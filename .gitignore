@@ -1,0 +1,16 @@
+# Environment files
+.env
+.env.local
+.env.*.local
+*.env
+
+# Python / FastAPI specifics
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Node / React / Vite specifics
+node_modules/
+dist/
+.DS_Store
