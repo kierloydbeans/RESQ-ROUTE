@@ -10,6 +10,7 @@ import Sidebar from './components/Sidebar'
 import Login from './views/Login'
 import Register from './views/Register'
 import ResetPassword from './views/ResetPassword'
+import { theme } from './theme'
 
 const AppLayout = (props) => (
   <Layout {...props} sidebar={Sidebar} />
@@ -22,6 +23,7 @@ const ProtectedAdmin = () => {
   }
   return (
     <Admin
+      theme={theme}
       dataProvider={dataProvider}
       authProvider={authProvider}
       layout={AppLayout}

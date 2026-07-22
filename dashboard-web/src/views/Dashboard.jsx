@@ -4,8 +4,12 @@ import MapContainer from '../components/MapContainer'
 import IntakeStats from '../components/IntakeStats'
 import Logo from '../components/Logo'
 
+// Convert http/https base URL to ws/wss dynamically
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000'
+const WS_BASE_URL = API_BASE_URL.replace(/^http/, 'ws')
+
 export const Dashboard = () => {
-  const { isConnected, lastMessage } = useWebSocket('ws://localhost:8000/ws')
+  const { isConnected, lastMessage } = useWebSocket(`${WS_BASE_URL}/ws`)
 
   const mockStats = {
     totalEvacuees: 1250,
@@ -21,52 +25,121 @@ export const Dashboard = () => {
   ]
 
   return (
-    <div style={{ padding: '2rem' }}>
-      <div className="flex items-center justify-between" style={{ marginBottom: '2rem' }}>
+    <div style={{ padding: '2rem', backgroundColor: '#f9fafb', minHeight: '100vh' }}>
+      {/* HEADER SECTION */}
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '2rem' }}>
         <div>
-          <div className="flex items-center gap-4" style={{ marginBottom: '0.5rem' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', marginBottom: '0.5rem' }}>
             <Logo size="medium" />
-            <h1 className="text-gradient" style={{ fontSize: '2.5rem', margin: 0 }}>
+            <h1 style={{
+              fontSize: '2rem',
+              fontWeight: '800',
+              margin: 0,
+              background: 'linear-gradient(135deg, #c52222 0%, #a36b16 100%)',
+              WebkitBackgroundClip: 'text',
+              WebkitTextFillColor: 'transparent'
+            }}>
               Central Command Panel
             </h1>
           </div>
-          <p style={{ color: 'var(--color-gray-600)', fontSize: '1rem' }}>
-            Real-time disaster response coordination dashboard
+          <p style={{ color: '#6b7280', fontSize: '0.95rem', margin: 0 }}>
+            Real-time disaster response coordination and shelter monitoring
           </p>
         </div>
+
+        {/* CONNECTION STATUS PILL */}
+        <div style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: '0.75rem',
+          backgroundColor: '#ffffff',
+          padding: '0.625rem 1.25rem',
+          borderRadius: '9999px',
+          boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.05)',
+          border: '1px solid #e5e7eb'
+        }}>
+          <span style={{
+            height: '10px',
+            width: '10px',
+            borderRadius: '50%',
+            backgroundColor: isConnected ? '#10b981' : '#ef4444',
+            display: 'inline-block'
+          }}></span>
+          <span style={{ fontSize: '0.875rem', fontWeight: '600', color: '#374151' }}>
+            System {isConnected ? 'Online' : 'Offline'}
+          </span>
+        </div>
       </div>
-      
-      <div className="grid grid-cols-1" style={{ gap: '1.5rem' }}>
-        <div className="card" style={{ padding: '1.5rem' }}>
-          <div style={{ marginBottom: '1rem' }}>
-            <h3 style={{ fontSize: '1.25rem', marginBottom: '0.5rem' }}>Live Map</h3>
-            <p style={{ color: 'var(--color-gray-600)', fontSize: '0.875rem' }}>
-              Real-time shelter and incident locations
+
+      {/* DASHBOARD GRID CONTENT */}
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: '1.5rem' }}>
+        {/* STATS OVERVIEW */}
+        <div style={{
+          backgroundColor: '#ffffff',
+          borderRadius: '16px',
+          boxShadow: '0 4px 12px rgba(0,0,0,0.03)',
+          border: '1px solid #e5e7eb',
+          overflow: 'hidden'
+        }}>
+          <IntakeStats stats={mockStats} />
+        </div>
+
+        {/* LIVE MAP CARD */}
+        <div style={{
+          backgroundColor: '#ffffff',
+          borderRadius: '16px',
+          padding: '1.5rem',
+          boxShadow: '0 4px 12px rgba(0,0,0,0.03)',
+          border: '1px solid #e5e7eb'
+        }}>
+          <div style={{ marginBottom: '1.25rem' }}>
+            <h3 style={{ fontSize: '1.25rem', fontWeight: '700', color: '#111827', margin: 0 }}>
+              Live Operations Map
+            </h3>
+            <p style={{ color: '#6b7280', fontSize: '0.875rem', marginTop: '0.25rem', margin: 0 }}>
+              Real-time shelter status, incident dispatching, and evacuation locations
             </p>
           </div>
-          <MapContainer markers={mockMarkers} />
+          <div style={{ borderRadius: '12px', overflow: 'hidden', minHeight: '400px' }}>
+            <MapContainer markers={mockMarkers} />
+          </div>
         </div>
-        
-        <div className="grid grid-cols-1" style={{ gap: '1.5rem' }}>
-          <div className="card">
-            <IntakeStats stats={mockStats} />
+
+        {/* WEBSOCKET LOG & DETAILS CARD */}
+        <div style={{
+          backgroundColor: '#ffffff',
+          borderRadius: '16px',
+          padding: '1.25rem 1.5rem',
+          boxShadow: '0 4px 12px rgba(0,0,0,0.03)',
+          border: '1px solid #e5e7eb',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between'
+        }}>
+          <div>
+            <h4 style={{ fontSize: '0.95rem', fontWeight: '700', color: '#374151', margin: 0 }}>
+              Live Telemetry Stream
+            </h4>
+            <p style={{ color: '#6b7280', fontSize: '0.85rem', marginTop: '0.25rem', margin: 0 }}>
+              WebSocket status: <strong style={{ color: isConnected ? '#059669' : '#dc2626' }}>{isConnected ? 'Connected to /ws' : 'Reconnecting...'}</strong>
+            </p>
           </div>
-          
-          <div className="card" style={{ padding: '1.5rem' }}>
-            <div className="flex items-center justify-between">
-              <div>
-                <h3 style={{ fontSize: '1.125rem', marginBottom: '0.25rem' }}>Connection Status</h3>
-                <p style={{ color: 'var(--color-gray-600)', fontSize: '0.875rem' }}>
-                  WebSocket: {isConnected ? 'Connected' : 'Disconnected'}
-                </p>
-              </div>
-              <div className={`badge ${isConnected ? 'badge-secondary' : 'badge-accent'}`}>
-                {isConnected ? 'Online' : 'Offline'}
-              </div>
+          {lastMessage && (
+            <div style={{
+              fontSize: '0.8rem',
+              color: '#4b5563',
+              backgroundColor: '#f3f4f6',
+              padding: '0.5rem 0.85rem',
+              borderRadius: '8px',
+              fontFamily: 'monospace'
+            }}>
+              Latest update received
             </div>
-          </div>
+          )}
         </div>
       </div>
     </div>
   )
 }
+
+export default Dashboard
