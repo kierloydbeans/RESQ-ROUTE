@@ -9,6 +9,7 @@ import { IncidentTriage } from './views/IncidentTriage'
 import Sidebar from './components/Sidebar'
 import Login from './views/Login'
 import Register from './views/Register'
+import ResetPassword from './views/ResetPassword'
 
 const AppLayout = (props) => (
   <Layout {...props} sidebar={Sidebar} />
@@ -40,6 +41,7 @@ function App() {
         <Route path="/login" element={<Login />} />
         <Route path="/register" element={<Register />} />
         <Route path="/*" element={<ProtectedAdmin />} />
+        <Route path="/reset-password" element={<ResetPassword />} />
       </Routes>
     </Router>
   )

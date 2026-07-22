@@ -198,3 +198,61 @@ async def send_otp(
     background_tasks.add_task(send_otp_email, email_to=payload.email, otp_code=otp_code)
 
     return {"message": "Verification code sent to your email."}
+
+
+@router.post("/forgot-password", status_code=status.HTTP_200_OK)
+async def forgot_password(
+    payload: ForgotPasswordRequest,
+    background_tasks: BackgroundTasks,
+    session: AsyncSession = Depends(get_session)
+):
+    # 1. Check if user exists
+    statement = select(User).where(User.email == payload.email)
+    result = await session.execute(statement)
+    user = result.scalar_one_or_none()
+
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No user found with this email address."
+        )
+
+    # 2. Generate password reset token
+    token = generate_reset_token(user.email)
+
+    # 3. Dispatch reset email asynchronously
+    background_tasks.add_task(send_reset_password_email, email_to=user.email, token=token)
+
+    return {"message": "Password reset instructions sent to your email."}
+
+
+@router.post("/reset-password", status_code=status.HTTP_200_OK)
+async def reset_password(
+    payload: ResetPasswordRequest,
+    session: AsyncSession = Depends(get_session)
+):
+    # 1. Verify reset token and retrieve email
+    email = verify_reset_token(payload.token)
+    if not email:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid or expired reset token."
+        )
+
+    # 2. Fetch user
+    statement = select(User).where(User.email == email)
+    result = await session.execute(statement)
+    user = result.scalar_one_or_none()
+
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="User not found."
+        )
+
+    # 3. Update user password
+    user.hashed_password = get_password_hash(payload.new_password)
+    session.add(user)
+    await session.commit()
+
+    return {"message": "Password successfully updated."}
