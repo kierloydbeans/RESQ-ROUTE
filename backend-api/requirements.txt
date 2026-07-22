@@ -1,11 +1,12 @@
-fastapi==0.104.1
-uvicorn[standard]==0.24.0
-sqlmodel==0.0.14
-asyncpg==0.29.0
-python-jose[cryptography]==3.3.0
-passlib[bcrypt]==1.7.4
-python-multipart==0.0.6
-websockets==12.0
-pydantic==2.5.0
-pydantic-settings==2.1.0
-supabase==2.3.4
+fastapi==0.104.1  # for building the FastAPI application
+uvicorn[standard]==0.24.0  # for running the FastAPI application with ASGI server
+sqlmodel==0.0.14  # for SQL database interaction and ORM
+asyncpg==0.29.0  # for PostgreSQL database interaction
+python-jose[cryptography]==3.3.0  # for JWT token creation and verification
+passlib[bcrypt]==1.7.4  # for password hashing
+python-multipart==0.0.6  # for handling file uploads
+websockets==12.0  # for WebSocket support
+pydantic>=2.10.0  # for data validation and settings management
+pydantic-settings==2.1.0  # for managing application settings and environment variables
+supabase==2.3.4  # for interacting with Supabase services
+itsdangerous==2.1.2  # for generating secure tokens for email verification and password reset

@@ -4,7 +4,9 @@ import bcrypt
 from jose import JWTError, jwt
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from itsdangerous import URLSafeTimedSerializer, SignatureExpired, BadTimeSignature
 from .config import settings
+import secrets
 
 security = HTTPBearer()
 
@@ -42,3 +44,29 @@ async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(s
     token = credentials.credentials
     payload = decode_token(token)
     return payload
+
+# --- PASSWORD RESET TOKEN HELPERS ---
+
+def generate_reset_token(email: str) -> str:
+    """Generates a secure, signed URL token containing the target email."""
+    serializer = URLSafeTimedSerializer(settings.SECRET_KEY)
+    return serializer.dumps(email, salt="password-reset-salt")
+
+def verify_reset_token(token: str, max_age_seconds: int = 1800) -> Optional[str]:
+    """
+    Verifies reset token signature and checks if it expired (default 30 mins).
+    Returns email if valid, or None if invalid/expired.
+    """
+    serializer = URLSafeTimedSerializer(settings.SECRET_KEY)
+    try:
+        email = serializer.loads(token, salt="password-reset-salt", max_age=max_age_seconds)
+        return email
+    except (SignatureExpired, BadTimeSignature):
+        return None
+
+def generate_otp_code(length: int = 6) -> str:
+    """
+    Generates a cryptographically secure numeric OTP code of specified length.
+    Defaults to 6 digits (e.g., '482901').
+    """
+    return "".join(secrets.choice("0123456789") for _ in range(length))
