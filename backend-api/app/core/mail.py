@@ -18,7 +18,7 @@ def send_email(email_to: str, subject: str, body: str) -> None:
 
 def send_reset_password_email(email_to: str, token: str) -> None:
     # Set to your React Dashboard URL or local dev host
-    reset_link = f"http://localhost:3000/reset-password?token={token}"
+    reset_link = f"https://resq-route-frontend.onrender.com/reset-password?token={token}"
     
     subject = "ResQ-Route: Password Reset Request"
     body = f"""Hello,
