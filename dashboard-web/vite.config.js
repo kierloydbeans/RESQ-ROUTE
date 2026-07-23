@@ -15,5 +15,14 @@ export default defineConfig({
         ws: true
       }
     }
-  }
+  },
+  build: {
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          vendor: ['react', 'react-dom'], // Splits large libraries into a separate file
+        },
+      },
+    },
+  },
 })

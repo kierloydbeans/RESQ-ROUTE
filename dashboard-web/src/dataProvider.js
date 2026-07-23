@@ -1,6 +1,18 @@
 import { fetchUtils } from 'react-admin'
 
-const apiUrl = 'http://localhost:8000/api/v1'
+// Define the base URL for the API, using an environment variable if available, or defaulting to localhost
+export const BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000'
+
+// Construct the API URL 
+export const API_URL = `${BASE_URL}/api/v1`
+
+// Websocket URL construction based on the protocol of the BASE_URL
+const wsProtocol = BASE_URL.startsWith('https') ? 'wss' : 'ws';
+const wsHost = BASE_URL.replace(/^https?:\/\//, '');
+
+export const WS_URL = `${wsProtocol}://${wsHost}/ws`;
+
+const apiUrl = import.meta.env.VITE_API_URL
 const httpClient = fetchUtils.fetchJson
 
 export const dataProvider = {

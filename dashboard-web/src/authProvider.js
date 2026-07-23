@@ -1,10 +1,12 @@
+import { API_URL } from './dataProvider'
+
 export const authProvider = {
   login: ({ username, password }) => {
     const formData = new URLSearchParams()
     formData.append('username', username)
     formData.append('password', password)
 
-    const request = new Request('http://localhost:8000/api/v1/auth/login', {
+    const request = new Request(`${API_URL}/api/v1/auth/login`, {
       method: 'POST',
       body: formData,
       headers: new Headers({ 'Content-Type': 'application/x-www-form-urlencoded' })
