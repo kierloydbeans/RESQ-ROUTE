@@ -14,7 +14,7 @@ origins = [
     "https://resq-route.vercel.app/"  # Production frontend
 ]
 
-# CORS middleware
+# CORS middlewares
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.CORS_ORIGINS,
