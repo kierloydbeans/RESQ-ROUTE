@@ -4,7 +4,6 @@ import { fetchUtils } from 'react-admin';
 const rawEnv = import.meta.env.VITE_API_URL;
 console.log("Raw VITE_API_URL from build:", rawEnv);
 
-// Strip trailing slash OR strip /api/v1 if it was accidentally included in the dashboard
 let cleanBase = rawEnv ? rawEnv.replace(/\/$/, '') : '';
 if (cleanBase.endsWith('/api/v1')) {
   cleanBase = cleanBase.replace(/\/api\/v1$/, '');
@@ -19,7 +18,7 @@ console.log("Final Resolved API_URL:", API_URL);
 const wsProtocol = BASE_URL.startsWith('https') ? 'wss' : 'ws';
 const wsHost = BASE_URL.replace(/^https?:\/\//, '');
 
-export const WS_URL = `${wsProtocol}://${wsHost}/ws`;
+export const WS_URL = `${wsProtocol}://${wsHost}/api/v1/ws`;
 
 const httpClient = fetchUtils.fetchJson;
 
@@ -31,7 +30,6 @@ export const dataProvider = {
       limit: perPage.toString()
     });
 
-    // Used API_URL instead of raw apiUrl
     return httpClient(`${API_URL}/${resource}?${query}`).then(({ json }) => ({
       data: json.items,
       total: json.total

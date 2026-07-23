@@ -1,4 +1,6 @@
-import { API_URL } from './dataProvider'
+const rawEnv = import.meta.env.VITE_API_URL;
+const cleanBase = rawEnv ? rawEnv.replace(/\/$/, '').replace(/\/api\/v1$/, '') : '';
+const API_URL = cleanBase ? `${cleanBase}/api/v1` : 'http://localhost:8000/api/v1';
 
 export const authProvider = {
   login: ({ username, password }) => {
@@ -6,7 +8,6 @@ export const authProvider = {
     formData.append('username', username)
     formData.append('password', password)
 
-    // Simplified path (API_URL already contains /api/v1)
     const request = new Request(`${API_URL}/auth/login`, {
       method: 'POST',
       body: formData.toString(),
