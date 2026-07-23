@@ -9,7 +9,7 @@ export const authProvider = {
     // Simplified path (API_URL already contains /api/v1)
     const request = new Request(`${API_URL}/auth/login`, {
       method: 'POST',
-      body: formData,
+      body: formData.toString(),
       headers: new Headers({ 'Content-Type': 'application/x-www-form-urlencoded' })
     })
 
