@@ -1,4 +1,4 @@
-import {WS_URL} from './dataProvider'
+import {WS_URL} from '../dataProvider'
 import React from 'react'
 import { MapContainer as LeafletMap, TileLayer, Marker, Popup } from 'react-leaflet'
 import 'leaflet/dist/leaflet.css'
