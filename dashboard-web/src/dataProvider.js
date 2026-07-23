@@ -1,7 +1,9 @@
 import { fetchUtils } from 'react-admin'
-
+console.log("Current API_URL:", import.meta.env.VITE_API_URL);
 // Define the base URL for the API, using an environment variable if available, or defaulting to localhost
-export const BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000'
+export const API_URL = import.meta.env.VITE_API_URL 
+  ? import.meta.env.VITE_API_URL.replace(/\/$/, '') 
+  : 'http://localhost:8000';
 
 // Construct the API URL 
 export const API_URL = `${BASE_URL}/api/v1`
