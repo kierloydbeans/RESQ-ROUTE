@@ -9,12 +9,13 @@ if (cleanBase.endsWith('/api/v1')) {
   cleanBase = cleanBase.replace(/\/api\/v1$/, '');
 }
 
-export const BASE_URL = cleanBase;
+// Ensure BASE_URL is valid so string methods won't throw errors
+export const BASE_URL = cleanBase || 'https://resq-route.onrender.com';
 export const API_URL = `${BASE_URL}/api/v1`;
 
 console.log("Final Resolved API_URL:", API_URL);
 
-// WebSocket URL matching FastAPI prefix
+// WebSocket URL matching FastAPI prefix safely
 const wsProtocol = BASE_URL.startsWith('https') ? 'wss' : 'ws';
 const wsHost = BASE_URL.replace(/^https?:\/\//, '');
 
