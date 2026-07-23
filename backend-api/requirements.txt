@@ -10,3 +10,4 @@ pydantic>=2.10.0  # for data validation and settings management
 pydantic-settings==2.1.0  # for managing application settings and environment variables
 supabase==2.3.4  # for interacting with Supabase services
 itsdangerous==2.1.2  # for generating secure tokens for email verification and password reset
+pydantic[email]==2.10.7  # for email validation and sending
