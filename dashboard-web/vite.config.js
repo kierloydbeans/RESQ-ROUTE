@@ -7,11 +7,11 @@ export default defineConfig({
     port: 3000,
     proxy: {
       '/api': {
-        target: env.VITE_API_URL || 'http://localhost:8000',
+        target: import.meta.VITE_API_URL || 'http://localhost:8000',
         changeOrigin: true
       },
       '/ws': {
-        target: env.VITE_API_URL || 'ws://localhost:8000',
+        target: import.meta.VITE_API_URL || 'ws://localhost:8000',
         ws: true
       }
     }
