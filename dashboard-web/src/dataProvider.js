@@ -1,20 +1,25 @@
-import { fetchUtils } from 'react-admin'
+import { fetchUtils } from 'react-admin';
 
-console.log("Current API_URL:", import.meta.env.VITE_API_URL);
+// Log the exact value Vite injected into the build
+const rawEnv = import.meta.env.VITE_API_URL;
+console.log("Raw VITE_API_URL from build:", rawEnv);
 
-// Define the base URL for the API, using an environment variable if available, or defaulting to localhost
-export const BASE_URL = import.meta.env.VITE_API_URL 
-  ? import.meta.env.VITE_API_URL.replace(/\/$/, '') 
-  : 'http://localhost:8000';
+// Strip trailing slash OR strip /api/v1 if it was accidentally included in the dashboard
+let cleanBase = rawEnv ? rawEnv.replace(/\/$/, '') : '';
+if (cleanBase.endsWith('/api/v1')) {
+  cleanBase = cleanBase.replace(/\/api\/v1$/, '');
+}
 
-// Base API route prefix
+export const BASE_URL = cleanBase || 'http://localhost:8000';
 export const API_URL = `${BASE_URL}/api/v1`;
+
+console.log("Final Resolved API_URL:", API_URL);
 
 // WebSocket URL matching FastAPI prefix
 const wsProtocol = BASE_URL.startsWith('https') ? 'wss' : 'ws';
 const wsHost = BASE_URL.replace(/^https?:\/\//, '');
 
-export const WS_URL = `${wsProtocol}://${wsHost}/api/v1/ws`;
+export const WS_URL = `${wsProtocol}://${wsHost}/ws`;
 
 const httpClient = fetchUtils.fetchJson;
 
