@@ -10,8 +10,8 @@ app = FastAPI(title="RESQ-Route API", version="1.0.0")
 
 origins = [
     "http://localhost:3000",  # React frontend
-    "http://localhost:8000"   # FastAPI backend
-    "https://resq-route.vercel.app/"  # Production frontend
+    "http://localhost:8000",   # FastAPI backend
+    "https://resq-route.vercel.app"  # Production frontend
 ]
 
 # CORS middlewares
