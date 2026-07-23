@@ -9,7 +9,7 @@ if (cleanBase.endsWith('/api/v1')) {
   cleanBase = cleanBase.replace(/\/api\/v1$/, '');
 }
 
-export const BASE_URL = cleanBase || 'http://localhost:8000';
+export const BASE_URL = cleanBase;
 export const API_URL = `${BASE_URL}/api/v1`;
 
 console.log("Final Resolved API_URL:", API_URL);
