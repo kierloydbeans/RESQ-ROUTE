@@ -6,11 +6,13 @@ export const authProvider = {
     formData.append('username', username)
     formData.append('password', password)
 
-    const request = new Request(`${API_URL}/api/v1/auth/login`, {
+    // Simplified path (API_URL already contains /api/v1)
+    const request = new Request(`${API_URL}/auth/login`, {
       method: 'POST',
       body: formData,
       headers: new Headers({ 'Content-Type': 'application/x-www-form-urlencoded' })
     })
+
     return fetch(request)
       .then(response => {
         if (response.status < 200 || response.status >= 300) {
