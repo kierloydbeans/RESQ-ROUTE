@@ -1,6 +1,6 @@
 const rawEnv = import.meta.env.VITE_API_URL;
 const cleanBase = rawEnv ? rawEnv.replace(/\/$/, '').replace(/\/api\/v1$/, '') : '';
-const API_URL = cleanBase ? `${cleanBase}/api/v1` : 'http://localhost:8000/api/v1';
+const API_URL = cleanBase ? `${cleanBase}/api/v1` : '';
 
 export const authProvider = {
   login: ({ username, password }) => {
