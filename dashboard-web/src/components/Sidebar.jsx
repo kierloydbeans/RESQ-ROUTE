@@ -2,6 +2,8 @@ import React from 'react'
 import { Menu } from 'react-admin'
 import { useNavigate } from 'react-router-dom'
 
+<img src="/resq_logo_with_label.png" alt="ResQ Route Logo" />
+
 const Sidebar = () => {
   const navigate = useNavigate()
 
