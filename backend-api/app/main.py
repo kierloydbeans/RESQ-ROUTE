@@ -11,13 +11,16 @@ app = FastAPI(title="RESQ-Route API", version="1.0.0")
 origins = [
     "http://localhost:3000",  # React frontend
     "http://localhost:8000",   # FastAPI backend
-    "https://resq-route.vercel.app"  # Production frontend
+    "https://resq-route-frontend.onrender.com"  # Production frontend
 ]
+
+if hasattr(settings, "CORS_ORIGINS") and isinstance(settings.CORS_ORIGINS, list):
+    origins.extend(settings.CORS_ORIGINS)
 
 # CORS middlewares
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=settings.CORS_ORIGINS,
+    allow_origins=origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
