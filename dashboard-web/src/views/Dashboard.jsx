@@ -11,6 +11,10 @@ const WS_BASE_URL = API_BASE_URL.replace(/^http/, 'ws')
 
 export const Dashboard = () => {
   const [latestGps, setLatestGps] = useState(null)
+  const [showTestGps, setShowTestGps] = useState(false)
+  const [testLat, setTestLat] = useState(14.6349)
+  const [testLng, setTestLng] = useState(120.9722)
+  const [sendingTest, setSendingTest] = useState(false)
   const { isConnected, lastMessage } = useWebSocket(`${WS_BASE_URL}/api/v1/ws`)
 
   useEffect(() => {
@@ -25,6 +29,29 @@ export const Dashboard = () => {
       setLatestGps(lastMessage.data)
     }
   }, [lastMessage])
+
+  const handleSendTestGps = async () => {
+    setSendingTest(true)
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/v1/gps`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          latitude: parseFloat(testLat),
+          longitude: parseFloat(testLng),
+          accuracy: 10,
+          device_id: 'dashboard-test'
+        })
+      })
+      if (response.ok) {
+        setShowTestGps(false)
+      }
+    } catch (err) {
+      console.error('Failed to send test GPS:', err)
+    } finally {
+      setSendingTest(false)
+    }
+  }
 
   const mockStats = {
     totalEvacuees: 1250,
@@ -104,8 +131,123 @@ export const Dashboard = () => {
               <div style={{ marginTop: '0.25rem', color: '#9ca3af' }}>Waiting for device telemetry...</div>
             )}
           </div>
+
+          <button
+            onClick={() => setShowTestGps(true)}
+            style={{
+              padding: '0.625rem 1.25rem',
+              borderRadius: '9999px',
+              border: 'none',
+              backgroundColor: '#3b82f6',
+              color: '#ffffff',
+              fontSize: '0.875rem',
+              fontWeight: '600',
+              cursor: 'pointer',
+              boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)'
+            }}
+          >
+            Test GPS
+          </button>
         </div>
       </div>
+
+      {/* TEST GPS MODAL */}
+      {showTestGps && (
+        <div style={{
+          position: 'fixed',
+          inset: 0,
+          backgroundColor: 'rgba(0, 0, 0, 0.5)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 50
+        }}>
+          <div style={{
+            backgroundColor: '#ffffff',
+            borderRadius: '12px',
+            padding: '2rem',
+            maxWidth: '400px',
+            boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.1)'
+          }}>
+            <h2 style={{ fontSize: '1.5rem', fontWeight: '700', margin: '0 0 1rem 0', color: '#111827' }}>
+              Send Test GPS
+            </h2>
+            <div style={{ marginBottom: '1rem' }}>
+              <label style={{ display: 'block', fontSize: '0.875rem', fontWeight: '600', color: '#374151', marginBottom: '0.5rem' }}>
+                Latitude
+              </label>
+              <input
+                type="number"
+                step="0.0001"
+                value={testLat}
+                onChange={(e) => setTestLat(e.target.value)}
+                style={{
+                  width: '100%',
+                  padding: '0.75rem',
+                  border: '1px solid #e5e7eb',
+                  borderRadius: '8px',
+                  fontSize: '0.875rem',
+                  boxSizing: 'border-box'
+                }}
+              />
+            </div>
+            <div style={{ marginBottom: '1.5rem' }}>
+              <label style={{ display: 'block', fontSize: '0.875rem', fontWeight: '600', color: '#374151', marginBottom: '0.5rem' }}>
+                Longitude
+              </label>
+              <input
+                type="number"
+                step="0.0001"
+                value={testLng}
+                onChange={(e) => setTestLng(e.target.value)}
+                style={{
+                  width: '100%',
+                  padding: '0.75rem',
+                  border: '1px solid #e5e7eb',
+                  borderRadius: '8px',
+                  fontSize: '0.875rem',
+                  boxSizing: 'border-box'
+                }}
+              />
+            </div>
+            <div style={{ display: 'flex', gap: '0.75rem' }}>
+              <button
+                onClick={() => setShowTestGps(false)}
+                style={{
+                  flex: 1,
+                  padding: '0.75rem',
+                  borderRadius: '8px',
+                  border: '1px solid #e5e7eb',
+                  backgroundColor: '#f3f4f6',
+                  color: '#374151',
+                  fontSize: '0.875rem',
+                  fontWeight: '600',
+                  cursor: 'pointer'
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleSendTestGps}
+                disabled={sendingTest}
+                style={{
+                  flex: 1,
+                  padding: '0.75rem',
+                  borderRadius: '8px',
+                  border: 'none',
+                  backgroundColor: sendingTest ? '#d1d5db' : '#3b82f6',
+                  color: '#ffffff',
+                  fontSize: '0.875rem',
+                  fontWeight: '600',
+                  cursor: sendingTest ? 'not-allowed' : 'pointer'
+                }}
+              >
+                {sendingTest ? 'Sending...' : 'Send'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* DASHBOARD GRID CONTENT */}
       <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: '1.5rem' }}>
