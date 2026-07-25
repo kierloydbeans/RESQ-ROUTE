@@ -4,7 +4,9 @@ import Logo from '../components/Logo'
 
 <img src="/resq_logo_with_label.png" alt="ResQ Route Logo" />
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000'
+const rawApiBase = (import.meta.env.VITE_API_URL || import.meta.env.VITE_API_BASE_URL || 'https://resq-route.onrender.com').replace(/\/$/, '')
+const API_BASE_URL = rawApiBase.endsWith('/api/v1') ? rawApiBase.replace(/\/api\/v1$/, '') : rawApiBase
+const API_URL = `${API_BASE_URL}/api/v1`
 
 const Register = () => {
   const [formData, setFormData] = useState({
@@ -44,7 +46,7 @@ const Register = () => {
     setSendingOtp(true)
 
     try {
-      const response = await fetch(`${API_BASE_URL}/api/v1/auth/send-otp`, {
+      const response = await fetch(`${API_URL}/auth/send-otp`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email: formData.email })
@@ -88,7 +90,7 @@ const Register = () => {
     setLoading(true)
 
     try {
-      const response = await fetch(`${API_BASE_URL}/api/v1/auth/register`, {
+      const response = await fetch(`${API_URL}/auth/register`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

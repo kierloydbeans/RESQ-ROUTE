@@ -2,7 +2,9 @@ import React, { useState } from 'react'
 import { useSearchParams, useNavigate, Link } from 'react-router-dom'
 import Logo from '../components/Logo'
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000'
+const rawApiBase = (import.meta.env.VITE_API_URL || import.meta.env.VITE_API_BASE_URL || 'https://resq-route.onrender.com').replace(/\/$/, '')
+const API_BASE_URL = rawApiBase.endsWith('/api/v1') ? rawApiBase.replace(/\/api\/v1$/, '') : rawApiBase
+const API_URL = `${API_BASE_URL}/api/v1`
 
 const ResetPassword = () => {
   const [searchParams] = useSearchParams()
@@ -31,7 +33,7 @@ const ResetPassword = () => {
     setLoading(true)
 
     try {
-      const response = await fetch(`${API_BASE_URL}/api/v1/auth/reset-password`, {
+      const response = await fetch(`${API_URL}/auth/reset-password`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ token, new_password: newPassword })

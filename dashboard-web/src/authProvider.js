@@ -1,15 +1,14 @@
 // src/authProvider.js
 
-// 1. Read Vite env directly with a fallback to raw origin if needed
-const rawEnv = import.meta.env.VITE_API_URL;
+// Resolve the backend base URL safely so auth requests do not target the frontend host.
+const rawEnv = import.meta.env.VITE_API_URL || import.meta.env.VITE_API_BASE_URL || 'https://resq-route.onrender.com';
 let cleanBase = rawEnv ? rawEnv.replace(/\/$/, '') : '';
 
 if (cleanBase.endsWith('/api/v1')) {
   cleanBase = cleanBase.replace(/\/api\/v1$/, '');
 }
 
-// Fallback to current window origin if VITE_API_URL is missing
-const BASE_URL = cleanBase || window.location.origin;
+const BASE_URL = cleanBase || 'https://resq-route.onrender.com';
 const API_URL = `${BASE_URL}/api/v1`;
 
 export const authProvider = {

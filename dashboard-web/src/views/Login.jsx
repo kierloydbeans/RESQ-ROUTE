@@ -4,7 +4,9 @@ import Logo from '../components/Logo'
 
 <img src="/resq_logo_with_label.png" alt="ResQ Route Logo" />
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL
+const rawApiBase = (import.meta.env.VITE_API_URL || import.meta.env.VITE_API_BASE_URL || 'https://resq-route.onrender.com').replace(/\/$/, '')
+const API_BASE_URL = rawApiBase.endsWith('/api/v1') ? rawApiBase.replace(/\/api\/v1$/, '') : rawApiBase
+const API_URL = `${API_BASE_URL}/api/v1`
 
 const Login = () => {
   const [formData, setFormData] = useState({
@@ -35,7 +37,7 @@ const Login = () => {
     setLoading(true)
 
     try {
-      const response = await fetch(`${API_BASE_URL}/api/v1/auth/login`, {
+      const response = await fetch(`${API_URL}/auth/login`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/x-www-form-urlencoded',
@@ -71,7 +73,7 @@ const Login = () => {
     setResetLoading(true)
 
     try {
-      const response = await fetch(`${API_BASE_URL}/api/v1/auth/forgot-password`, {
+      const response = await fetch(`${API_URL}/auth/forgot-password`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

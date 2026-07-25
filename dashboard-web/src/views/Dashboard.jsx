@@ -5,7 +5,8 @@ import IntakeStats from '../components/IntakeStats'
 import Logo from '../components/Logo'
 
 // Convert http/https base URL to ws/wss dynamically
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000'
+const rawApiBase = (import.meta.env.VITE_API_URL || import.meta.env.VITE_API_BASE_URL || 'https://resq-route.onrender.com').replace(/\/$/, '')
+const API_BASE_URL = rawApiBase.endsWith('/api/v1') ? rawApiBase.replace(/\/api\/v1$/, '') : rawApiBase
 const WS_BASE_URL = API_BASE_URL.replace(/^http/, 'ws')
 
 export const Dashboard = () => {
