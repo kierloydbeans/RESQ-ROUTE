@@ -1,5 +1,4 @@
 import { useEffect, useState } from 'react'
-import io from 'socket.io-client'
 
 export const useWebSocket = (url) => {
   const [socket, setSocket] = useState(null)
@@ -7,19 +6,31 @@ export const useWebSocket = (url) => {
   const [lastMessage, setLastMessage] = useState(null)
 
   useEffect(() => {
-    const newSocket = io(url)
+    if (!url) return undefined
+
+    const normalizedUrl = url.startsWith('http') ? url.replace(/^http/, 'ws') : url
+    const newSocket = new WebSocket(normalizedUrl)
     setSocket(newSocket)
 
-    newSocket.on('connect', () => {
+    newSocket.addEventListener('open', () => {
       setIsConnected(true)
     })
 
-    newSocket.on('disconnect', () => {
+    newSocket.addEventListener('close', () => {
       setIsConnected(false)
     })
 
-    newSocket.on('telemetry', (data) => {
-      setLastMessage(data)
+    newSocket.addEventListener('error', () => {
+      setIsConnected(false)
+    })
+
+    newSocket.addEventListener('message', (event) => {
+      try {
+        const payload = JSON.parse(event.data)
+        setLastMessage(payload)
+      } catch (error) {
+        setLastMessage(event.data)
+      }
     })
 
     return () => {

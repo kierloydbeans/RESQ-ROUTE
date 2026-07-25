@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'screens/citizen/evacuation_routing_screen.dart';
 import 'screens/rescuer/manifest_control_screen.dart';
-import 'services/websocket_service.dart';
+import 'services/websocket.dart';
 
 void main() {
   runApp(const ResQRouteApp());

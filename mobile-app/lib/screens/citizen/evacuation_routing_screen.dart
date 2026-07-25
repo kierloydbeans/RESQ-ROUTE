@@ -23,14 +23,29 @@ class _EvacuationRoutingScreenState extends State<EvacuationRoutingScreen> {
   }
 
   Future<void> _initializeLocation() async {
-    final position = await _gpsService.getCurrentPosition();
-    final shelters = await _gpsService.getNearbyShelters(position);
-    
-    setState(() {
-      _currentPosition = position;
-      _nearbyShelters = shelters;
-      _isLoading = false;
-    });
+    try {
+      final position = await _gpsService.getCurrentPosition();
+      await _gpsService.sendLocationToBackend(
+        latitude: position.latitude,
+        longitude: position.longitude,
+        accuracy: position.accuracy,
+        deviceId: 'citizen-device',
+      );
+      final shelters = await _gpsService.getNearbyShelters(position);
+
+      setState(() {
+        _currentPosition = position;
+        _nearbyShelters = shelters;
+        _isLoading = false;
+      });
+    } catch (error) {
+      setState(() => _isLoading = false);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Unable to fetch location: $error')),
+        );
+      }
+    }
   }
 
   @override

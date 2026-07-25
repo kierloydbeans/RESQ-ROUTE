@@ -1,4 +1,4 @@
-import React from 'react'
+import React, { useEffect, useState } from 'react'
 import { useWebSocket } from '../hooks/useWebSocket'
 import MapContainer from '../components/MapContainer'
 import IntakeStats from '../components/IntakeStats'
@@ -10,7 +10,21 @@ const API_BASE_URL = rawApiBase.endsWith('/api/v1') ? rawApiBase.replace(/\/api\
 const WS_BASE_URL = API_BASE_URL.replace(/^http/, 'ws')
 
 export const Dashboard = () => {
-  const { isConnected, lastMessage } = useWebSocket(`${WS_BASE_URL}/ws`)
+  const [latestGps, setLatestGps] = useState(null)
+  const { isConnected, lastMessage } = useWebSocket(`${WS_BASE_URL}/api/v1/ws`)
+
+  useEffect(() => {
+    fetch(`${API_BASE_URL}/api/v1/gps`)
+      .then((response) => response.json())
+      .then((data) => setLatestGps(data.gps))
+      .catch(() => {})
+  }, [API_BASE_URL])
+
+  useEffect(() => {
+    if (lastMessage?.type === 'gps_update' && lastMessage.data) {
+      setLatestGps(lastMessage.data)
+    }
+  }, [lastMessage])
 
   const mockStats = {
     totalEvacuees: 1250,
@@ -48,27 +62,48 @@ export const Dashboard = () => {
           </p>
         </div>
 
-        {/* CONNECTION STATUS PILL */}
-        <div style={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: '0.75rem',
-          backgroundColor: '#ffffff',
-          padding: '0.625rem 1.25rem',
-          borderRadius: '9999px',
-          boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.05)',
-          border: '1px solid #e5e7eb'
-        }}>
-          <span style={{
-            height: '10px',
-            width: '10px',
-            borderRadius: '50%',
-            backgroundColor: isConnected ? '#10b981' : '#ef4444',
-            display: 'inline-block'
-          }}></span>
-          <span style={{ fontSize: '0.875rem', fontWeight: '600', color: '#374151' }}>
-            System {isConnected ? 'Online' : 'Offline'}
-          </span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+          <div style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '0.75rem',
+            backgroundColor: '#ffffff',
+            padding: '0.625rem 1.25rem',
+            borderRadius: '9999px',
+            boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.05)',
+            border: '1px solid #e5e7eb'
+          }}>
+            <span style={{
+              height: '10px',
+              width: '10px',
+              borderRadius: '50%',
+              backgroundColor: isConnected ? '#10b981' : '#ef4444',
+              display: 'inline-block'
+            }}></span>
+            <span style={{ fontSize: '0.875rem', fontWeight: '600', color: '#374151' }}>
+              System {isConnected ? 'Online' : 'Offline'}
+            </span>
+          </div>
+
+          <div style={{
+            backgroundColor: '#ffffff',
+            padding: '0.875rem 1.1rem',
+            borderRadius: '14px',
+            boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.05)',
+            border: '1px solid #e5e7eb',
+            minWidth: '220px'
+          }}>
+            <div style={{ fontSize: '0.75rem', textTransform: 'uppercase', letterSpacing: '0.08em', color: '#6b7280' }}>
+              Live GPS
+            </div>
+            {latestGps ? (
+              <div style={{ marginTop: '0.25rem', fontWeight: '700', color: '#111827' }}>
+                {latestGps.latitude.toFixed(5)}, {latestGps.longitude.toFixed(5)}
+              </div>
+            ) : (
+              <div style={{ marginTop: '0.25rem', color: '#9ca3af' }}>Waiting for device telemetry...</div>
+            )}
+          </div>
         </div>
       </div>
 

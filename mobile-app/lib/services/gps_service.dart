@@ -1,3 +1,5 @@
+import 'dart:convert';
+import 'package:http/http.dart' as http;
 import 'package:geolocator/geolocator.dart';
 import '../models/sync_models.dart';
 
@@ -26,6 +28,24 @@ class GPSService {
     return await Geolocator.getCurrentPosition(
       desiredAccuracy: LocationAccuracy.high,
     );
+  }
+
+  Future<void> sendLocationToBackend({required double latitude, required double longitude, String? deviceId, double? accuracy}) async {
+    final uri = Uri.parse('https://resq-route.onrender.com/api/v1/gps');
+    final response = await http.post(
+      uri,
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({
+        'latitude': latitude,
+        'longitude': longitude,
+        'accuracy': accuracy,
+        'device_id': deviceId ?? 'mobile-device',
+      }),
+    );
+
+    if (response.statusCode >= 400) {
+      throw Exception('Failed to send GPS update: ${response.body}');
+    }
   }
 
   Future<List<ShelterModel>> getNearbyShelters(Position position) async {
