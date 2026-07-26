@@ -12,6 +12,7 @@ origins = [
     "http://localhost:3000",  # React frontend
     "http://localhost:8000",   # FastAPI backend
     "https://resq-route-frontend.onrender.com"  # Production frontend
+    "https://resq-route-test.onrender.com",  # Develop deployed frontend
 ]
 
 if hasattr(settings, "CORS_ORIGINS") and isinstance(settings.CORS_ORIGINS, list):
