@@ -22,14 +22,21 @@ const normalizeCoordinates = (position) => {
   return [second, first]
 }
 
-const createMarkerElement = (color = '#dc2626') => {
+const createMarkerElement = (color = '#dc2626', icon = null) => {
   const el = document.createElement('div')
-  el.style.width = '16px'
-  el.style.height = '16px'
-  el.style.borderRadius = '50%'
-  el.style.background = color
-  el.style.border = '2px solid white'
+  el.style.display = 'flex'
+  el.style.alignItems = 'center'
+  el.style.justifyContent = 'center'
+  el.style.width = icon ? '28px' : '16px'
+  el.style.height = icon ? '28px' : '16px'
+  el.style.borderRadius = icon ? '50%' : '50%'
+  el.style.background = icon ? '#fff7ed' : color
+  el.style.border = icon ? '2px solid #f59e0b' : '2px solid white'
   el.style.boxShadow = '0 2px 6px rgba(0,0,0,0.3)'
+  el.style.color = icon ? '#b45309' : '#ffffff'
+  el.style.fontSize = icon ? '16px' : '0'
+  el.style.fontWeight = '700'
+  el.textContent = icon || ''
   return el
 }
 
@@ -125,7 +132,7 @@ const MapContainer = ({ markers = [] }) => {
 
     markers.forEach((marker) => {
       const [lng, lat] = normalizeCoordinates(marker.position)
-      const markerInstance = new maplibregl.Marker({ element: createMarkerElement(marker.color) })
+      const markerInstance = new maplibregl.Marker({ element: createMarkerElement(marker.color, marker.icon) })
         .setLngLat([lng, lat])
         .setPopup(new maplibregl.Popup({ offset: 25 }).setHTML(`<strong>${marker.label}</strong>`))
         .addTo(map)
