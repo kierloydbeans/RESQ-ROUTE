@@ -11,7 +11,8 @@ const API_URL = `${API_BASE_URL}/api/v1`
 const Login = () => {
   const [formData, setFormData] = useState({
     username: '',
-    password: ''
+    password: '',
+    role: 'citizen'
   })
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
@@ -37,14 +38,15 @@ const Login = () => {
     setLoading(true)
 
     try {
-      const response = await fetch(`${API_URL}/auth/login`, {
+      const response = await fetch(`${API_URL}/auth/login-role`, {
         method: 'POST',
         headers: {
-          'Content-Type': 'application/x-www-form-urlencoded',
+          'Content-Type': 'application/json',
         },
-        body: new URLSearchParams({
+        body: JSON.stringify({
           username: formData.username,
-          password: formData.password
+          password: formData.password,
+          role: formData.role
         })
       })
 
@@ -199,6 +201,28 @@ const Login = () => {
                   boxSizing: 'border-box'
                 }}
               />
+            </div>
+
+            <div style={{ marginBottom: '1rem' }}>
+              <select
+                name="role"
+                value={formData.role}
+                onChange={handleChange}
+                style={{
+                  width: '100%',
+                  padding: '0.875rem 1.25rem',
+                  borderRadius: '9999px',
+                  border: '1px solid #e5e7eb',
+                  backgroundColor: '#f9fafb',
+                  fontSize: '0.95rem',
+                  outline: 'none',
+                  boxSizing: 'border-box'
+                }}
+              >
+                <option value="citizen">Citizen</option>
+                <option value="rescuer">Rescuer</option>
+                <option value="coordinator">Coordinator</option>
+              </select>
             </div>
 
             <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '1.75rem' }}>
