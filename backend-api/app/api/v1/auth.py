@@ -203,17 +203,19 @@ async def create_alert(
     if not sender:
         raise HTTPException(status_code=404, detail="Sender not found")
 
-    alert = EmergencyAlert(
-        sender_id=sender.id,
-        sender_name=payload.get("sender_name", sender.full_name or sender.username),
-        sender_role=payload.get("sender_role", sender.role.value),
-        latitude=payload.get("latitude"),
-        longitude=payload.get("longitude"),
-        message=payload.get("message", "Emergency alert"),
-        status=payload.get("status", AlertStatus.PENDING),
-        assigned_rescuer_id=payload.get("assigned_rescuer_id"),
-        assigned_rescuer_name=payload.get("assigned_rescuer_name")
-    )
+    alert_data = {
+        "sender_id": sender.id,
+        "sender_name": payload.get("sender_name", sender.full_name or sender.username),
+        "sender_role": payload.get("sender_role", sender.role.value if hasattr(sender.role, 'value') else str(sender.role)),
+        "latitude": payload.get("latitude"),
+        "longitude": payload.get("longitude"),
+        "message": payload.get("message", "Emergency alert"),
+        "status": payload.get("status", AlertStatus.PENDING),
+        "assigned_rescuer_id": payload.get("assigned_rescuer_id"),
+        "assigned_rescuer_name": payload.get("assigned_rescuer_name")
+    }
+    alert = EmergencyAlert.model_validate(alert_data)
+
     session.add(alert)
     await session.commit()
     await session.refresh(alert)
