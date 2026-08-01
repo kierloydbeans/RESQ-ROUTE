@@ -14,13 +14,16 @@ origins = [
     "https://resq-route-frontend.onrender.com"  # Production frontend
 ]
 
-if hasattr(settings, "CORS_ORIGINS") and isinstance(settings.CORS_ORIGINS, list):
-    origins.extend(settings.CORS_ORIGINS)
+configured_origins = getattr(settings, "CORS_ORIGINS", [])
+if isinstance(configured_origins, str):
+    configured_origins = [origin.strip() for origin in configured_origins.split(",") if origin.strip()]
+origins.extend(origin for origin in configured_origins if origin != "*")
 
 # CORS middlewares
 app.add_middleware(
     CORSMiddleware,
     allow_origins=origins,
+    allow_origin_regex=r"https://([a-z0-9-]+\.)?ngrok-free\.(dev|app)|https://([a-z0-9-]+\.)?loca\.lt",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

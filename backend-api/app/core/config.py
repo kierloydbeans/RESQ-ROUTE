@@ -22,14 +22,11 @@ class Settings(BaseSettings):
     # WebSocket
     WS_HEARTBEAT_INTERVAL: int = 30
 
-    # SMTP Settings
-    SMTP_HOST: str
-    SMTP_PORT: int = 587
-    SMTP_USER: str
-    SMTP_PASSWORD: str
+    # Brevo email API
+    BREVO_API_KEY: str
+    BREVO_API_URL: str 
     EMAILS_FROM_EMAIL: str
     EMAILS_FROM_NAME: str = "ResQ-Route Admin"
-    SMTP_TLS: bool = True
 
     model_config = SettingsConfigDict(
         env_file=".env",
