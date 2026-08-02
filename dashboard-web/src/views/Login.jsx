@@ -1,18 +1,36 @@
-import React, { useState } from 'react'
+import React, { useState, useEffect } from 'react'
 import { useNavigate, Link } from 'react-router-dom'
 import Logo from '../components/Logo'
 
-<img src="/resq_logo_with_label.png" alt="ResQ Route Logo" />
-
+// Convert http/https base URL to ws/wss dynamically
 const rawApiBase = (import.meta.env.VITE_API_URL || import.meta.env.VITE_API_BASE_URL || 'https://resq-route.onrender.com').replace(/\/$/, '')
 const API_BASE_URL = rawApiBase.endsWith('/api/v1') ? rawApiBase.replace(/\/api\/v1$/, '') : rawApiBase
 const API_URL = `${API_BASE_URL}/api/v1`
 
+// --- Reusable Map Pin Component (Now scoped to the left panel) ---
+const BackgroundPin = ({ top, left, delay }) => (
+  <svg 
+    className="pulsing-pin"
+    style={{ 
+      position: 'absolute', 
+      top: top, 
+      left: left, 
+      width: '32px', // Slightly smaller since they are in a smaller panel
+      height: '32px',
+      animationDelay: delay,
+      zIndex: 0 // Keeps pins behind the text
+    }} 
+    viewBox="0 0 24 24" 
+    xmlns="http://www.w3.org/2000/svg"
+  >
+    <path d="M12 21.5C16.5 16 19 12.5 19 8.5C19 4.35786 15.866 1 12 1C8.13401 1 5 4.35786 5 8.5C5 12.5 7.5 16 12 21.5Z" fill="#ffffff" />
+    <circle cx="12" cy="8.5" r="3.5" fill="#c52222" />
+  </svg>
+)
+
 const Login = () => {
-  const [formData, setFormData] = useState({
-    username: '',
-    password: ''
-  })
+  const [isPageLoading, setIsPageLoading] = useState(true)
+  const [formData, setFormData] = useState({ username: '', password: '' })
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
 
@@ -24,41 +42,28 @@ const Login = () => {
 
   const navigate = useNavigate()
 
+  useEffect(() => {
+    const timer = setTimeout(() => setIsPageLoading(false), 1200)
+    return () => clearTimeout(timer)
+  }, [])
+
   const handleChange = (e) => {
-    setFormData({
-      ...formData,
-      [e.target.name]: e.target.value
-    })
+    setFormData({ ...formData, [e.target.name]: e.target.value })
   }
 
   const handleSubmit = async (e) => {
     e.preventDefault()
     setError('')
     setLoading(true)
-
     try {
       const response = await fetch(`${API_URL}/auth/login`, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/x-www-form-urlencoded',
-        },
-        body: new URLSearchParams({
-          username: formData.username,
-          password: formData.password
-        })
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams({ username: formData.username, password: formData.password })
       })
-
       const data = await response.json()
-
-      if (!response.ok) {
-        throw new Error(data.detail || 'Login failed')
-      }
-
-      localStorage.setItem('auth', JSON.stringify({
-        token: data.access_token,
-        user: data.user
-      }))
-
+      if (!response.ok) throw new Error(data.detail || 'Login failed')
+      localStorage.setItem('auth', JSON.stringify({ token: data.access_token, user: data.user }))
       navigate('/')
     } catch (err) {
       setError(err.message)
@@ -71,26 +76,15 @@ const Login = () => {
     e.preventDefault()
     setResetMessage({ type: '', text: '' })
     setResetLoading(true)
-
     try {
       const response = await fetch(`${API_URL}/auth/forgot-password`, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email: resetEmail })
       })
-
       const data = await response.json()
-
-      if (!response.ok) {
-        throw new Error(data.detail || 'Failed to send reset email')
-      }
-
-      setResetMessage({
-        type: 'success',
-        text: 'If an account exists with this email, a password reset link has been sent.'
-      })
+      if (!response.ok) throw new Error(data.detail || 'Failed to send reset email')
+      setResetMessage({ type: 'success', text: 'If an account exists with this email, a password reset link has been sent.' })
       setResetEmail('')
     } catch (err) {
       setResetMessage({ type: 'error', text: err.message })
@@ -105,8 +99,59 @@ const Login = () => {
     setResetMessage({ type: '', text: '' })
   }
 
+  const skeletonPulseStyle = `
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: .4; }
+    }
+    .skeleton-box {
+      animation: pulse 1.5s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+      background-color: #e5e7eb;
+    }
+  `
+
+  const pinPulseStyle = `
+    @keyframes opacityPulse {
+      0%, 100% { opacity: 0.1; }
+      50% { opacity: 0.8; }
+    }
+    .pulsing-pin {
+      animation: opacityPulse 4s ease-in-out infinite;
+      pointer-events: none;
+    }
+  `
+
+  if (isPageLoading) {
+    return (
+      <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', backgroundColor: '#f3f4f6', padding: '1.5rem' }}>
+        <style>{skeletonPulseStyle}</style>
+        <div style={{
+          maxWidth: '960px', width: '100%', minHeight: '560px', display: 'flex', borderRadius: '20px',
+          overflow: 'hidden', boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04)',
+          backgroundColor: '#ffffff'
+        }}>
+          <div className="skeleton-box" style={{ flex: '1', backgroundColor: '#d1d5db' }}></div>
+          <div style={{ flex: '1', padding: '3rem 2.5rem', display: 'flex', flexDirection: 'column', justifyContent: 'center', backgroundColor: '#ffffff' }}>
+            <div style={{ marginBottom: '2rem' }}>
+              <div className="skeleton-box" style={{ height: '48px', width: '140px', borderRadius: '8px', marginBottom: '1rem' }}></div>
+              <div className="skeleton-box" style={{ height: '32px', width: '100px', borderRadius: '8px' }}></div>
+            </div>
+            <div className="skeleton-box" style={{ height: '46px', width: '100%', borderRadius: '9999px', marginBottom: '1.25rem' }}></div>
+            <div className="skeleton-box" style={{ height: '46px', width: '100%', borderRadius: '9999px', marginBottom: '1rem' }}></div>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '1.75rem' }}>
+              <div className="skeleton-box" style={{ height: '14px', width: '110px', borderRadius: '4px' }}></div>
+            </div>
+            <div className="skeleton-box" style={{ height: '48px', width: '100%', borderRadius: '9999px' }}></div>
+          </div>
+        </div>
+      </div>
+    )
+  }
+
   return (
     <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', backgroundColor: '#f3f4f6', padding: '1.5rem' }}>
+      <style>{pinPulseStyle}</style>
+      
       <div style={{
         maxWidth: '960px',
         width: '100%',
@@ -117,10 +162,18 @@ const Login = () => {
         boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04)',
         backgroundColor: '#ffffff'
       }}>
-        {/* LEFT PANEL - BRAND BANNER */}
+        
+        {/* --- LEFT PANEL: Image Background + Gradient Overlay + Pins --- */}
         <div style={{
           flex: '1',
-          background: 'linear-gradient(135deg, #c52222 0%, #a36b16 100%)',
+          // Here we combine the gradient overlay (set to 85% opacity) with the background image
+          // Replace the Unsplash URL with your actual map or command center image!
+          background: `
+            linear-gradient(135deg, rgba(197, 34, 34, 0.85) 0%, rgba(163, 107, 22, 0.85) 100%),
+            url('https://preview.redd.it/was-there-any-urban-masterplan-for-caloocan-city-v0-rcfgre5qrpjc1.jpg?width=640&crop=smart&auto=webp&s=00978c251414bcb6fb0459978ca5eedcd113d39a')
+          `,
+          backgroundSize: 'cover',
+          backgroundPosition: 'center',
           padding: '3rem 2.5rem',
           display: 'flex',
           flexDirection: 'column',
@@ -129,23 +182,27 @@ const Login = () => {
           position: 'relative',
           overflow: 'hidden'
         }}>
-          {/* Subtle Decorative Pattern SVG */}
-          <svg style={{ position: 'absolute', top: 0, left: 0, opacity: 0.1, pointerEvents: 'none' }} width="100%" height="100%">
-            <circle cx="10%" cy="20%" r="120" stroke="#fff" strokeWidth="2" fill="none" />
-            <circle cx="80%" cy="80%" r="180" stroke="#fff" strokeWidth="2" fill="none" />
-          </svg>
+          
+          {/* Scattered Pulsing Pins (Contained strictly to this left panel) */}
+          <BackgroundPin top="15%" left="15%" delay="0s" />
+          <BackgroundPin top="65%" left="10%" delay="1.5s" />
+          <BackgroundPin top="25%" left="75%" delay="0.8s" />
+          <BackgroundPin top="75%" left="80%" delay="2.2s" />
+          <BackgroundPin top="85%" left="40%" delay="3s" />
+          <BackgroundPin top="10%" left="50%" delay="1.2s" />
 
-          <div style={{ position: 'relative', zIndex: 1 }}>
-            <h1 style={{ fontSize: '2.5rem', fontWeight: '800', lineHeight: 1.2, marginBottom: '1rem', color: '#ffffff' }}>
+          {/* Text Content */}
+          <div style={{ position: 'relative', zIndex: 10 }}>
+            <h1 style={{ fontSize: '2.5rem', fontWeight: '800', lineHeight: 1.2, marginBottom: '1rem', color: '#ffffff', textShadow: '0 2px 4px rgba(0,0,0,0.2)' }}>
               Welcome back!
             </h1>
-            <p style={{ fontSize: '1rem', opacity: 0.9, lineHeight: 1.6, maxWidth: '320px', color: '#fef2f2' }}>
+            <p style={{ fontSize: '1rem', opacity: 0.95, lineHeight: 1.6, maxWidth: '320px', color: '#fef2f2', textShadow: '0 1px 2px rgba(0,0,0,0.2)' }}>
               Sign in to access your dashboard and manage disaster response operations seamlessly.
             </p>
           </div>
         </div>
 
-        {/* RIGHT PANEL - FORM */}
+        {/* --- RIGHT PANEL: The Form --- */}
         <div style={{ flex: '1', padding: '3rem 2.5rem', display: 'flex', flexDirection: 'column', justifyContent: 'center', backgroundColor: '#ffffff' }}>
           <div style={{ marginBottom: '2rem' }}>
             <Logo size="large" />
@@ -170,7 +227,7 @@ const Login = () => {
                 style={{
                   width: '100%',
                   padding: '0.875rem 1.25rem',
-                  borderRadius: '9999px',
+                  borderRadius: '12px',
                   border: '1px solid #e5e7eb',
                   backgroundColor: '#f9fafb',
                   fontSize: '0.95rem',
@@ -191,7 +248,7 @@ const Login = () => {
                 style={{
                   width: '100%',
                   padding: '0.875rem 1.25rem',
-                  borderRadius: '9999px',
+                  borderRadius: '12px',
                   border: '1px solid #e5e7eb',
                   backgroundColor: '#f9fafb',
                   fontSize: '0.95rem',
@@ -224,7 +281,7 @@ const Login = () => {
               style={{
                 width: '100%',
                 padding: '0.875rem',
-                borderRadius: '9999px',
+                borderRadius: '12px',
                 border: 'none',
                 background: 'linear-gradient(135deg, #c52222 0%, #a36b16 100%)',
                 color: '#ffffff',
@@ -253,14 +310,9 @@ const Login = () => {
       {/* FORGOT PASSWORD MODAL */}
       {showForgotModal && (
         <div style={{
-          position: 'fixed',
-          top: 0, left: 0, right: 0, bottom: 0,
-          backgroundColor: 'rgba(0, 0, 0, 0.5)',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          zIndex: 1000,
-          padding: '1rem'
+          position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
+          backgroundColor: 'rgba(0, 0, 0, 0.5)', display: 'flex', alignItems: 'center',
+          justifyContent: 'center', zIndex: 1000, padding: '1rem'
         }}>
           <div style={{ maxWidth: '420px', width: '100%', backgroundColor: '#fff', borderRadius: '16px', padding: '2rem', boxShadow: '0 20px 25px -5px rgba(0,0,0,0.2)' }}>
             <h3 style={{ marginTop: 0, marginBottom: '0.5rem', fontSize: '1.25rem', fontWeight: '700', color: '#111827' }}>
@@ -285,13 +337,8 @@ const Login = () => {
                   required
                   placeholder="name@example.com"
                   style={{
-                    width: '100%',
-                    padding: '0.875rem 1.25rem',
-                    borderRadius: '9999px',
-                    border: '1px solid #e5e7eb',
-                    backgroundColor: '#f9fafb',
-                    fontSize: '0.95rem',
-                    boxSizing: 'border-box'
+                    width: '100%', padding: '0.875rem 1.25rem', borderRadius: '12px',
+                    border: '1px solid #e5e7eb', backgroundColor: '#f9fafb', fontSize: '0.95rem', boxSizing: 'border-box'
                   }}
                 />
               </div>
@@ -301,13 +348,8 @@ const Login = () => {
                   type="button"
                   onClick={closeForgotModal}
                   style={{
-                    padding: '0.625rem 1.25rem',
-                    borderRadius: '9999px',
-                    border: 'none',
-                    backgroundColor: '#e5e7eb',
-                    color: '#374151',
-                    fontWeight: '600',
-                    cursor: 'pointer'
+                    padding: '0.625rem 1.25rem', borderRadius: '9999px', border: 'none',
+                    backgroundColor: '#e5e7eb', color: '#374151', fontWeight: '600', cursor: 'pointer'
                   }}
                 >
                   Cancel
@@ -316,13 +358,9 @@ const Login = () => {
                   type="submit"
                   disabled={resetLoading}
                   style={{
-                    padding: '0.625rem 1.25rem',
-                    borderRadius: '9999px',
-                    border: 'none',
-                    background: 'linear-gradient(135deg, #c52222 0%, #a36b16 100%)',
-                    color: '#ffffff',
-                    fontWeight: '600',
-                    cursor: resetLoading ? 'not-allowed' : 'pointer'
+                    padding: '0.625rem 1.25rem', borderRadius: '9999px', border: 'none',
+                    background: 'linear-gradient(135deg, #c52222 0%, #a36b16 100%)', color: '#ffffff',
+                    fontWeight: '600', cursor: resetLoading ? 'not-allowed' : 'pointer'
                   }}
                 >
                   {resetLoading ? 'Sending...' : 'Send Reset Link'}
