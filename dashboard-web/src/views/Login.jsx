@@ -222,6 +222,7 @@ const Login = () => {
                 <option value="citizen">Citizen</option>
                 <option value="rescuer">Rescuer</option>
                 <option value="coordinator">Coordinator</option>
+                <option value="dispatcher">Dispatcher</option>
               </select>
             </div>
 

@@ -21,6 +21,8 @@ class EmergencyAlertBase(SQLModel):
     sender_role: str
     latitude: float
     longitude: float
+    disaster_type: str = "other"
+    severity: str = "high"
     message: str = "Emergency alert"
     status: AlertStatus = Field(default=AlertStatus.PENDING)
     assigned_rescuer_id: Optional[int] = Field(default=None, foreign_key="user.id")
