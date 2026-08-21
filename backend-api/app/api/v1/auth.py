@@ -20,7 +20,9 @@ from app.models.user import User, UserRead, UserRole
 from app.models.otp import OTPVerification
 from app.models.rescuer import RescuerProfile, RescuerProfileRead, RescuerStatus
 from app.models.emergency_alert import EmergencyAlert, EmergencyAlertRead, AlertStatus
+from app.models.vehicle import Vehicle
 from app.core.mail import send_reset_password_email, send_otp_email
+from app.api.websockets.telemetry import manager as telemetry_manager
 
 router = APIRouter()
 
@@ -192,6 +194,59 @@ async def list_rescuers(session: AsyncSession = Depends(get_session)):
         for user in rescuer_users
     ]
 
+
+@router.get("/rescue-units")
+async def list_rescue_units(session: AsyncSession = Depends(get_session)):
+    profile_result = await session.execute(
+        select(RescuerProfile, User)
+        .join(User, RescuerProfile.user_id == User.id)
+        .where(User.role == UserRole.RESCUER)
+    )
+    vehicle_result = await session.execute(select(Vehicle))
+    alert_result = await session.execute(select(EmergencyAlert))
+    rescuer_profiles = profile_result.all()
+    alerts = alert_result.scalars().all()
+    dispatched_count = sum(
+        1 for profile, _user in rescuer_profiles
+        if (profile.status.value if hasattr(profile.status, "value") else str(profile.status)).lower() == "in_transit"
+    )
+
+    return {
+        "rescuer_count": len(rescuer_profiles),
+        "dispatched_count": dispatched_count,
+        "closed_alert_count": sum(
+            1 for alert in alerts
+            if (alert.status.value if hasattr(alert.status, "value") else str(alert.status)).lower() == "closed"
+        ),
+        "rescuers": [
+            {
+                "id": profile.id,
+                "user_id": profile.user_id,
+                    "status": profile.status.value if hasattr(profile.status, "value") else str(profile.status),
+                    "username": user.username,
+                    "full_name": user.full_name,
+                    "email": user.email,
+                "station_name": profile.station_name,
+                "phone": profile.phone,
+                "current_latitude": profile.current_latitude,
+                "current_longitude": profile.current_longitude,
+            }
+            for profile, user in rescuer_profiles
+        ],
+        "vehicles": [
+            {
+                "id": vehicle.id,
+                "plate_number": vehicle.plate_number,
+                "vehicle_type": vehicle.vehicle_type,
+                "driver_name": vehicle.driver_name,
+                "capacity": vehicle.capacity,
+                "status": vehicle.status,
+                "center_id": vehicle.center_id,
+            }
+            for vehicle in vehicle_result.scalars().all()
+        ],
+    }
+
 @router.post("/alerts", response_model=EmergencyAlertRead, status_code=status.HTTP_201_CREATED)
 async def create_alert(
     payload: dict,
@@ -209,6 +264,8 @@ async def create_alert(
         "sender_role": payload.get("sender_role", sender.role.value if hasattr(sender.role, 'value') else str(sender.role)),
         "latitude": payload.get("latitude"),
         "longitude": payload.get("longitude"),
+        "disaster_type": payload.get("disaster_type", "other"),
+        "severity": payload.get("severity", "high"),
         "message": payload.get("message", "Emergency alert"),
         "status": payload.get("status", AlertStatus.PENDING),
         "assigned_rescuer_id": payload.get("assigned_rescuer_id"),
@@ -219,6 +276,11 @@ async def create_alert(
     session.add(alert)
     await session.commit()
     await session.refresh(alert)
+    await telemetry_manager.broadcast({
+        "type": "alert_created",
+        "data": EmergencyAlertRead.model_validate(alert).model_dump(mode="json"),
+        "timestamp": datetime.utcnow().timestamp(),
+    })
     return alert
 
 
@@ -277,6 +339,11 @@ async def update_alert(
 
     await session.commit()
     await session.refresh(alert)
+    await telemetry_manager.broadcast({
+        "type": "alert_updated",
+        "data": EmergencyAlertRead.model_validate(alert).model_dump(mode="json"),
+        "timestamp": datetime.utcnow().timestamp(),
+    })
     return alert
 
 @router.post("/register", response_model=UserRead, status_code=status.HTTP_201_CREATED)

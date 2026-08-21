@@ -1,7 +1,6 @@
 import React, { useEffect, useState } from 'react'
 import { useWebSocket } from '../hooks/useWebSocket'
 import MapContainer from '../components/MapContainer'
-import IntakeStats from '../components/IntakeStats'
 import Logo from '../components/Logo'
 
 const getStoredAuth = () => {
@@ -17,6 +16,24 @@ const rawApiBase = (import.meta.env.VITE_API_URL || import.meta.env.VITE_API_BAS
 const API_BASE_URL = rawApiBase.endsWith('/api/v1') ? rawApiBase.replace(/\/api\/v1$/, '') : rawApiBase
 const WS_BASE_URL = API_BASE_URL.replace(/^http/, 'ws')
 
+const disasterIcons = {
+  flood: '⌁',
+  earthquake: '⌂',
+  fire: '♨',
+  medical: '+',
+  trapped: '!',
+  other: '•'
+}
+
+const disasterLabels = {
+  flood: 'Flood',
+  earthquake: 'Earthquake',
+  fire: 'Fire',
+  medical: 'Medical',
+  trapped: 'Rescue',
+  other: 'Other'
+}
+
 export const Dashboard = () => {
   const auth = getStoredAuth()
   const role = auth?.user?.role?.toLowerCase?.() || 'citizen'
@@ -27,7 +44,43 @@ export const Dashboard = () => {
   const [alerts, setAlerts] = useState([])
   const [rescuers, setRescuers] = useState([])
   const [selectedRescuerId, setSelectedRescuerId] = useState('')
+  const [selectedIncident, setSelectedIncident] = useState('')
+  const [selectedSeverity, setSelectedSeverity] = useState('high')
+  const [activeModal, setActiveModal] = useState(null)
+  const [rescueUnits, setRescueUnits] = useState({ rescuers: [], vehicles: [] })
+  const [unitSort, setUnitSort] = useState('status')
+  const [modalLoading, setModalLoading] = useState(false)
+  const [selectedMergeIds, setSelectedMergeIds] = useState([])
+  const [verifiedAlertState, setVerifiedAlertState] = useState(null)
+  const [assigningAlert, setAssigningAlert] = useState(null)
+  const [currentTime, setCurrentTime] = useState(() => new Date())
+  const verifiedAlert = verifiedAlertState
+  const setVerifiedAlert = (alert) => setVerifiedAlertState((current) => current?.id === alert?.id ? null : alert)
   const { isConnected, lastMessage } = useWebSocket(`${WS_BASE_URL}/api/v1/ws`)
+
+  useEffect(() => {
+    const clock = window.setInterval(() => setCurrentTime(new Date()), 1000)
+    return () => window.clearInterval(clock)
+  }, [])
+
+  const openModal = async (modal) => {
+    setActiveModal(modal)
+    setModalLoading(true)
+    try {
+      if (modal === 'alerts') {
+        const response = await fetch(`${API_BASE_URL}/api/v1/auth/alerts`)
+        if (response.ok) setAlerts(await response.json())
+      }
+      if (modal === 'units') {
+        const response = await fetch(`${API_BASE_URL}/api/v1/auth/rescue-units`)
+        if (response.ok) setRescueUnits(await response.json())
+      }
+    } catch (error) {
+      console.error(`Failed to load ${modal}`, error)
+    } finally {
+      setModalLoading(false)
+    }
+  }
 
   useEffect(() => {
     fetch(`${API_BASE_URL}/api/v1/gps`)
@@ -66,6 +119,14 @@ export const Dashboard = () => {
     if (lastMessage?.type === 'gps_update' && lastMessage.data) {
       setLatestGps(lastMessage.data)
     }
+
+    if (lastMessage?.type === 'alert_created' && lastMessage.data) {
+      setAlerts((currentAlerts) => [lastMessage.data, ...currentAlerts.filter((alert) => alert.id !== lastMessage.data.id)])
+    }
+
+    if (lastMessage?.type === 'alert_updated' && lastMessage.data) {
+      setAlerts((currentAlerts) => currentAlerts.map((alert) => alert.id === lastMessage.data.id ? lastMessage.data : alert))
+    }
   }, [lastMessage])
 
   useEffect(() => {
@@ -80,7 +141,6 @@ export const Dashboard = () => {
         console.error('Failed to load alerts', error)
       }
     }
-
     const loadRescuers = async () => {
       try {
         const response = await fetch(`${API_BASE_URL}/api/v1/auth/rescuers`)
@@ -93,8 +153,18 @@ export const Dashboard = () => {
       }
     }
 
+    const loadRescueUnits = async () => {
+      try {
+        const response = await fetch(`${API_BASE_URL}/api/v1/auth/rescue-units`)
+        if (response.ok) setRescueUnits(await response.json())
+      } catch (error) {
+        console.error('Failed to load rescue units', error)
+      }
+    }
+
     loadAlerts()
     loadRescuers()
+    loadRescueUnits()
   }, [API_BASE_URL])
 
   const handleSendEmergencyAlert = async () => {
@@ -114,7 +184,9 @@ export const Dashboard = () => {
           sender_role: auth.user.role,
           latitude: latestGps.latitude,
           longitude: latestGps.longitude,
-          message: alertMessage || 'Emergency alert'
+          disaster_type: selectedIncident || 'other',
+          severity: selectedSeverity,
+          message: alertMessage || ''
         })
       })
 
@@ -133,14 +205,15 @@ export const Dashboard = () => {
     }
   }
 
-  const handleAssignAlert = async (alertId) => {
-    if (!selectedRescuerId) {
-      setAlertStatus('Choose a rescuer before assigning the alert.')
+  const handleAssignAlert = async (alertId, rescuerSelection = selectedRescuerId) => {
+    if (!rescuerSelection) {
+      const alert = alerts.find((entry) => entry.id === alertId)
+      if (alert) setAssigningAlert(alert)
       return
     }
 
     try {
-      const rescuer = rescuers.find((entry) => entry.id === Number(selectedRescuerId))
+      const rescuer = rescuers.find((entry) => entry.id === Number(rescuerSelection))
       const response = await fetch(`${API_BASE_URL}/api/v1/auth/alerts/${alertId}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
@@ -165,6 +238,18 @@ export const Dashboard = () => {
     }
   }
 
+  const openAssignmentModal = (alert) => {
+    setSelectedRescuerId('')
+    setAssigningAlert(alert)
+  }
+
+  useEffect(() => {
+    if (assigningAlert && selectedRescuerId) {
+      handleAssignAlert(assigningAlert.id, selectedRescuerId)
+      setAssigningAlert(null)
+    }
+  }, [assigningAlert, selectedRescuerId])
+
   const handleUpdateAlertStatus = async (alertId, status) => {
     try {
       const response = await fetch(`${API_BASE_URL}/api/v1/auth/alerts/${alertId}`, {
@@ -181,6 +266,30 @@ export const Dashboard = () => {
       }
     } catch (error) {
       setAlertStatus(error.message)
+    }
+  }
+
+  const toggleMergeAlert = (alertId) => {
+    setSelectedMergeIds((currentIds) => currentIds.includes(alertId)
+      ? currentIds.filter((id) => id !== alertId)
+      : [...currentIds, alertId])
+  }
+
+  const handleMergeAlerts = async () => {
+    if (selectedMergeIds.length < 2) return
+    const duplicateIds = selectedMergeIds.slice(1)
+    try {
+      await Promise.all(duplicateIds.map((alertId) => fetch(`${API_BASE_URL}/api/v1/auth/alerts/${alertId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: 'closed' })
+      })))
+      setSelectedMergeIds([])
+      const refreshed = await fetch(`${API_BASE_URL}/api/v1/auth/alerts`)
+      if (refreshed.ok) setAlerts(await refreshed.json())
+      setAlertStatus(`Merged ${duplicateIds.length} duplicate alert${duplicateIds.length === 1 ? '' : 's'}.`)
+    } catch (error) {
+      setAlertStatus('Unable to merge selected alerts.')
     }
   }
 
@@ -204,224 +313,79 @@ export const Dashboard = () => {
     icon: '⚠'
   }))
 
+  const displayName = auth?.user?.full_name || auth?.user?.username || 'Cmdr. Reyes'
+  const visibleAlerts = role === 'rescuer' ? alerts.filter((alert) => alert.assigned_rescuer_id === rescuerId) : alerts
+  const alertCount = alerts.length || 24
+  const [isDark, setIsDark] = useState(() => localStorage.getItem('resq-theme') !== 'light')
+  const [accountMenuOpen, setAccountMenuOpen] = useState(false)
+
+  useEffect(() => {
+    document.documentElement.dataset.theme = isDark ? 'dark' : 'light'
+    localStorage.setItem('resq-theme', isDark ? 'dark' : 'light')
+  }, [isDark])
+
+  const formatTime = (value) => value ? new Date(value).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '14:32'
+  const formattedCurrentTime = new Intl.DateTimeFormat('en-PH', {
+    timeZone: 'Asia/Manila',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false
+  }).format(currentTime)
+  const sortedRescuers = [...rescueUnits.rescuers].sort((first, second) => {
+    if (unitSort === 'name') return (first.full_name || first.username || '').localeCompare(second.full_name || second.username || '')
+    return (first.status || '').localeCompare(second.status || '')
+  })
+  const sortedVehicles = [...rescueUnits.vehicles].sort((first, second) => {
+    if (unitSort === 'type') return (first.vehicle_type || '').localeCompare(second.vehicle_type || '')
+    if (unitSort === 'name') return (first.driver_name || '').localeCompare(second.driver_name || '')
+    return (first.status || '').localeCompare(second.status || '')
+  })
+  const handleLogout = () => {
+    localStorage.removeItem('auth')
+    window.location.href = '/login'
+  }
+
+  const accountMenu = <div className="account-menu"><button className="operator operator-trigger" onClick={() => setAccountMenuOpen((value) => !value)} aria-expanded={accountMenuOpen} aria-haspopup="menu"><span className="operator-avatar">♟</span><span><b>{displayName}</b><small>{role.toUpperCase()}</small></span></button>{accountMenuOpen && <div className="account-dropdown" role="menu"><button onClick={handleLogout} role="menuitem">Logout</button></div>}</div>
+
+  if (role === 'citizen') {
+    return (
+      <main className="citizen-console">
+        <header className="citizen-header"><div className="brand-lockup"><Logo size="small" /><div><strong>RESQ-ROUTE</strong><span>CITIZEN SAFETY NETWORK</span></div></div><div className="header-actions"><span className={`connection ${isConnected ? 'online' : 'offline'}`}><i /> {isConnected ? 'Connected' : 'Reconnecting'}</span><button className="icon-button" onClick={() => setIsDark((value) => !value)} aria-label="Toggle light and dark mode">{isDark ? '☼' : '☾'}</button>{accountMenu}</div></header>
+        <section className="citizen-hero"><div><span className="eyebrow">CITIZEN EMERGENCY CHANNEL</span><h1>Get help when every second counts.</h1><p>Your alert shares your current location with the response team so dispatchers can coordinate assistance.</p></div><div className={`signal-card ${isConnected ? 'signal-live' : ''}`}><i /><b>{isConnected ? 'RESPONSE NETWORK ONLINE' : 'CONNECTING TO RESPONSE NETWORK'}</b><small>Last checked just now</small></div></section>
+        <section className="citizen-grid"><div className="alert-composer"><div className="panel-title"><h2>SEND EMERGENCY ALERT</h2><span>PRIORITY CHANNEL</span></div><div className="composer-body"><label>Choose what is happening</label><div className="quick-alerts">{[['flood', '⌁', 'Stranded by flood'], ['earthquake', '⌂', 'Stranded by earthquake'], ['fire', '♨', 'Fire'], ['medical', '+', 'Medical emergency'], ['trapped', '!', 'Trapped / rescue']].map(([value, icon, label]) => <button className={`quick-alert ${value} ${selectedIncident === value ? 'selected' : ''}`} key={value} onClick={() => setSelectedIncident(value)}><span>{icon}</span>{label}</button>)}</div><label>How serious is it?</label><div className="severity-options">{['low', 'medium', 'high', 'critical'].map((severity) => <button className={`severity-option ${severity} ${selectedSeverity === severity ? 'selected' : ''}`} key={severity} onClick={() => setSelectedSeverity(severity)}>{severity}</button>)}</div><label htmlFor="citizen-alert-message">Additional details <small>(optional)</small></label><textarea id="citizen-alert-message" value={alertMessage} onChange={(event) => setAlertMessage(event.target.value)} placeholder="Add injuries, landmarks, or other details if useful" /><div className="location-confirm"><span>⌖</span><div><b>Location attached</b><small>{latestGps ? `${latestGps.latitude.toFixed(5)}° N, ${latestGps.longitude.toFixed(5)}° E` : 'Waiting for device location...'}</small></div><i /></div><button className="emergency-button" onClick={handleSendEmergencyAlert}>SEND ALERT TO DISPATCH</button>{alertStatus && <p className="alert-status">{alertStatus}</p>}</div></div><div className="citizen-side"><div className="citizen-card"><span className="card-kicker">YOUR SAFETY STATUS</span><strong>Ready to respond</strong><p>Keep this page open after sending an alert. Dispatchers may use it to share updates.</p><div className="status-line"><i className="status-dot green" /> GPS telemetry active</div><div className="status-line"><i className={`status-dot ${isConnected ? 'green' : 'red'}`} /> Dispatch connection {isConnected ? 'stable' : 'offline'}</div></div><div className="citizen-card quiet-card"><span className="card-kicker">EMERGENCY TIP</span><strong>Move to a safe, visible area</strong><p>Stay away from floodwater, live wires, and unstable structures. Signal responders if it is safe to do so.</p></div></div></section>
+      </main>
+    )
+  }
+
+  if (role !== 'dispatcher') {
+    return <main className="restricted-console"><Logo size="small" /><h1>Dispatcher access required</h1><p>This operations console is available only to dispatcher accounts.</p><button className="emergency-button" onClick={handleLogout}>RETURN TO LOGIN</button></main>
+  }
+
   return (
-    <div style={{ padding: '2rem', backgroundColor: '#f9fafb', minHeight: '100vh' }}>
-      {/* HEADER SECTION */}
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '2rem' }}>
-        <div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', marginBottom: '0.5rem' }}>
-            <Logo size="medium" />
-            <h1 style={{
-              fontSize: '2rem',
-              fontWeight: '800',
-              margin: 0,
-              background: 'linear-gradient(135deg, #c52222 0%, #a36b16 100%)',
-              WebkitBackgroundClip: 'text',
-              WebkitTextFillColor: 'transparent'
-            }}>
-              {role === 'citizen' ? 'Citizen Support Panel' : role === 'rescuer' ? 'Rescue Operations Panel' : 'Central Command Panel'}
-            </h1>
-          </div>
-          <p style={{ color: '#6b7280', fontSize: '0.95rem', margin: 0 }}>
-            {role === 'citizen'
-              ? 'Send an emergency alert so responders can find your location and assist quickly.'
-              : 'Real-time disaster response coordination and shelter monitoring'}
-          </p>
-        </div>
+    <main className="ops-console">
+      <header className="ops-header">
+        <div className="brand-lockup"><Logo size="small" /><div><strong>RESQ-ROUTE</strong><span>CDRRMO LIVE OPERATIONS CENTER</span></div></div>
+        <div className="header-actions"><span className={`connection ${isConnected ? 'online' : 'offline'}`}><i /> WebSocket: {isConnected ? 'Connected' : 'Reconnecting'}</span><span className="header-time">{formattedCurrentTime} PHT</span><button className="icon-button" onClick={() => setIsDark((value) => !value)} aria-label="Toggle light and dark mode">{isDark ? '☼' : '☾'}</button>{accountMenu}</div>
+      </header>
+      <div className="incident-ticker"><b>CITIZEN HAZARD STREAM</b><span>[14:31] Sector 2: Fallen heavy billboard blocking flood artery road</span><span>[14:28] Sector 5: Deep flood level, exceeding 1.5m at Melchor Crossing</span><span>[14:25] Sector 1: Downed power line reported</span></div>
 
-        <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
-          <div style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: '0.75rem',
-            backgroundColor: '#ffffff',
-            padding: '0.625rem 1.25rem',
-            borderRadius: '9999px',
-            boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.05)',
-            border: '1px solid #e5e7eb'
-          }}>
-            <span style={{
-              height: '10px',
-              width: '10px',
-              borderRadius: '50%',
-              backgroundColor: isConnected ? '#10b981' : '#ef4444',
-              display: 'inline-block'
-            }}></span>
-            <span style={{ fontSize: '0.875rem', fontWeight: '600', color: '#374151' }}>
-              System {isConnected ? 'Online' : 'Offline'}
-            </span>
-          </div>
+      <section className="ops-grid">
+        <aside className="feed-panel"><PanelTitle title="LIVE SOS FEED" badge="LIVE" onClick={() => openModal('alerts')} /><div className="feed-list">{(alerts.length ? alerts : [{ id: 1, sender_name: 'R. Corpuz', disaster_type: 'flood', severity: 'critical', message: 'Trapped near river', status: 'pending', created_at: null }, { id: 2, sender_name: 'M. Santos', disaster_type: 'medical', severity: 'high', message: 'Injury reported', status: 'pending', created_at: null }, { id: 3, sender_name: 'L. Mendoza', disaster_type: 'fire', severity: 'high', message: '', status: 'pending', created_at: null }]).slice(0, 5).map((alert) => { const disasterType = alert.disaster_type || 'other'; const severity = alert.severity || 'high'; return <article className="sos-item" key={alert.id}><div className="sos-meta"><span className={`severity ${severity}`}>{severity.toUpperCase()}</span><time>{formatTime(alert.created_at)} ago</time></div><div className="sos-person"><span className={`sos-icon disaster-${disasterType}`}>{disasterIcons[disasterType] || disasterIcons.other}</span><div><b>{alert.sender_name}</b><small>{disasterLabels[disasterType] || 'Other'}{alert.message ? ` · ${alert.message}` : ''}</small></div></div><div className="coordinates">14.5995° N, 120.9842° E</div><div className="sos-actions"><button onClick={() => handleAssignAlert(alert.id)}>ASSIGN</button><button>VERIFY</button><button>MERGE</button></div></article>})}</div></aside>
 
-          <div style={{
-            backgroundColor: '#ffffff',
-            padding: '0.875rem 1.1rem',
-            borderRadius: '14px',
-            boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.05)',
-            border: '1px solid #e5e7eb',
-            minWidth: '220px'
-          }}>
-            <div style={{ fontSize: '0.75rem', textTransform: 'uppercase', letterSpacing: '0.08em', color: '#6b7280' }}>
-              Live GPS
-            </div>
-            {latestGps ? (
-              <div style={{ marginTop: '0.25rem', fontWeight: '700', color: '#111827' }}>
-                {latestGps.latitude.toFixed(5)}, {latestGps.longitude.toFixed(5)}
-              </div>
-            ) : (
-              <div style={{ marginTop: '0.25rem', color: '#9ca3af' }}>Waiting for device telemetry...</div>
-            )}
-          </div>
-        </div>
-      </div>
+        <section className="map-panel"><PanelTitle title="CDRRMO TACTICAL MAP AREA" badge="TRACKING MAP" /><div className="map-stage"><div className="map-coordinate">CENTER: 14.5995° N<br />LONG: 120.9842° E</div><div className="map-legend"><span><i className="dot red" /> UNASSIGNED INCIDENT</span><span><i className="dot amber" /> DISPATCHED UNIT</span><span><i className="dot green" /> RESCUER POSITION</span></div><MapContainer markers={role === 'citizen' ? mockMarkers : [...mockMarkers, ...alertMarkers]} /><div className="map-label label-alpha">●<span>ALPHA (14.59N)</span></div><div className="map-label label-sos">●<span>SOS #184</span></div><div className="map-label label-unit">●<span>UNIT BETA</span></div><div className="evac-label">♧ EVAC CENTER A (92%)<b /></div><span className="map-scale">SCALE: 1:25,000</span><span className="map-live">LIVE RADAR FEED [WSS_003]</span></div></section>
 
-      {/* DASHBOARD GRID CONTENT */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: '1.5rem' }}>
-        {role === 'citizen' && (
-          <div style={{ backgroundColor: '#ffffff', borderRadius: '16px', padding: '1.5rem', boxShadow: '0 4px 12px rgba(0,0,0,0.03)', border: '1px solid #e5e7eb' }}>
-            <h3 style={{ fontSize: '1.1rem', fontWeight: '700', color: '#111827', marginTop: 0 }}>Send Emergency Alert</h3>
-            <p style={{ color: '#6b7280', fontSize: '0.9rem' }}>Your account details and current location will be shared with the response team.</p>
-            <textarea
-              value={alertMessage}
-              onChange={(e) => setAlertMessage(e.target.value)}
-              placeholder="Describe the emergency"
-              style={{ width: '100%', minHeight: '96px', borderRadius: '12px', border: '1px solid #e5e7eb', padding: '0.9rem', marginBottom: '0.75rem' }}
-            />
-            <button onClick={handleSendEmergencyAlert} style={{ padding: '0.75rem 1rem', borderRadius: '999px', border: 'none', background: 'linear-gradient(135deg, #c52222 0%, #a36b16 100%)', color: '#fff', fontWeight: '600', cursor: 'pointer' }}>
-              Send Emergency Alert
-            </button>
-            {alertStatus && <p style={{ marginTop: '0.75rem', color: '#374151', fontSize: '0.9rem' }}>{alertStatus}</p>}
-          </div>
-        )}
-        {/* STATS OVERVIEW */}
-        <div style={{
-          backgroundColor: '#ffffff',
-          borderRadius: '16px',
-          boxShadow: '0 4px 12px rgba(0,0,0,0.03)',
-          border: '1px solid #e5e7eb',
-          overflow: 'hidden'
-        }}>
-          <IntakeStats stats={mockStats} />
-        </div>
-
-        {/* LIVE MAP CARD */}
-        <div style={{
-          backgroundColor: '#ffffff',
-          borderRadius: '16px',
-          padding: '1.5rem',
-          boxShadow: '0 4px 12px rgba(0,0,0,0.03)',
-          border: '1px solid #e5e7eb'
-        }}>
-          <div style={{ marginBottom: '1.25rem' }}>
-            <h3 style={{ fontSize: '1.25rem', fontWeight: '700', color: '#111827', margin: 0 }}>
-              Live Operations Map
-            </h3>
-            <p style={{ color: '#6b7280', fontSize: '0.875rem', marginTop: '0.25rem', margin: 0 }}>
-              Real-time shelter status, incident dispatching, and evacuation locations
-            </p>
-          </div>
-          <div style={{ borderRadius: '12px', overflow: 'hidden', minHeight: '400px' }}>
-            <MapContainer markers={role === 'citizen' ? mockMarkers : [...mockMarkers, ...alertMarkers]} />
-          </div>
-        </div>
-
-        {(role === 'rescuer' || role === 'coordinator') && (
-          <div style={{ backgroundColor: '#ffffff', borderRadius: '16px', padding: '1.25rem 1.5rem', boxShadow: '0 4px 12px rgba(0,0,0,0.03)', border: '1px solid #e5e7eb' }}>
-            <h4 style={{ fontSize: '0.95rem', fontWeight: '700', color: '#374151', marginTop: 0 }}>Active Alerts</h4>
-            <div style={{ display: 'grid', gap: '0.75rem' }}>
-              {alerts.length === 0 ? (
-                <p style={{ margin: 0, color: '#6b7280' }}>No active alerts.</p>
-              ) : (role === 'rescuer' ? alerts.filter((alert) => alert.assigned_rescuer_id === rescuerId) : alerts).map((alert) => (
-                <div key={alert.id} style={{ border: '1px solid #e5e7eb', borderRadius: '12px', padding: '0.9rem' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '0.5rem' }}>
-                    <strong>{alert.sender_name}</strong>
-                    <span style={{ fontSize: '0.8rem', color: '#6b7280' }}>{alert.status}</span>
-                  </div>
-                  <p style={{ margin: '0.35rem 0', color: '#4b5563' }}>{alert.message}</p>
-                  <p style={{ margin: 0, color: '#6b7280', fontSize: '0.8rem' }}>{alert.latitude.toFixed(4)}, {alert.longitude.toFixed(4)}</p>
-                  {role === 'rescuer' && alert.assigned_rescuer_id === rescuerId && (
-                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem', marginTop: '0.75rem' }}>
-                      {alert.status === 'assigned' && (
-                        <button onClick={() => handleUpdateAlertStatus(alert.id, 'on_the_way')} style={{ padding: '0.6rem 0.85rem', borderRadius: '8px', border: 'none', backgroundColor: '#f59e0b', color: '#fff', cursor: 'pointer' }}>
-                          On the way
-                        </button>
-                      )}
-                      {alert.status === 'on_the_way' && (
-                        <>
-                          <button onClick={() => handleUpdateAlertStatus(alert.id, 'assigned')} style={{ padding: '0.6rem 0.85rem', borderRadius: '8px', border: '1px solid #d1d5db', backgroundColor: '#ffffff', color: '#374151', cursor: 'pointer' }}>
-                            Cancel
-                          </button>
-                          <button onClick={() => handleUpdateAlertStatus(alert.id, 'arrived')} style={{ padding: '0.6rem 0.85rem', borderRadius: '8px', border: 'none', backgroundColor: '#10b981', color: '#fff', cursor: 'pointer' }}>
-                            Arrived in area
-                          </button>
-                        </>
-                      )}
-                      {alert.status === 'arrived' && (
-                        <>
-                          <button onClick={() => handleUpdateAlertStatus(alert.id, 'returning')} style={{ padding: '0.6rem 0.85rem', borderRadius: '8px', border: 'none', backgroundColor: '#2563eb', color: '#fff', cursor: 'pointer' }}>
-                            Return to evac center
-                          </button>
-                          <button onClick={() => handleUpdateAlertStatus(alert.id, 'assigned')} style={{ padding: '0.6rem 0.85rem', borderRadius: '8px', border: '1px solid #d1d5db', backgroundColor: '#ffffff', color: '#374151', cursor: 'pointer' }}>
-                            Heading to another alert site
-                          </button>
-                        </>
-                      )}
-                      {alert.status === 'returning' && (
-                        <span style={{ color: '#2563eb', fontWeight: '600' }}>Returning to evac center...</span>
-                      )}
-                    </div>
-                  )}
-                  {role === 'coordinator' && (
-                    <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.6rem' }}>
-                      <select value={selectedRescuerId} onChange={(e) => setSelectedRescuerId(e.target.value)} style={{ flex: 1, padding: '0.6rem', borderRadius: '8px', border: '1px solid #e5e7eb' }}>
-                        <option value="">Select rescuer</option>
-                        {rescuers.map((rescuer) => (
-                          <option key={rescuer.id} value={rescuer.id}>{rescuer.display_name || rescuer.full_name || rescuer.username || `Rescuer ${rescuer.id}`} ({rescuer.status || 'available'})</option>
-                        ))}
-                      </select>
-                      <button onClick={() => handleAssignAlert(alert.id)} style={{ padding: '0.6rem 0.85rem', borderRadius: '8px', border: 'none', backgroundColor: '#2563eb', color: '#fff', cursor: 'pointer' }}>Assign</button>
-                    </div>
-                  )}
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {/* WEBSOCKET LOG & DETAILS CARD */}
-        <div style={{
-          backgroundColor: '#ffffff',
-          borderRadius: '16px',
-          padding: '1.25rem 1.5rem',
-          boxShadow: '0 4px 12px rgba(0,0,0,0.03)',
-          border: '1px solid #e5e7eb',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between'
-        }}>
-          <div>
-            <h4 style={{ fontSize: '0.95rem', fontWeight: '700', color: '#374151', margin: 0 }}>
-              Live Telemetry Stream
-            </h4>
-            <p style={{ color: '#6b7280', fontSize: '0.85rem', marginTop: '0.25rem', margin: 0 }}>
-              WebSocket status: <strong style={{ color: isConnected ? '#059669' : '#dc2626' }}>{isConnected ? 'Connected to /ws' : 'Reconnecting...'}</strong>
-            </p>
-          </div>
-          {lastMessage && (
-            <div style={{
-              fontSize: '0.8rem',
-              color: '#4b5563',
-              backgroundColor: '#f3f4f6',
-              padding: '0.5rem 0.85rem',
-              borderRadius: '8px',
-              fontFamily: 'monospace'
-            }}>
-              Latest update received
-            </div>
-          )}
-        </div>
-      </div>
-    </div>
+        <aside className="right-rail"><section className="metric-card response-card"><small>AVG RESPONSE</small><strong>8.2 min</strong><span>Below target (10m)</span></section><section className="rail-section"><div className="unit-panel-heading"><PanelTitle title="ACTIVE RESCUE UNITS" badge={`${rescueUnits.rescuers.length + rescueUnits.vehicles.length} FOUND`} onClick={() => openModal('units')} /><select value={unitSort} onChange={(event) => setUnitSort(event.target.value)} aria-label="Sort rescue units"><option value="status">Sort: Status</option><option value="name">Sort: Name</option><option value="type">Sort: Type</option></select></div><div className="unit-list-label">RESCUER PROFILES</div>{sortedRescuers.length === 0 ? <p className="unit-empty">No rescuer profiles</p> : sortedRescuers.map((rescuer) => <Unit key={`rescuer-${rescuer.id}`} name={rescuer.full_name || rescuer.username} detail={`${rescuer.station_name || 'No station'} · @${rescuer.username}`} status={rescuer.status} />)}<div className="unit-list-label">VEHICLES</div>{sortedVehicles.length === 0 ? <p className="unit-empty">No vehicles</p> : sortedVehicles.map((vehicle) => <Unit key={`vehicle-${vehicle.id}`} name={`${vehicle.vehicle_type} · ${vehicle.plate_number}`} detail={`${vehicle.driver_name} · capacity ${vehicle.capacity}`} status={vehicle.status} />)}</section><section className="rail-section operational"><PanelTitle title="OPERATIONAL METRICS" /><Metric label="ACTIVE SOS" value={alertCount} note="+4 in last 10m" color="red" /><Metric label="DISPATCHED" value={`${rescueUnits.dispatched_count || 0} / ${rescueUnits.rescuer_count || 0}`} note="Rescuer profiles in transit" color="red" /><Metric label="RESCUED TODAY" value={rescueUnits.closed_alert_count || 0} note="Closed emergency alerts" color="green" /></section></aside>
+      </section>
+      <section className="alert-console"><PanelTitle title="ACTIVE ALERTS" badge={`${visibleAlerts.length} OPEN`} />{visibleAlerts.length === 0 ? <p>No active alerts.</p> : visibleAlerts.map((alert) => <div className="alert-row" key={alert.id}><b>{alert.sender_name}</b><span>{alert.message}</span><em>{alert.status}</em><><select value={selectedRescuerId} onChange={(event) => setSelectedRescuerId(event.target.value)}><option value="">Select rescuer</option>{rescuers.map((rescuer) => <option key={rescuer.id} value={rescuer.id}>{rescuer.display_name || rescuer.full_name || rescuer.username}</option>)}</select><button onClick={() => handleAssignAlert(alert.id)}>ASSIGN</button></></div>)}</section>
+      {activeModal && <div className="modal-backdrop" onClick={() => setActiveModal(null)}><section className="ops-modal" role="dialog" aria-modal="true" onClick={(event) => event.stopPropagation()}><div className="modal-header"><PanelTitle title={activeModal === 'alerts' ? 'ALL EMERGENCY ALERTS' : 'ACTIVE RESCUE UNITS'} badge="LIVE DATA" /><button className="modal-close" onClick={() => setActiveModal(null)} aria-label="Close modal">×</button></div>{modalLoading ? <p className="modal-empty">Loading live data...</p> : activeModal === 'alerts' ? <div className="modal-alert-list">{alerts.length === 0 ? <p className="modal-empty">No emergency alerts found.</p> : alerts.map((alert) => { const disasterType = alert.disaster_type || 'other'; return <div className="modal-alert" key={alert.id}><input type="checkbox" checked={selectedMergeIds.includes(alert.id)} onChange={() => toggleMergeAlert(alert.id)} aria-label={`Select alert ${alert.id} for merge`} /><span className={`sos-icon disaster-${disasterType}`}>{disasterIcons[disasterType] || disasterIcons.other}</span><div><b>{disasterLabels[disasterType] || 'Other'} · {(alert.severity || 'high').toUpperCase()}</b><small>{alert.sender_name} · {alert.message || 'No additional message'}</small></div><em>{alert.status}</em><div className="modal-alert-actions"><select value={selectedRescuerId} onChange={(event) => setSelectedRescuerId(event.target.value)} aria-label="Select rescuer"><option value="">Assign...</option>{rescuers.map((rescuer) => <option key={rescuer.id} value={rescuer.id}>{rescuer.display_name || rescuer.full_name || rescuer.username}</option>)}</select><button onClick={() => handleAssignAlert(alert.id)}>Assign</button><button onClick={() => setVerifiedAlert(alert)}>Verify</button></div>{verifiedAlert?.id === alert.id && <div className="verified-alert"><b>ALERT DETAILS</b><span>{alert.latitude}, {alert.longitude} · {formatTime(alert.created_at)}</span><small>{alert.message || 'No additional message provided.'}</small></div>}</div> })}<div className="merge-toolbar"><span>{selectedMergeIds.length} selected</span><button disabled={selectedMergeIds.length < 2} onClick={handleMergeAlerts}>Merge selected as duplicates</button></div></div> : <div className="modal-unit-grid"><div><h3>RESCUER PROFILES</h3>{rescueUnits.rescuers.length === 0 ? <p className="modal-empty">No rescuer profiles found.</p> : rescueUnits.rescuers.map((rescuer) => <div className="modal-unit" key={rescuer.id}><b>Profile #{rescuer.id}</b><span>{rescuer.status.replace('_', ' ')}</span><small>{rescuer.station_name || 'Unassigned station'}</small></div>)}</div><div><h3>VEHICLES</h3>{rescueUnits.vehicles.length === 0 ? <p className="modal-empty">No vehicles found.</p> : rescueUnits.vehicles.map((vehicle) => <div className="modal-unit" key={vehicle.id}><b>{vehicle.vehicle_type}</b><span>{vehicle.status}</span><small>{vehicle.plate_number} · {vehicle.driver_name}</small></div>)}</div></div>}</section></div>}
+      {assigningAlert && <div className="modal-backdrop" onClick={() => setAssigningAlert(null)}><section className="ops-modal assignment-modal" role="dialog" aria-modal="true" onClick={(event) => event.stopPropagation()}><div className="modal-header"><PanelTitle title="ASSIGN RESCUER" badge={`ALERT #${assigningAlert.id}`} /><button className="modal-close" onClick={() => setAssigningAlert(null)} aria-label="Close assignment modal">×</button></div><div className="assignment-body"><p>Select a rescuer profile for <b>{assigningAlert.sender_name}</b>.</p>{rescueUnits.rescuers.length === 0 ? <p className="modal-empty">No rescuer profiles found.</p> : rescueUnits.rescuers.map((rescuer) => <button className="rescuer-choice" key={rescuer.id} onClick={() => { setSelectedRescuerId(String(rescuer.user_id)); handleAssignAlert(assigningAlert.id); setAssigningAlert(null) }}><span><b>{rescuer.full_name || rescuer.username}</b><small>@{rescuer.username} · {rescuer.station_name || 'Unassigned station'}</small></span><em>{rescuer.status.replace('_', ' ')}</em></button>)}</div></section></div>}
+    </main>
   )
 }
+
+const PanelTitle = ({ title, badge, onClick }) => <div className={`panel-title ${onClick ? 'panel-title-clickable' : ''}`} onClick={onClick} onKeyDown={(event) => event.key === 'Enter' && onClick?.()} role={onClick ? 'button' : undefined} tabIndex={onClick ? 0 : undefined}><h2>{title}</h2>{badge && <span>{badge}</span>}</div>
+const Unit = ({ name, detail, status }) => <div className="unit-row"><div><b>{name}</b><small>{detail}</small></div><span className={`unit-status ${status.toLowerCase().replace(' ', '-')}`}>{status}</span></div>
+const Metric = ({ label, value, note, color }) => <div className="rail-metric"><small>{label}</small><strong className={color}>{value}</strong><span>{note}</span></div>
 
 export default Dashboard

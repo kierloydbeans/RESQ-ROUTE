@@ -8,6 +8,7 @@ class UserRole(str, Enum):
     ADMIN = "admin"
     RESCUER = "rescuer"
     COORDINATOR = "coordinator"
+    DISPATCHER = "dispatcher"
     CITIZEN = "citizen"
 
 class UserBase(SQLModel):
