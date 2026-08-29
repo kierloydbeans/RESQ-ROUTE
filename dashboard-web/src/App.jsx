@@ -16,8 +16,14 @@ const AppLayout = (props) => (
 )
 
 const ProtectedAdmin = () => {
-  const auth = localStorage.getItem('auth')
-  if (!auth) {
+  let auth = null
+  try {
+    auth = JSON.parse(localStorage.getItem('auth'))
+  } catch {
+    localStorage.removeItem('auth')
+  }
+
+  if (!auth?.token || !auth?.user?.role) {
     return <Navigate to="/login" replace />
   }
   return (
