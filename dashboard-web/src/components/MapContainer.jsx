@@ -3,6 +3,7 @@ import * as maplibregl from 'maplibre-gl'
 import 'maplibre-gl/dist/maplibre-gl.css'
 
 const DEFAULT_LOCATION = [120.98, 14.65]
+const VECTOR_STYLE_URL = import.meta.env.VITE_MAP_STYLE_URL || 'https://demotiles.maplibre.org/style.json'
 
 const normalizeCoordinates = (position) => {
   if (!Array.isArray(position) || position.length < 2) {
@@ -53,26 +54,13 @@ const MapContainer = ({ markers = [] }) => {
 
     mapRef.current = new maplibregl.Map({
       container: mapContainerRef.current,
-      style: {
-        version: 8,
-        sources: {
-          osm: {
-            type: 'raster',
-            tiles: ['https://tile.openstreetmap.org/{z}/{x}/{y}.png'],
-            tileSize: 256,
-            attribution: '© OpenStreetMap contributors',
-          },
-        },
-        layers: [
-          {
-            id: 'osm',
-            type: 'raster',
-            source: 'osm',
-          },
-        ],
-      },
+      style: VECTOR_STYLE_URL,
       center: DEFAULT_LOCATION,
       zoom: 13,
+    })
+
+    mapRef.current.on('error', (event) => {
+      console.error('Map vector style failed to load:', event.error || event)
     })
 
     mapRef.current.addControl(new maplibregl.NavigationControl(), 'top-right')
@@ -123,6 +111,14 @@ const MapContainer = ({ markers = [] }) => {
   }, [])
 
   useEffect(() => {
+    if (!mapContainerRef.current || !mapRef.current || typeof ResizeObserver === 'undefined') return undefined
+
+    const observer = new ResizeObserver(() => mapRef.current?.resize())
+    observer.observe(mapContainerRef.current)
+    return () => observer.disconnect()
+  }, [])
+
+  useEffect(() => {
     if (!mapRef.current) return
 
     markerInstancesRef.current.forEach((marker) => marker.remove())
@@ -142,7 +138,7 @@ const MapContainer = ({ markers = [] }) => {
   }, [markers])
 
   return (
-    <div style={{ height: '400px', width: '100%', position: 'relative', zIndex: 1 }}>
+    <div className="map-container" style={{ height: '100%', width: '100%', position: 'relative', zIndex: 1 }}>
       <div ref={mapContainerRef} style={{ height: '100%', width: '100%' }} />
     </div>
   )

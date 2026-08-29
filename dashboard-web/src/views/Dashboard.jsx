@@ -11,6 +11,8 @@ const getStoredAuth = () => {
   }
 }
 
+const normalizeRole = (role) => String(role?.value || role || '').toLowerCase().split('.').pop()
+
 // Convert http/https base URL to ws/wss dynamically
 const rawApiBase = (import.meta.env.VITE_API_URL || import.meta.env.VITE_API_BASE_URL || 'https://resq-route.onrender.com').replace(/\/$/, '')
 const API_BASE_URL = rawApiBase.endsWith('/api/v1') ? rawApiBase.replace(/\/api\/v1$/, '') : rawApiBase
@@ -34,9 +36,19 @@ const disasterLabels = {
   other: 'Other'
 }
 
+const distanceBetween = (firstLatitude, firstLongitude, secondLatitude, secondLongitude) => {
+  if ([firstLatitude, firstLongitude, secondLatitude, secondLongitude].some((value) => typeof value !== 'number')) return null
+  const earthRadiusKm = 6371
+  const latitudeDelta = (secondLatitude - firstLatitude) * Math.PI / 180
+  const longitudeDelta = (secondLongitude - firstLongitude) * Math.PI / 180
+  const a = Math.sin(latitudeDelta / 2) ** 2
+    + Math.cos(firstLatitude * Math.PI / 180) * Math.cos(secondLatitude * Math.PI / 180) * Math.sin(longitudeDelta / 2) ** 2
+  return earthRadiusKm * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
+}
+
 export const Dashboard = () => {
   const auth = getStoredAuth()
-  const role = auth?.user?.role?.toLowerCase?.() || 'citizen'
+  const role = normalizeRole(auth?.user?.role) || 'citizen'
   const rescuerId = auth?.user?.id
   const [latestGps, setLatestGps] = useState(null)
   const [alertMessage, setAlertMessage] = useState('')
@@ -54,6 +66,7 @@ export const Dashboard = () => {
   const [verifiedAlertState, setVerifiedAlertState] = useState(null)
   const [assigningAlert, setAssigningAlert] = useState(null)
   const [currentTime, setCurrentTime] = useState(() => new Date())
+  const [mapHeight, setMapHeight] = useState(375)
   const verifiedAlert = verifiedAlertState
   const setVerifiedAlert = (alert) => setVerifiedAlertState((current) => current?.id === alert?.id ? null : alert)
   const { isConnected, lastMessage } = useWebSocket(`${WS_BASE_URL}/api/v1/ws`)
@@ -269,6 +282,24 @@ export const Dashboard = () => {
     }
   }
 
+  const handleAcknowledgeAssignment = async (alertId) => {
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/v1/auth/alerts/${alertId}/acknowledge`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ user_id: rescuerId })
+      })
+      if (!response.ok) throw new Error('Unable to acknowledge assignment')
+      const refreshed = await fetch(`${API_BASE_URL}/api/v1/auth/alerts`)
+      if (refreshed.ok) setAlerts(await refreshed.json())
+      const units = await fetch(`${API_BASE_URL}/api/v1/auth/rescue-units`)
+      if (units.ok) setRescueUnits(await units.json())
+      setAlertStatus('Assignment acknowledged. You are now in transit.')
+    } catch (error) {
+      setAlertStatus(error.message)
+    }
+  }
+
   const toggleMergeAlert = (alertId) => {
     setSelectedMergeIds((currentIds) => currentIds.includes(alertId)
       ? currentIds.filter((id) => id !== alertId)
@@ -332,10 +363,37 @@ export const Dashboard = () => {
     second: '2-digit',
     hour12: false
   }).format(currentTime)
+
+  const handleMapResize = (clientY, mapTop) => {
+    const nextHeight = Math.min(720, Math.max(280, clientY - mapTop))
+    setMapHeight(nextHeight)
+  }
+
+  const startMapResize = (event) => {
+    event.preventDefault()
+    const mapTop = event.currentTarget.parentElement.getBoundingClientRect().top
+    const handleMouseMove = (moveEvent) => handleMapResize(moveEvent.clientY, mapTop)
+    const stopResize = () => {
+      window.removeEventListener('mousemove', handleMouseMove)
+      window.removeEventListener('mouseup', stopResize)
+    }
+    window.addEventListener('mousemove', handleMouseMove)
+    window.addEventListener('mouseup', stopResize)
+  }
   const sortedRescuers = [...rescueUnits.rescuers].sort((first, second) => {
     if (unitSort === 'name') return (first.full_name || first.username || '').localeCompare(second.full_name || second.username || '')
     return (first.status || '').localeCompare(second.status || '')
   })
+  const rankedAssignmentRescuers = assigningAlert
+    ? [...rescueUnits.rescuers].sort((first, second) => {
+      const firstAvailable = first.status === 'available' ? 0 : 1
+      const secondAvailable = second.status === 'available' ? 0 : 1
+      if (firstAvailable !== secondAvailable) return firstAvailable - secondAvailable
+      const firstDistance = distanceBetween(assigningAlert.latitude, assigningAlert.longitude, first.current_latitude, first.current_longitude) ?? Number.POSITIVE_INFINITY
+      const secondDistance = distanceBetween(assigningAlert.latitude, assigningAlert.longitude, second.current_latitude, second.current_longitude) ?? Number.POSITIVE_INFINITY
+      return firstDistance - secondDistance
+    })
+    : []
   const sortedVehicles = [...rescueUnits.vehicles].sort((first, second) => {
     if (unitSort === 'type') return (first.vehicle_type || '').localeCompare(second.vehicle_type || '')
     if (unitSort === 'name') return (first.driver_name || '').localeCompare(second.driver_name || '')
@@ -358,6 +416,15 @@ export const Dashboard = () => {
     )
   }
 
+  if (role === 'rescuer') {
+    return (
+      <main className="rescuer-console">
+        <header className="rescuer-header"><div className="brand-lockup"><Logo size="small" /><div><strong>RESQ-ROUTE</strong><span>RESCUE FIELD OPERATIONS</span></div></div><div className="header-actions"><span className={`connection ${isConnected ? 'online' : 'offline'}`}><i /> {isConnected ? 'Connected' : 'Reconnecting'}</span><span className="header-time">{formattedCurrentTime} PHT</span>{accountMenu}</div></header>
+        <section className="rescuer-content"><div className="rescuer-heading"><span className="eyebrow">FIELD UNIT · {displayName.toUpperCase()}</span><h1>Assignment queue</h1><p>Acknowledge a dispatch to confirm that you are moving to the incident.</p></div>{visibleAlerts.length === 0 ? <div className="rescuer-empty">No assignments are waiting.</div> : <div className="rescuer-assignment-grid">{visibleAlerts.map((alert) => <article className="rescuer-assignment" key={alert.id}><div className="rescuer-assignment-top"><span className="rescuer-signal">{disasterIcons[alert.disaster_type] || disasterIcons.other}</span><div><span className="card-kicker">NEW ASSIGNMENT · #{alert.id}</span><h2>{(alert.severity || 'high').toUpperCase()}</h2></div><span className="rescuer-status">{(alert.status || 'assigned').replace('_', ' ').toUpperCase()}</span></div><div className="rescuer-assignment-body"><div><small>LOCATION</small><strong>{alert.latitude?.toFixed?.(5) || 'Unknown'}, {alert.longitude?.toFixed?.(5) || 'Unknown'}</strong></div><div><small>INCIDENT</small><strong>{disasterLabels[alert.disaster_type] || 'Emergency'} · {alert.sender_name}</strong></div><div><small>INSTRUCTIONS</small><p>{alert.message || 'Proceed to the incident location and assess the situation.'}</p></div></div>{alert.status === 'assigned' ? <button className="rescuer-acknowledge" onClick={() => handleAcknowledgeAssignment(alert.id)}>ACKNOWLEDGE ASSIGNMENT</button> : <div className="rescuer-confirmed">ASSIGNMENT ACKNOWLEDGED · IN TRANSIT</div>}</article>)}</div>}{alertStatus && <p className="alert-status">{alertStatus}</p>}</section>
+      </main>
+    )
+  }
+
   if (role !== 'dispatcher') {
     return <main className="restricted-console"><Logo size="small" /><h1>Dispatcher access required</h1><p>This operations console is available only to dispatcher accounts.</p><button className="emergency-button" onClick={handleLogout}>RETURN TO LOGIN</button></main>
   }
@@ -373,13 +440,13 @@ export const Dashboard = () => {
       <section className="ops-grid">
         <aside className="feed-panel"><PanelTitle title="LIVE SOS FEED" badge="LIVE" onClick={() => openModal('alerts')} /><div className="feed-list">{(alerts.length ? alerts : [{ id: 1, sender_name: 'R. Corpuz', disaster_type: 'flood', severity: 'critical', message: 'Trapped near river', status: 'pending', created_at: null }, { id: 2, sender_name: 'M. Santos', disaster_type: 'medical', severity: 'high', message: 'Injury reported', status: 'pending', created_at: null }, { id: 3, sender_name: 'L. Mendoza', disaster_type: 'fire', severity: 'high', message: '', status: 'pending', created_at: null }]).slice(0, 5).map((alert) => { const disasterType = alert.disaster_type || 'other'; const severity = alert.severity || 'high'; return <article className="sos-item" key={alert.id}><div className="sos-meta"><span className={`severity ${severity}`}>{severity.toUpperCase()}</span><time>{formatTime(alert.created_at)} ago</time></div><div className="sos-person"><span className={`sos-icon disaster-${disasterType}`}>{disasterIcons[disasterType] || disasterIcons.other}</span><div><b>{alert.sender_name}</b><small>{disasterLabels[disasterType] || 'Other'}{alert.message ? ` · ${alert.message}` : ''}</small></div></div><div className="coordinates">14.5995° N, 120.9842° E</div><div className="sos-actions"><button onClick={() => handleAssignAlert(alert.id)}>ASSIGN</button><button>VERIFY</button><button>MERGE</button></div></article>})}</div></aside>
 
-        <section className="map-panel"><PanelTitle title="CDRRMO TACTICAL MAP AREA" badge="TRACKING MAP" /><div className="map-stage"><div className="map-coordinate">CENTER: 14.5995° N<br />LONG: 120.9842° E</div><div className="map-legend"><span><i className="dot red" /> UNASSIGNED INCIDENT</span><span><i className="dot amber" /> DISPATCHED UNIT</span><span><i className="dot green" /> RESCUER POSITION</span></div><MapContainer markers={role === 'citizen' ? mockMarkers : [...mockMarkers, ...alertMarkers]} /><div className="map-label label-alpha">●<span>ALPHA (14.59N)</span></div><div className="map-label label-sos">●<span>SOS #184</span></div><div className="map-label label-unit">●<span>UNIT BETA</span></div><div className="evac-label">♧ EVAC CENTER A (92%)<b /></div><span className="map-scale">SCALE: 1:25,000</span><span className="map-live">LIVE RADAR FEED [WSS_003]</span></div></section>
+        <section className="map-panel"><PanelTitle title="CDRRMO TACTICAL MAP AREA" badge="TRACKING MAP" /><div className="map-stage" style={{ height: `${mapHeight}px` }}><div className="map-coordinate">CENTER: 14.5995° N<br />LONG: 120.9842° E</div><div className="map-legend"><span><i className="dot red" /> UNASSIGNED INCIDENT</span><span><i className="dot amber" /> DISPATCHED UNIT</span><span><i className="dot green" /> RESCUER POSITION</span></div><MapContainer markers={role === 'citizen' ? mockMarkers : [...mockMarkers, ...alertMarkers]} /><div className="map-label label-alpha">●<span>ALPHA (14.59N)</span></div><div className="map-label label-sos">●<span>SOS #184</span></div><div className="map-label label-unit">●<span>UNIT BETA</span></div><div className="evac-label">♧ EVAC CENTER A (92%)<b /></div><span className="map-scale">SCALE: 1:25,000</span><span className="map-live">LIVE RADAR FEED [WSS_003]</span><button className="map-resize-handle" onMouseDown={startMapResize} aria-label="Drag to resize map" title="Drag to resize map">↕</button></div></section>
 
         <aside className="right-rail"><section className="metric-card response-card"><small>AVG RESPONSE</small><strong>8.2 min</strong><span>Below target (10m)</span></section><section className="rail-section"><div className="unit-panel-heading"><PanelTitle title="ACTIVE RESCUE UNITS" badge={`${rescueUnits.rescuers.length + rescueUnits.vehicles.length} FOUND`} onClick={() => openModal('units')} /><select value={unitSort} onChange={(event) => setUnitSort(event.target.value)} aria-label="Sort rescue units"><option value="status">Sort: Status</option><option value="name">Sort: Name</option><option value="type">Sort: Type</option></select></div><div className="unit-list-label">RESCUER PROFILES</div>{sortedRescuers.length === 0 ? <p className="unit-empty">No rescuer profiles</p> : sortedRescuers.map((rescuer) => <Unit key={`rescuer-${rescuer.id}`} name={rescuer.full_name || rescuer.username} detail={`${rescuer.station_name || 'No station'} · @${rescuer.username}`} status={rescuer.status} />)}<div className="unit-list-label">VEHICLES</div>{sortedVehicles.length === 0 ? <p className="unit-empty">No vehicles</p> : sortedVehicles.map((vehicle) => <Unit key={`vehicle-${vehicle.id}`} name={`${vehicle.vehicle_type} · ${vehicle.plate_number}`} detail={`${vehicle.driver_name} · capacity ${vehicle.capacity}`} status={vehicle.status} />)}</section><section className="rail-section operational"><PanelTitle title="OPERATIONAL METRICS" /><Metric label="ACTIVE SOS" value={alertCount} note="+4 in last 10m" color="red" /><Metric label="DISPATCHED" value={`${rescueUnits.dispatched_count || 0} / ${rescueUnits.rescuer_count || 0}`} note="Rescuer profiles in transit" color="red" /><Metric label="RESCUED TODAY" value={rescueUnits.closed_alert_count || 0} note="Closed emergency alerts" color="green" /></section></aside>
       </section>
       <section className="alert-console"><PanelTitle title="ACTIVE ALERTS" badge={`${visibleAlerts.length} OPEN`} />{visibleAlerts.length === 0 ? <p>No active alerts.</p> : visibleAlerts.map((alert) => <div className="alert-row" key={alert.id}><b>{alert.sender_name}</b><span>{alert.message}</span><em>{alert.status}</em><><select value={selectedRescuerId} onChange={(event) => setSelectedRescuerId(event.target.value)}><option value="">Select rescuer</option>{rescuers.map((rescuer) => <option key={rescuer.id} value={rescuer.id}>{rescuer.display_name || rescuer.full_name || rescuer.username}</option>)}</select><button onClick={() => handleAssignAlert(alert.id)}>ASSIGN</button></></div>)}</section>
       {activeModal && <div className="modal-backdrop" onClick={() => setActiveModal(null)}><section className="ops-modal" role="dialog" aria-modal="true" onClick={(event) => event.stopPropagation()}><div className="modal-header"><PanelTitle title={activeModal === 'alerts' ? 'ALL EMERGENCY ALERTS' : 'ACTIVE RESCUE UNITS'} badge="LIVE DATA" /><button className="modal-close" onClick={() => setActiveModal(null)} aria-label="Close modal">×</button></div>{modalLoading ? <p className="modal-empty">Loading live data...</p> : activeModal === 'alerts' ? <div className="modal-alert-list">{alerts.length === 0 ? <p className="modal-empty">No emergency alerts found.</p> : alerts.map((alert) => { const disasterType = alert.disaster_type || 'other'; return <div className="modal-alert" key={alert.id}><input type="checkbox" checked={selectedMergeIds.includes(alert.id)} onChange={() => toggleMergeAlert(alert.id)} aria-label={`Select alert ${alert.id} for merge`} /><span className={`sos-icon disaster-${disasterType}`}>{disasterIcons[disasterType] || disasterIcons.other}</span><div><b>{disasterLabels[disasterType] || 'Other'} · {(alert.severity || 'high').toUpperCase()}</b><small>{alert.sender_name} · {alert.message || 'No additional message'}</small></div><em>{alert.status}</em><div className="modal-alert-actions"><select value={selectedRescuerId} onChange={(event) => setSelectedRescuerId(event.target.value)} aria-label="Select rescuer"><option value="">Assign...</option>{rescuers.map((rescuer) => <option key={rescuer.id} value={rescuer.id}>{rescuer.display_name || rescuer.full_name || rescuer.username}</option>)}</select><button onClick={() => handleAssignAlert(alert.id)}>Assign</button><button onClick={() => setVerifiedAlert(alert)}>Verify</button></div>{verifiedAlert?.id === alert.id && <div className="verified-alert"><b>ALERT DETAILS</b><span>{alert.latitude}, {alert.longitude} · {formatTime(alert.created_at)}</span><small>{alert.message || 'No additional message provided.'}</small></div>}</div> })}<div className="merge-toolbar"><span>{selectedMergeIds.length} selected</span><button disabled={selectedMergeIds.length < 2} onClick={handleMergeAlerts}>Merge selected as duplicates</button></div></div> : <div className="modal-unit-grid"><div><h3>RESCUER PROFILES</h3>{rescueUnits.rescuers.length === 0 ? <p className="modal-empty">No rescuer profiles found.</p> : rescueUnits.rescuers.map((rescuer) => <div className="modal-unit" key={rescuer.id}><b>Profile #{rescuer.id}</b><span>{rescuer.status.replace('_', ' ')}</span><small>{rescuer.station_name || 'Unassigned station'}</small></div>)}</div><div><h3>VEHICLES</h3>{rescueUnits.vehicles.length === 0 ? <p className="modal-empty">No vehicles found.</p> : rescueUnits.vehicles.map((vehicle) => <div className="modal-unit" key={vehicle.id}><b>{vehicle.vehicle_type}</b><span>{vehicle.status}</span><small>{vehicle.plate_number} · {vehicle.driver_name}</small></div>)}</div></div>}</section></div>}
-      {assigningAlert && <div className="modal-backdrop" onClick={() => setAssigningAlert(null)}><section className="ops-modal assignment-modal" role="dialog" aria-modal="true" onClick={(event) => event.stopPropagation()}><div className="modal-header"><PanelTitle title="ASSIGN RESCUER" badge={`ALERT #${assigningAlert.id}`} /><button className="modal-close" onClick={() => setAssigningAlert(null)} aria-label="Close assignment modal">×</button></div><div className="assignment-body"><p>Select a rescuer profile for <b>{assigningAlert.sender_name}</b>.</p>{rescueUnits.rescuers.length === 0 ? <p className="modal-empty">No rescuer profiles found.</p> : rescueUnits.rescuers.map((rescuer) => <button className="rescuer-choice" key={rescuer.id} onClick={() => { setSelectedRescuerId(String(rescuer.user_id)); handleAssignAlert(assigningAlert.id); setAssigningAlert(null) }}><span><b>{rescuer.full_name || rescuer.username}</b><small>@{rescuer.username} · {rescuer.station_name || 'Unassigned station'}</small></span><em>{rescuer.status.replace('_', ' ')}</em></button>)}</div></section></div>}
+      {assigningAlert && <div className="modal-backdrop" onClick={() => setAssigningAlert(null)}><section className="ops-modal assignment-modal" role="dialog" aria-modal="true" onClick={(event) => event.stopPropagation()}><div className="modal-header"><PanelTitle title="ASSIGN RESCUER" badge={`ALERT #${assigningAlert.id}`} /><button className="modal-close" onClick={() => setAssigningAlert(null)} aria-label="Close assignment modal">×</button></div><div className="assignment-body"><p>Nearest available rescuers for <b>{assigningAlert.sender_name}</b>.</p>{rankedAssignmentRescuers.length === 0 ? <p className="modal-empty">No rescuer profiles found.</p> : rankedAssignmentRescuers.map((rescuer) => { const distance = distanceBetween(assigningAlert.latitude, assigningAlert.longitude, rescuer.current_latitude, rescuer.current_longitude); return <button className="rescuer-choice" key={rescuer.id} onClick={() => { setSelectedRescuerId(String(rescuer.user_id)); handleAssignAlert(assigningAlert.id); setAssigningAlert(null) }}><span><b>{rescuer.full_name || rescuer.username}</b><small>@{rescuer.username} · {rescuer.station_name || 'Unassigned station'}</small></span><em>{distance === null ? 'Distance unavailable' : `${distance.toFixed(1)} km away`} · {rescuer.status.replace('_', ' ')}</em></button> })}</div></section></div>}
     </main>
   )
 }
