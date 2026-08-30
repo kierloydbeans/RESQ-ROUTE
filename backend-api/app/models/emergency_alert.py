@@ -8,9 +8,6 @@ from sqlmodel import SQLModel, Field
 class AlertStatus(str, Enum):
     PENDING = "pending"
     ASSIGNED = "assigned"
-    ON_THE_WAY = "on_the_way"
-    ARRIVED = "arrived"
-    RETURNING = "returning"
     RESOLVING = "resolving"
     CLOSED = "closed"
 

@@ -246,6 +246,8 @@ async def list_rescue_units(session: AsyncSession = Depends(get_session)):
                 "capacity": vehicle.capacity,
                 "status": vehicle.status,
                 "center_id": vehicle.center_id,
+                "current_location_lat": vehicle.current_location_lat,
+                "current_location_lng": vehicle.current_location_lng,
             }
             for vehicle in vehicle_result.scalars().all()
         ],
@@ -374,7 +376,7 @@ async def acknowledge_alert(
         raise HTTPException(status_code=404, detail="Rescuer profile not found")
 
     profile.status = RescuerStatus.IN_TRANSIT
-    alert.status = AlertStatus.ON_THE_WAY
+    alert.status = AlertStatus.RESOLVING
     await session.commit()
     await session.refresh(alert)
     await telemetry_manager.broadcast({

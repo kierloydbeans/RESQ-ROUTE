@@ -1,9 +1,13 @@
 import React, { useEffect, useRef } from 'react'
 import * as maplibregl from 'maplibre-gl'
+import maplibreWorkerUrl from 'maplibre-gl/dist/maplibre-gl-worker.mjs?url'
 import 'maplibre-gl/dist/maplibre-gl.css'
 
 const DEFAULT_LOCATION = [120.98, 14.65]
 const VECTOR_STYLE_URL = import.meta.env.VITE_MAP_STYLE_URL || 'https://api.maptiler.com/maps/base-v4/style.json?key=mt7k9rWpGBUe5lFcSLZ1'
+
+maplibregl.setWorkerUrl(maplibreWorkerUrl)
+console.info('[RESQ map] MapLibre worker configured', { workerUrl: maplibreWorkerUrl })
 
 const resolveDirectTileSources = (style) => {
   const sources = Object.fromEntries(Object.entries(style.sources || {}).map(([sourceId, source]) => {
@@ -12,11 +16,34 @@ const resolveDirectTileSources = (style) => {
     }
 
     const tileUrl = source.url.replace('/tiles/v3/tiles.json', '/tiles/v3/{z}/{x}/{y}.pbf')
+    const { url, ...sourceWithoutTileJsonUrl } = source
     console.info('[RESQ map] Replacing TileJSON source with direct PBF template', { sourceId, tileUrl })
-    return [sourceId, { ...source, tiles: [tileUrl], url: undefined }]
+    return [sourceId, { ...sourceWithoutTileJsonUrl, tiles: [tileUrl] }]
   }))
 
-  return { ...style, sources }
+  const rasterUrl = VECTOR_STYLE_URL.replace(/\/style\.json(\?.*)?$/, '/{z}/{x}/{y}.png$1')
+  const backgroundIndex = style.layers.findIndex((layer) => layer.type === 'background')
+  const rasterLayer = {
+    id: 'resq-raster-fallback',
+    type: 'raster',
+    source: 'resq-raster-fallback',
+    layout: { visibility: 'none' },
+    paint: { 'raster-opacity': 1 },
+  }
+
+  console.info('[RESQ map] Configuring PNG fallback', { rasterUrl })
+  return {
+    ...style,
+    sources: {
+      ...sources,
+      'resq-raster-fallback': { type: 'raster', tiles: [rasterUrl], tileSize: 256 },
+    },
+    layers: [
+      ...style.layers.slice(0, backgroundIndex + 1),
+      rasterLayer,
+      ...style.layers.slice(backgroundIndex + 1),
+    ],
+  }
 }
 
 const normalizeCoordinates = (position) => {
@@ -46,27 +73,52 @@ const createMarkerElement = (color = '#dc2626', icon = null) => {
   el.style.height = icon ? '28px' : '16px'
   el.style.borderRadius = icon ? '50%' : '50%'
   el.style.background = icon ? '#fff7ed' : color
-  el.style.border = icon ? '2px solid #f59e0b' : '2px solid white'
+  el.style.border = icon ? `2px solid ${color}` : '2px solid white'
   el.style.boxShadow = '0 2px 6px rgba(0,0,0,0.3)'
-  el.style.color = icon ? '#b45309' : '#ffffff'
+  el.style.color = icon ? color : '#ffffff'
   el.style.fontSize = icon ? '16px' : '0'
   el.style.fontWeight = '700'
   el.textContent = icon || ''
   return el
 }
 
-const MapContainer = ({ markers = [] }) => {
+const MapContainer = ({ markers = [], route = null }) => {
   const mapContainerRef = useRef(null)
   const mapRef = useRef(null)
   const markerInstancesRef = useRef([])
   const deviceMarkerRef = useRef(null)
   const watchIdRef = useRef(null)
   const hasCenteredOnDeviceRef = useRef(false)
+  const markersRef = useRef(markers)
+  const routeRef = useRef(route)
+
+  const renderMarkers = (map, nextMarkers) => {
+    markerInstancesRef.current.forEach((marker) => marker.remove())
+    markerInstancesRef.current = []
+    nextMarkers.forEach((marker) => {
+      const [lng, lat] = normalizeCoordinates(marker.position)
+      markerInstancesRef.current.push(new maplibregl.Marker({ element: createMarkerElement(marker.color, marker.icon) })
+        .setLngLat([lng, lat])
+        .setPopup(new maplibregl.Popup({ offset: 25 }).setHTML(`<strong>${marker.label}</strong>`))
+        .addTo(map))
+    })
+  }
+
+  const updateRoute = (map, nextRoute) => {
+    routeRef.current = nextRoute
+    const source = map.getSource('citizen-route')
+    if (!source) return
+    source.setData(nextRoute || { type: 'FeatureCollection', features: [] })
+    if (!nextRoute?.coordinates?.length) return
+    const bounds = nextRoute.coordinates.reduce((currentBounds, coordinate) => currentBounds.extend(coordinate), new maplibregl.LngLatBounds(nextRoute.coordinates[0], nextRoute.coordinates[0]))
+    map.fitBounds(bounds, { padding: 70, maxZoom: 15, duration: 700 })
+  }
 
   useEffect(() => {
     if (!mapContainerRef.current || mapRef.current) return
 
     let disposed = false
+    let fallbackTimer = null
 
     const initializeMap = async () => {
       try {
@@ -92,12 +144,32 @@ const MapContainer = ({ markers = [] }) => {
           },
         })
         mapRef.current = map
+        let rasterFallbackShown = false
+        const enableRasterFallback = (reason) => {
+          if (rasterFallbackShown || !map.getLayer('resq-raster-fallback')) return
+          rasterFallbackShown = true
+          map.setLayoutProperty('resq-raster-fallback', 'visibility', 'visible')
+          console.warn('[RESQ map] Enabling PNG fallback', { reason })
+        }
+        map.resize()
+        console.info('[RESQ map] Map dimensions initialized', {
+          width: mapContainerRef.current.clientWidth,
+          height: mapContainerRef.current.clientHeight,
+        })
 
         map.on('load', () => {
+          if (fallbackTimer !== null) window.clearTimeout(fallbackTimer)
           map.resize()
           console.info('[RESQ map] Map loaded successfully', { sources: Object.keys(map.getStyle().sources || {}) })
+          map.addSource('citizen-route', { type: 'geojson', data: routeRef.current || { type: 'FeatureCollection', features: [] } })
+          map.addLayer({ id: 'citizen-route-line', type: 'line', source: 'citizen-route', paint: { 'line-color': '#50a8ff', 'line-width': 5, 'line-opacity': 0.9 } })
+          renderMarkers(map, markersRef.current)
+          if (routeRef.current) updateRoute(map, routeRef.current)
         })
         map.on('styledata', () => console.info('[RESQ map] Style data received'))
+        map.on('sourcedataloading', (event) => {
+          if (event.sourceId) console.debug('[RESQ map] Source data loading', { sourceId: event.sourceId })
+        })
         map.on('sourcedata', (event) => {
           if (event.sourceId) console.debug('[RESQ map] Source data received', {
             sourceId: event.sourceId,
@@ -105,12 +177,21 @@ const MapContainer = ({ markers = [] }) => {
             isSourceLoaded: event.isSourceLoaded,
           })
         })
-        map.on('error', (event) => console.error('[RESQ map] Resource failed', {
-          error: event.error || event,
-          resourceUrl: event.error?.url,
-        }))
+        map.on('idle', () => {
+          const loadedSources = Object.keys(map.getStyle().sources || {}).filter((sourceId) => map.isSourceLoaded(sourceId))
+          console.info('[RESQ map] Map idle', { loadedSources })
+          if (!loadedSources.includes('maptiler_planet')) enableRasterFallback('vector source is not loaded')
+        })
+        map.on('error', (event) => {
+          const resourceUrl = event.error?.url || ''
+          console.error('[RESQ map] Resource failed', { error: event.error || event, resourceUrl })
+          if (resourceUrl.includes('.pbf')) enableRasterFallback('PBF request failed')
+        })
         map.on('webglcontextlost', (event) => console.error('[RESQ map] WebGL context lost', event))
         map.addControl(new maplibregl.NavigationControl(), 'top-right')
+        fallbackTimer = window.setTimeout(() => {
+          if (!map.isSourceLoaded('maptiler_planet')) enableRasterFallback('vector source startup timeout')
+        }, 5000)
 
         if ('geolocation' in navigator) {
           watchIdRef.current = navigator.geolocation.watchPosition(
@@ -147,6 +228,7 @@ const MapContainer = ({ markers = [] }) => {
 
     return () => {
       disposed = true
+      if (fallbackTimer !== null) window.clearTimeout(fallbackTimer)
       if (watchIdRef.current !== null) {
         navigator.geolocation.clearWatch(watchIdRef.current)
       }
@@ -159,31 +241,33 @@ const MapContainer = ({ markers = [] }) => {
   }, [])
 
   useEffect(() => {
-    if (!mapContainerRef.current || !mapRef.current || typeof ResizeObserver === 'undefined') return undefined
+    if (!mapContainerRef.current || typeof ResizeObserver === 'undefined') return undefined
 
-    const observer = new ResizeObserver(() => mapRef.current?.resize())
+    const observer = new ResizeObserver(() => {
+      if (mapRef.current) {
+        mapRef.current.resize()
+        console.debug('[RESQ map] Map resized', {
+          width: mapContainerRef.current.clientWidth,
+          height: mapContainerRef.current.clientHeight,
+        })
+      }
+    })
     observer.observe(mapContainerRef.current)
     return () => observer.disconnect()
   }, [])
 
   useEffect(() => {
-    if (!mapRef.current) return
-
-    markerInstancesRef.current.forEach((marker) => marker.remove())
-    markerInstancesRef.current = []
-
-    const map = mapRef.current
-
-    markers.forEach((marker) => {
-      const [lng, lat] = normalizeCoordinates(marker.position)
-      const markerInstance = new maplibregl.Marker({ element: createMarkerElement(marker.color, marker.icon) })
-        .setLngLat([lng, lat])
-        .setPopup(new maplibregl.Popup({ offset: 25 }).setHTML(`<strong>${marker.label}</strong>`))
-        .addTo(map)
-
-      markerInstancesRef.current.push(markerInstance)
-    })
+    markersRef.current = markers
+    if (mapRef.current) renderMarkers(mapRef.current, markers)
   }, [markers])
+
+  useEffect(() => {
+    if (mapRef.current?.isStyleLoaded() && mapRef.current.getSource('citizen-route')) {
+      updateRoute(mapRef.current, route)
+    } else {
+      routeRef.current = route
+    }
+  }, [route])
 
   return (
     <div className="map-container" style={{ height: '100%', width: '100%', position: 'relative', zIndex: 1 }}>
