@@ -5,6 +5,20 @@ import 'maplibre-gl/dist/maplibre-gl.css'
 const DEFAULT_LOCATION = [120.98, 14.65]
 const VECTOR_STYLE_URL = import.meta.env.VITE_MAP_STYLE_URL || 'https://api.maptiler.com/maps/base-v4/style.json?key=mt7k9rWpGBUe5lFcSLZ1'
 
+const resolveDirectTileSources = (style) => {
+  const sources = Object.fromEntries(Object.entries(style.sources || {}).map(([sourceId, source]) => {
+    if (source.type !== 'vector' || !source.url?.includes('/tiles/v3/tiles.json')) {
+      return [sourceId, source]
+    }
+
+    const tileUrl = source.url.replace('/tiles/v3/tiles.json', '/tiles/v3/{z}/{x}/{y}.pbf')
+    console.info('[RESQ map] Replacing TileJSON source with direct PBF template', { sourceId, tileUrl })
+    return [sourceId, { ...source, tiles: [tileUrl], url: undefined }]
+  }))
+
+  return { ...style, sources }
+}
+
 const normalizeCoordinates = (position) => {
   if (!Array.isArray(position) || position.length < 2) {
     return DEFAULT_LOCATION
@@ -52,85 +66,87 @@ const MapContainer = ({ markers = [] }) => {
   useEffect(() => {
     if (!mapContainerRef.current || mapRef.current) return
 
-    console.info('[RESQ map] Initializing MapLibre', {
-      styleUrl: VECTOR_STYLE_URL,
-      location: window.location.href,
-      mode: import.meta.env.MODE,
-    })
+    let disposed = false
 
-    mapRef.current = new maplibregl.Map({
-      container: mapContainerRef.current,
-      style: VECTOR_STYLE_URL,
-      center: DEFAULT_LOCATION,
-      zoom: 13,
-      transformRequest: (url, resourceType) => {
-        const isVectorTile = resourceType === 'Tile' && url.includes('.pbf')
-        console.debug('[RESQ map] Requesting resource', { resourceType, url, isVectorTile })
-        return { url }
-      },
-    })
-
-    mapRef.current.on('load', () => {
-      console.info('[RESQ map] Map loaded successfully')
-    })
-    mapRef.current.on('styledata', () => {
-      console.info('[RESQ map] Style data received')
-    })
-    mapRef.current.on('sourcedata', (event) => {
-      if (event.sourceId) {
-        console.debug('[RESQ map] Source data received', {
-          sourceId: event.sourceId,
-          sourceDataType: event.sourceDataType,
-          isSourceLoaded: event.isSourceLoaded,
+    const initializeMap = async () => {
+      try {
+        console.info('[RESQ map] Fetching style', {
+          styleUrl: VECTOR_STYLE_URL,
+          location: window.location.href,
+          mode: import.meta.env.MODE,
         })
-      }
-    })
-    mapRef.current.on('error', (event) => {
-      console.error('[RESQ map] Resource failed', {
-        error: event.error || event,
-        resourceUrl: event.error?.url,
-      })
-    })
-    mapRef.current.on('webglcontextlost', (event) => {
-      console.error('[RESQ map] WebGL context lost', event)
-    })
+        const response = await fetch(VECTOR_STYLE_URL)
+        if (!response.ok) throw new Error(`Style request failed with HTTP ${response.status}`)
+        const style = resolveDirectTileSources(await response.json())
+        if (disposed) return
 
-    mapRef.current.addControl(new maplibregl.NavigationControl(), 'top-right')
+        const map = new maplibregl.Map({
+          container: mapContainerRef.current,
+          style,
+          center: DEFAULT_LOCATION,
+          zoom: 13,
+          transformRequest: (url, resourceType) => {
+            const isVectorTile = resourceType === 'Tile' && url.includes('.pbf')
+            console.debug('[RESQ map] Requesting resource', { resourceType, url, isVectorTile })
+            return { url }
+          },
+        })
+        mapRef.current = map
 
-    if ('geolocation' in navigator) {
-      watchIdRef.current = navigator.geolocation.watchPosition(
-        (position) => {
-          const lng = position.coords.longitude
-          const lat = position.coords.latitude
+        map.on('load', () => {
+          map.resize()
+          console.info('[RESQ map] Map loaded successfully', { sources: Object.keys(map.getStyle().sources || {}) })
+        })
+        map.on('styledata', () => console.info('[RESQ map] Style data received'))
+        map.on('sourcedata', (event) => {
+          if (event.sourceId) console.debug('[RESQ map] Source data received', {
+            sourceId: event.sourceId,
+            sourceDataType: event.sourceDataType,
+            isSourceLoaded: event.isSourceLoaded,
+          })
+        })
+        map.on('error', (event) => console.error('[RESQ map] Resource failed', {
+          error: event.error || event,
+          resourceUrl: event.error?.url,
+        }))
+        map.on('webglcontextlost', (event) => console.error('[RESQ map] WebGL context lost', event))
+        map.addControl(new maplibregl.NavigationControl(), 'top-right')
 
-          if (!mapRef.current) return
+        if ('geolocation' in navigator) {
+          watchIdRef.current = navigator.geolocation.watchPosition(
+            (position) => {
+              const lng = position.coords.longitude
+              const lat = position.coords.latitude
 
-          if (!deviceMarkerRef.current) {
-            deviceMarkerRef.current = new maplibregl.Marker({ element: createMarkerElement('#0f766e') })
-              .setLngLat([lng, lat])
-              .setPopup(new maplibregl.Popup({ offset: 25 }).setText('Current device location'))
-              .addTo(mapRef.current)
-          } else {
-            deviceMarkerRef.current.setLngLat([lng, lat])
-          }
+              if (!mapRef.current) return
 
-          if (!hasCenteredOnDeviceRef.current) {
-            mapRef.current.flyTo({ center: [lng, lat], zoom: 14, speed: 0.7 })
-            hasCenteredOnDeviceRef.current = true
-          }
-        },
-        (error) => {
-          console.warn('Geolocation watch failed:', error.message)
-        },
-        {
-          enableHighAccuracy: true,
-          maximumAge: 5000,
-          timeout: 10000,
+              if (!deviceMarkerRef.current) {
+                deviceMarkerRef.current = new maplibregl.Marker({ element: createMarkerElement('#0f766e') })
+                  .setLngLat([lng, lat])
+                  .setPopup(new maplibregl.Popup({ offset: 25 }).setText('Current device location'))
+                  .addTo(mapRef.current)
+              } else {
+                deviceMarkerRef.current.setLngLat([lng, lat])
+              }
+
+              if (!hasCenteredOnDeviceRef.current) {
+                mapRef.current.flyTo({ center: [lng, lat], zoom: 14, speed: 0.7 })
+                hasCenteredOnDeviceRef.current = true
+              }
+            },
+            (error) => console.warn('Geolocation watch failed:', error.message),
+            { enableHighAccuracy: true, maximumAge: 5000, timeout: 10000 }
+          )
         }
-      )
+      } catch (error) {
+        console.error('[RESQ map] Map initialization failed', error)
+      }
     }
 
+    initializeMap()
+
     return () => {
+      disposed = true
       if (watchIdRef.current !== null) {
         navigator.geolocation.clearWatch(watchIdRef.current)
       }
