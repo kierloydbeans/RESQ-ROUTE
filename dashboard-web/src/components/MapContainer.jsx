@@ -3,7 +3,7 @@ import * as maplibregl from 'maplibre-gl'
 import 'maplibre-gl/dist/maplibre-gl.css'
 
 const DEFAULT_LOCATION = [120.98, 14.65]
-const VECTOR_STYLE_URL = import.meta.env.VITE_MAP_STYLE_URL || 'https://demotiles.maplibre.org/style.json'
+const VECTOR_STYLE_URL = import.meta.env.VITE_MAP_STYLE_URL || 'https://api.maptiler.com/maps/base-v4/style.json?key=mt7k9rWpGBUe5lFcSLZ1'
 
 const normalizeCoordinates = (position) => {
   if (!Array.isArray(position) || position.length < 2) {
@@ -52,15 +52,47 @@ const MapContainer = ({ markers = [] }) => {
   useEffect(() => {
     if (!mapContainerRef.current || mapRef.current) return
 
+    console.info('[RESQ map] Initializing MapLibre', {
+      styleUrl: VECTOR_STYLE_URL,
+      location: window.location.href,
+      mode: import.meta.env.MODE,
+    })
+
     mapRef.current = new maplibregl.Map({
       container: mapContainerRef.current,
       style: VECTOR_STYLE_URL,
       center: DEFAULT_LOCATION,
       zoom: 13,
+      transformRequest: (url, resourceType) => {
+        const isVectorTile = resourceType === 'Tile' && url.includes('.pbf')
+        console.debug('[RESQ map] Requesting resource', { resourceType, url, isVectorTile })
+        return { url }
+      },
     })
 
+    mapRef.current.on('load', () => {
+      console.info('[RESQ map] Map loaded successfully')
+    })
+    mapRef.current.on('styledata', () => {
+      console.info('[RESQ map] Style data received')
+    })
+    mapRef.current.on('sourcedata', (event) => {
+      if (event.sourceId) {
+        console.debug('[RESQ map] Source data received', {
+          sourceId: event.sourceId,
+          sourceDataType: event.sourceDataType,
+          isSourceLoaded: event.isSourceLoaded,
+        })
+      }
+    })
     mapRef.current.on('error', (event) => {
-      console.error('Map vector style failed to load:', event.error || event)
+      console.error('[RESQ map] Resource failed', {
+        error: event.error || event,
+        resourceUrl: event.error?.url,
+      })
+    })
+    mapRef.current.on('webglcontextlost', (event) => {
+      console.error('[RESQ map] WebGL context lost', event)
     })
 
     mapRef.current.addControl(new maplibregl.NavigationControl(), 'top-right')
