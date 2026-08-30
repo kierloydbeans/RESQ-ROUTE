@@ -11,7 +11,7 @@ const Logo = ({ size = 'medium' }) => {
 
   return (
     <img 
-      src="/logo.png" 
+      src="../assets/resq-route-logo.png" 
       alt="ResQ-Route Logo" 
       style={{ 
         height: currentSize.height,
