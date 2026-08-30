@@ -93,6 +93,11 @@ const MapContainer = ({ markers = [] }) => {
           },
         })
         mapRef.current = map
+        map.resize()
+        console.info('[RESQ map] Map dimensions initialized', {
+          width: mapContainerRef.current.clientWidth,
+          height: mapContainerRef.current.clientHeight,
+        })
 
         map.on('load', () => {
           map.resize()
@@ -166,9 +171,17 @@ const MapContainer = ({ markers = [] }) => {
   }, [])
 
   useEffect(() => {
-    if (!mapContainerRef.current || !mapRef.current || typeof ResizeObserver === 'undefined') return undefined
+    if (!mapContainerRef.current || typeof ResizeObserver === 'undefined') return undefined
 
-    const observer = new ResizeObserver(() => mapRef.current?.resize())
+    const observer = new ResizeObserver(() => {
+      if (mapRef.current) {
+        mapRef.current.resize()
+        console.debug('[RESQ map] Map resized', {
+          width: mapContainerRef.current.clientWidth,
+          height: mapContainerRef.current.clientHeight,
+        })
+      }
+    })
     observer.observe(mapContainerRef.current)
     return () => observer.disconnect()
   }, [])
