@@ -21,7 +21,29 @@ const resolveDirectTileSources = (style) => {
     return [sourceId, { ...sourceWithoutTileJsonUrl, tiles: [tileUrl] }]
   }))
 
-  return { ...style, sources }
+  const rasterUrl = VECTOR_STYLE_URL.replace(/\/style\.json(\?.*)?$/, '/{z}/{x}/{y}.png$1')
+  const backgroundIndex = style.layers.findIndex((layer) => layer.type === 'background')
+  const rasterLayer = {
+    id: 'resq-raster-fallback',
+    type: 'raster',
+    source: 'resq-raster-fallback',
+    layout: { visibility: 'none' },
+    paint: { 'raster-opacity': 1 },
+  }
+
+  console.info('[RESQ map] Configuring PNG fallback', { rasterUrl })
+  return {
+    ...style,
+    sources: {
+      ...sources,
+      'resq-raster-fallback': { type: 'raster', tiles: [rasterUrl], tileSize: 256 },
+    },
+    layers: [
+      ...style.layers.slice(0, backgroundIndex + 1),
+      rasterLayer,
+      ...style.layers.slice(backgroundIndex + 1),
+    ],
+  }
 }
 
 const normalizeCoordinates = (position) => {
@@ -72,6 +94,7 @@ const MapContainer = ({ markers = [] }) => {
     if (!mapContainerRef.current || mapRef.current) return
 
     let disposed = false
+    let fallbackTimer = null
 
     const initializeMap = async () => {
       try {
@@ -97,6 +120,13 @@ const MapContainer = ({ markers = [] }) => {
           },
         })
         mapRef.current = map
+        let rasterFallbackShown = false
+        const enableRasterFallback = (reason) => {
+          if (rasterFallbackShown || !map.getLayer('resq-raster-fallback')) return
+          rasterFallbackShown = true
+          map.setLayoutProperty('resq-raster-fallback', 'visibility', 'visible')
+          console.warn('[RESQ map] Enabling PNG fallback', { reason })
+        }
         map.resize()
         console.info('[RESQ map] Map dimensions initialized', {
           width: mapContainerRef.current.clientWidth,
@@ -104,6 +134,7 @@ const MapContainer = ({ markers = [] }) => {
         })
 
         map.on('load', () => {
+          if (fallbackTimer !== null) window.clearTimeout(fallbackTimer)
           map.resize()
           console.info('[RESQ map] Map loaded successfully', { sources: Object.keys(map.getStyle().sources || {}) })
         })
@@ -118,15 +149,21 @@ const MapContainer = ({ markers = [] }) => {
             isSourceLoaded: event.isSourceLoaded,
           })
         })
-        map.on('idle', () => console.info('[RESQ map] Map idle', {
-          loadedSources: Object.keys(map.getStyle().sources || {}).filter((sourceId) => map.isSourceLoaded(sourceId)),
-        }))
-        map.on('error', (event) => console.error('[RESQ map] Resource failed', {
-          error: event.error || event,
-          resourceUrl: event.error?.url,
-        }))
+        map.on('idle', () => {
+          const loadedSources = Object.keys(map.getStyle().sources || {}).filter((sourceId) => map.isSourceLoaded(sourceId))
+          console.info('[RESQ map] Map idle', { loadedSources })
+          if (!loadedSources.includes('maptiler_planet')) enableRasterFallback('vector source is not loaded')
+        })
+        map.on('error', (event) => {
+          const resourceUrl = event.error?.url || ''
+          console.error('[RESQ map] Resource failed', { error: event.error || event, resourceUrl })
+          if (resourceUrl.includes('.pbf')) enableRasterFallback('PBF request failed')
+        })
         map.on('webglcontextlost', (event) => console.error('[RESQ map] WebGL context lost', event))
         map.addControl(new maplibregl.NavigationControl(), 'top-right')
+        fallbackTimer = window.setTimeout(() => {
+          if (!map.isSourceLoaded('maptiler_planet')) enableRasterFallback('vector source startup timeout')
+        }, 5000)
 
         if ('geolocation' in navigator) {
           watchIdRef.current = navigator.geolocation.watchPosition(
@@ -163,6 +200,7 @@ const MapContainer = ({ markers = [] }) => {
 
     return () => {
       disposed = true
+      if (fallbackTimer !== null) window.clearTimeout(fallbackTimer)
       if (watchIdRef.current !== null) {
         navigator.geolocation.clearWatch(watchIdRef.current)
       }
