@@ -1,9 +1,13 @@
 import React, { useEffect, useRef } from 'react'
 import * as maplibregl from 'maplibre-gl'
+import maplibreWorkerUrl from 'maplibre-gl/dist/maplibre-gl-worker.mjs?url'
 import 'maplibre-gl/dist/maplibre-gl.css'
 
 const DEFAULT_LOCATION = [120.98, 14.65]
 const VECTOR_STYLE_URL = import.meta.env.VITE_MAP_STYLE_URL || 'https://api.maptiler.com/maps/base-v4/style.json?key=mt7k9rWpGBUe5lFcSLZ1'
+
+maplibregl.setWorkerUrl(maplibreWorkerUrl)
+console.info('[RESQ map] MapLibre worker configured', { workerUrl: maplibreWorkerUrl })
 
 const resolveDirectTileSources = (style) => {
   const sources = Object.fromEntries(Object.entries(style.sources || {}).map(([sourceId, source]) => {
