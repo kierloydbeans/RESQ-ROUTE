@@ -12,6 +12,10 @@ const getStoredAuth = () => {
 }
 
 const normalizeRole = (role) => String(role?.value || role || '').toLowerCase().split('.').pop()
+const statusLabel = (status) => String(status || 'unknown').replace(/_/g, ' ').toUpperCase()
+const alertMarkerColors = { pending: '#dc2626', assigned: '#f59e0b', resolving: '#2563eb', closed: '#dc2626' }
+const rescuerMarkerColors = { available: '#00d6a0', recovering: '#f59e0b', in_transit: '#2563eb' }
+const vehicleMarkerColors = { available: '#00d6a0', in_transit: '#2563eb', maintenance: '#dc2626' }
 
 // Convert http/https base URL to ws/wss dynamically
 const rawApiBase = (import.meta.env.VITE_API_URL || import.meta.env.VITE_API_BASE_URL || 'https://resq-route.onrender.com').replace(/\/$/, '')
@@ -54,6 +58,7 @@ export const Dashboard = () => {
   const [alertMessage, setAlertMessage] = useState('')
   const [alertStatus, setAlertStatus] = useState('')
   const [alerts, setAlerts] = useState([])
+  const [centers, setCenters] = useState([])
   const [rescuers, setRescuers] = useState([])
   const [selectedRescuerId, setSelectedRescuerId] = useState('')
   const [selectedIncident, setSelectedIncident] = useState('')
@@ -175,9 +180,19 @@ export const Dashboard = () => {
       }
     }
 
+    const loadCenters = async () => {
+      try {
+        const response = await fetch(`${API_BASE_URL}/api/v1/shelters/?limit=100`)
+        if (response.ok) setCenters(await response.json())
+      } catch (error) {
+        console.error('Failed to load evacuation centers', error)
+      }
+    }
+
     loadAlerts()
     loadRescuers()
     loadRescueUnits()
+    loadCenters()
   }, [API_BASE_URL])
 
   const handleSendEmergencyAlert = async () => {
@@ -324,29 +339,44 @@ export const Dashboard = () => {
     }
   }
 
-  const mockStats = {
-    totalEvacuees: 1250,
-    capacityUsed: 78,
-    activeShelters: 12,
-    criticalNeeds: 5
-  }
-
-  const mockMarkers = [
-    { position: [14.65, 120.98], label: 'Caloocan City Hall Shelter' },
-    { position: [14.66, 120.99], label: 'Bagong Silang Evacuation Center' },
-    { position: [14.64, 120.97], label: 'Tala High School Shelter' }
-  ]
+  const centerMarkers = centers.filter((center) => center.is_active !== false).map((center) => {
+    const occupancy = center.capacity > 0 ? Math.round((center.current_occupancy / center.capacity) * 100) : 0
+    return {
+      position: [center.longitude, center.latitude],
+      label: `${center.name} · ${occupancy}% occupied`,
+      color: occupancy >= 90 ? '#dc2626' : occupancy >= 75 ? '#f59e0b' : '#00d6a0',
+      icon: '⌂'
+    }
+  })
 
   const alertMarkers = alerts.map((alert) => ({
     position: [alert.longitude, alert.latitude],
-    label: `${alert.sender_name} • ${alert.status}`,
-    color: alert.status === 'assigned' ? '#2563eb' : '#dc2626',
+    label: `${alert.sender_name} · ${statusLabel(alert.status)}`,
+    color: alertMarkerColors[alert.status] || '#dc2626',
     icon: '⚠'
   }))
 
+  const rescuerMarkers = rescueUnits.rescuers.filter((rescuer) => rescuer.current_latitude !== null && rescuer.current_longitude !== null).map((rescuer) => ({
+    position: [rescuer.current_longitude, rescuer.current_latitude],
+    label: `${rescuer.full_name || rescuer.username} · ${statusLabel(rescuer.status)}`,
+    color: rescuerMarkerColors[rescuer.status] || '#00d6a0',
+    icon: '♟'
+  }))
+
+  const vehicleMarkers = rescueUnits.vehicles.filter((vehicle) => vehicle.current_location_lat !== null && vehicle.current_location_lng !== null).map((vehicle) => ({
+    position: [vehicle.current_location_lng, vehicle.current_location_lat],
+    label: `${vehicle.vehicle_type} ${vehicle.plate_number} · ${statusLabel(vehicle.status)}`,
+    color: vehicleMarkerColors[vehicle.status] || '#64748b',
+    icon: '▣'
+  }))
+
+  const mapMarkers = [...centerMarkers, ...alertMarkers, ...rescuerMarkers, ...vehicleMarkers]
+  const primaryCenter = centers.find((center) => center.is_active !== false) || centers[0]
+  const primaryOccupancy = primaryCenter?.capacity > 0 ? Math.round((primaryCenter.current_occupancy / primaryCenter.capacity) * 100) : 0
+
   const displayName = auth?.user?.full_name || auth?.user?.username || 'Cmdr. Reyes'
   const visibleAlerts = role === 'rescuer' ? alerts.filter((alert) => alert.assigned_rescuer_id === rescuerId) : alerts
-  const alertCount = alerts.length || 24
+  const alertCount = alerts.length
   const [isDark, setIsDark] = useState(() => localStorage.getItem('resq-theme') !== 'light')
   const [accountMenuOpen, setAccountMenuOpen] = useState(false)
 
@@ -438,9 +468,9 @@ export const Dashboard = () => {
       <div className="incident-ticker"><b>CITIZEN HAZARD STREAM</b><span>[14:31] Sector 2: Fallen heavy billboard blocking flood artery road</span><span>[14:28] Sector 5: Deep flood level, exceeding 1.5m at Melchor Crossing</span><span>[14:25] Sector 1: Downed power line reported</span></div>
 
       <section className="ops-grid">
-        <aside className="feed-panel"><PanelTitle title="LIVE SOS FEED" badge="LIVE" onClick={() => openModal('alerts')} /><div className="feed-list">{(alerts.length ? alerts : [{ id: 1, sender_name: 'R. Corpuz', disaster_type: 'flood', severity: 'critical', message: 'Trapped near river', status: 'pending', created_at: null }, { id: 2, sender_name: 'M. Santos', disaster_type: 'medical', severity: 'high', message: 'Injury reported', status: 'pending', created_at: null }, { id: 3, sender_name: 'L. Mendoza', disaster_type: 'fire', severity: 'high', message: '', status: 'pending', created_at: null }]).slice(0, 5).map((alert) => { const disasterType = alert.disaster_type || 'other'; const severity = alert.severity || 'high'; return <article className="sos-item" key={alert.id}><div className="sos-meta"><span className={`severity ${severity}`}>{severity.toUpperCase()}</span><time>{formatTime(alert.created_at)} ago</time></div><div className="sos-person"><span className={`sos-icon disaster-${disasterType}`}>{disasterIcons[disasterType] || disasterIcons.other}</span><div><b>{alert.sender_name}</b><small>{disasterLabels[disasterType] || 'Other'}{alert.message ? ` · ${alert.message}` : ''}</small></div></div><div className="coordinates">14.5995° N, 120.9842° E</div><div className="sos-actions"><button onClick={() => handleAssignAlert(alert.id)}>ASSIGN</button><button>VERIFY</button><button>MERGE</button></div></article>})}</div></aside>
+        <aside className="feed-panel"><PanelTitle title="LIVE SOS FEED" badge="LIVE" onClick={() => openModal('alerts')} /><div className="feed-list">{alerts.slice(0, 5).map((alert) => { const disasterType = alert.disaster_type || 'other'; const severity = alert.severity || 'high'; return <article className="sos-item" key={alert.id}><div className="sos-meta"><span className={`severity ${severity}`}>{severity.toUpperCase()}</span><time>{formatTime(alert.created_at)} ago</time></div><div className="sos-person"><span className={`sos-icon disaster-${disasterType}`}>{disasterIcons[disasterType] || disasterIcons.other}</span><div><b>{alert.sender_name}</b><small>{disasterLabels[disasterType] || 'Other'} · {statusLabel(alert.status)}{alert.message ? ` · ${alert.message}` : ''}</small></div></div><div className="coordinates">{alert.latitude?.toFixed?.(5) || 'Unknown'}° N, {alert.longitude?.toFixed?.(5) || 'Unknown'}° E</div><div className="sos-actions"><button onClick={() => handleAssignAlert(alert.id)}>ASSIGN</button><button>VERIFY</button><button>MERGE</button></div></article>})}</div></aside>
 
-        <section className="map-panel"><PanelTitle title="CDRRMO TACTICAL MAP AREA" badge="TRACKING MAP" /><div className="map-stage" style={{ height: `${mapHeight}px` }}><div className="map-coordinate">CENTER: 14.5995° N<br />LONG: 120.9842° E</div><div className="map-legend"><span><i className="dot red" /> UNASSIGNED INCIDENT</span><span><i className="dot amber" /> DISPATCHED UNIT</span><span><i className="dot green" /> RESCUER POSITION</span></div><MapContainer markers={role === 'citizen' ? mockMarkers : [...mockMarkers, ...alertMarkers]} /><div className="map-label label-alpha">●<span>ALPHA (14.59N)</span></div><div className="map-label label-sos">●<span>SOS #184</span></div><div className="map-label label-unit">●<span>UNIT BETA</span></div><div className="evac-label">♧ EVAC CENTER A (92%)<b /></div><span className="map-scale">SCALE: 1:25,000</span><span className="map-live">LIVE RADAR FEED [WSS_003]</span><button className="map-resize-handle" onMouseDown={startMapResize} aria-label="Drag to resize map" title="Drag to resize map">↕</button></div></section>
+        <section className="map-panel"><PanelTitle title="CDRRMO TACTICAL MAP AREA" badge="TRACKING MAP" /><div className="map-stage" style={{ height: `${mapHeight}px` }}><DraggableMapOverlay className="map-coordinate" label="Map center coordinates" defaultPosition={{ left: 12, top: 12 }}>{primaryCenter ? <>CENTER: {Number(primaryCenter.latitude).toFixed(5)}° N<br />LONG: {Number(primaryCenter.longitude).toFixed(5)}° E</> : 'CENTER: NO ACTIVE CENTER'}</DraggableMapOverlay><DraggableMapOverlay className="map-legend" label="Map legend" defaultPosition={{ right: 12, top: 12 }}><span><i className="dot red" /> PENDING / CLOSED ALERT</span><span><i className="dot amber" /> ASSIGNED / RECOVERING</span><span><i className="dot green" /> AVAILABLE / CENTER</span><span><i className="dot blue" /> RESOLVING / IN TRANSIT</span></DraggableMapOverlay><MapContainer markers={mapMarkers} />{primaryCenter && <DraggableMapOverlay className="evac-label" label="Evacuation center status" defaultPosition={{ left: 580, top: 164 }}>♧ {primaryCenter.name} ({primaryOccupancy}%)<b /></DraggableMapOverlay>}<DraggableMapOverlay className="map-scale" label="Map scale" defaultPosition={{ left: 12, top: 340 }}>SCALE: 1:25,000</DraggableMapOverlay><DraggableMapOverlay className="map-live" label="Live radar feed status" defaultPosition={{ left: 600, top: 340 }}>LIVE RADAR FEED [WSS_003]</DraggableMapOverlay><button className="map-resize-handle" onMouseDown={startMapResize} aria-label="Drag to resize map" title="Drag to resize map">↕</button></div></section>
 
         <aside className="right-rail"><section className="metric-card response-card"><small>AVG RESPONSE</small><strong>8.2 min</strong><span>Below target (10m)</span></section><section className="rail-section"><div className="unit-panel-heading"><PanelTitle title="ACTIVE RESCUE UNITS" badge={`${rescueUnits.rescuers.length + rescueUnits.vehicles.length} FOUND`} onClick={() => openModal('units')} /><select value={unitSort} onChange={(event) => setUnitSort(event.target.value)} aria-label="Sort rescue units"><option value="status">Sort: Status</option><option value="name">Sort: Name</option><option value="type">Sort: Type</option></select></div><div className="unit-list-label">RESCUER PROFILES</div>{sortedRescuers.length === 0 ? <p className="unit-empty">No rescuer profiles</p> : sortedRescuers.map((rescuer) => <Unit key={`rescuer-${rescuer.id}`} name={rescuer.full_name || rescuer.username} detail={`${rescuer.station_name || 'No station'} · @${rescuer.username}`} status={rescuer.status} />)}<div className="unit-list-label">VEHICLES</div>{sortedVehicles.length === 0 ? <p className="unit-empty">No vehicles</p> : sortedVehicles.map((vehicle) => <Unit key={`vehicle-${vehicle.id}`} name={`${vehicle.vehicle_type} · ${vehicle.plate_number}`} detail={`${vehicle.driver_name} · capacity ${vehicle.capacity}`} status={vehicle.status} />)}</section><section className="rail-section operational"><PanelTitle title="OPERATIONAL METRICS" /><Metric label="ACTIVE SOS" value={alertCount} note="+4 in last 10m" color="red" /><Metric label="DISPATCHED" value={`${rescueUnits.dispatched_count || 0} / ${rescueUnits.rescuer_count || 0}`} note="Rescuer profiles in transit" color="red" /><Metric label="RESCUED TODAY" value={rescueUnits.closed_alert_count || 0} note="Closed emergency alerts" color="green" /></section></aside>
       </section>
@@ -451,8 +481,48 @@ export const Dashboard = () => {
   )
 }
 
+const DraggableMapOverlay = ({ className, label, defaultPosition, children }) => {
+  const [position, setPosition] = useState(defaultPosition)
+  const dragRef = React.useRef(null)
+
+  const moveOverlay = (clientX, clientY) => {
+    const mapBounds = dragRef.current?.parentElement?.getBoundingClientRect()
+    if (!mapBounds) return
+    const overlayBounds = dragRef.current.getBoundingClientRect()
+    const left = Math.max(0, Math.min(mapBounds.width - overlayBounds.width, clientX - mapBounds.left))
+    const top = Math.max(0, Math.min(mapBounds.height - overlayBounds.height, clientY - mapBounds.top))
+    setPosition({ left, top })
+  }
+
+  const handlePointerDown = (event) => {
+    event.currentTarget.setPointerCapture(event.pointerId)
+    const move = (moveEvent) => moveOverlay(moveEvent.clientX, moveEvent.clientY)
+    const stop = () => {
+      event.currentTarget.removeEventListener('pointermove', move)
+      event.currentTarget.removeEventListener('pointerup', stop)
+    }
+    event.currentTarget.addEventListener('pointermove', move)
+    event.currentTarget.addEventListener('pointerup', stop)
+  }
+
+  const handleKeyDown = (event) => {
+    const distance = event.shiftKey ? 20 : 5
+    const nextPosition = { ...position }
+    if (event.key === 'ArrowLeft') nextPosition.left -= distance
+    if (event.key === 'ArrowRight') nextPosition.left += distance
+    if (event.key === 'ArrowUp') nextPosition.top -= distance
+    if (event.key === 'ArrowDown') nextPosition.top += distance
+    if (nextPosition.left !== position.left || nextPosition.top !== position.top) {
+      event.preventDefault()
+      setPosition({ left: Math.max(0, nextPosition.left), top: Math.max(0, nextPosition.top) })
+    }
+  }
+
+  return <div ref={dragRef} className={`map-overlay-draggable ${className}`} style={{ left: position.left, top: position.top, right: 'auto', bottom: 'auto' }} onPointerDown={handlePointerDown} onKeyDown={handleKeyDown} role="group" tabIndex="0" aria-label={`${label}. Use arrow keys to move.`}>{children}</div>
+}
+
 const PanelTitle = ({ title, badge, onClick }) => <div className={`panel-title ${onClick ? 'panel-title-clickable' : ''}`} onClick={onClick} onKeyDown={(event) => event.key === 'Enter' && onClick?.()} role={onClick ? 'button' : undefined} tabIndex={onClick ? 0 : undefined}><h2>{title}</h2>{badge && <span>{badge}</span>}</div>
-const Unit = ({ name, detail, status }) => <div className="unit-row"><div><b>{name}</b><small>{detail}</small></div><span className={`unit-status ${status.toLowerCase().replace(' ', '-')}`}>{status}</span></div>
+const Unit = ({ name, detail, status }) => <div className="unit-row"><div><b>{name}</b><small>{detail}</small></div><span className={`unit-status ${String(status || '').toLowerCase().replace(/_/g, '-')}`}>{statusLabel(status)}</span></div>
 const Metric = ({ label, value, note, color }) => <div className="rail-metric"><small>{label}</small><strong className={color}>{value}</strong><span>{note}</span></div>
 
 export default Dashboard
