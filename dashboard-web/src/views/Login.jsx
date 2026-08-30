@@ -38,6 +38,12 @@ const Login = () => {
     setLoading(true)
 
     try {
+      console.info('[RESQ auth] Login request', {
+        url: `${API_URL}/auth/login-role`,
+        username: formData.username,
+        role: formData.role,
+        origin: window.location.origin
+      })
       const response = await fetch(`${API_URL}/auth/login-role`, {
         method: 'POST',
         headers: {
@@ -50,6 +56,11 @@ const Login = () => {
         })
       })
 
+      console.info('[RESQ auth] Login response', {
+        url: response.url,
+        status: response.status,
+        ok: response.ok
+      })
       const data = await response.json()
 
       if (!response.ok) {
@@ -63,6 +74,11 @@ const Login = () => {
 
       navigate('/')
     } catch (err) {
+      console.error('[RESQ auth] Login request failed', {
+        message: err.message,
+        apiUrl: API_URL,
+        origin: window.location.origin
+      })
       setError(err.message)
     } finally {
       setLoading(false)

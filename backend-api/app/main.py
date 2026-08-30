@@ -23,7 +23,7 @@ origins.extend(origin for origin in configured_origins if origin != "*")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=origins,
-    allow_origin_regex=r"https://([a-z0-9-]+\.)?ngrok-free\.(dev|app)|https://([a-z0-9-]+\.)?loca\.lt",
+    allow_origin_regex=r"https://([a-z0-9-]+\.)?onrender\.com|https://([a-z0-9-]+\.)?ngrok-free\.(dev|app)|https://([a-z0-9-]+\.)?loca\.lt",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

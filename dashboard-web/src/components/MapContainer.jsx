@@ -12,8 +12,9 @@ const resolveDirectTileSources = (style) => {
     }
 
     const tileUrl = source.url.replace('/tiles/v3/tiles.json', '/tiles/v3/{z}/{x}/{y}.pbf')
+    const { url, ...sourceWithoutTileJsonUrl } = source
     console.info('[RESQ map] Replacing TileJSON source with direct PBF template', { sourceId, tileUrl })
-    return [sourceId, { ...source, tiles: [tileUrl], url: undefined }]
+    return [sourceId, { ...sourceWithoutTileJsonUrl, tiles: [tileUrl] }]
   }))
 
   return { ...style, sources }
@@ -98,6 +99,9 @@ const MapContainer = ({ markers = [] }) => {
           console.info('[RESQ map] Map loaded successfully', { sources: Object.keys(map.getStyle().sources || {}) })
         })
         map.on('styledata', () => console.info('[RESQ map] Style data received'))
+        map.on('sourcedataloading', (event) => {
+          if (event.sourceId) console.debug('[RESQ map] Source data loading', { sourceId: event.sourceId })
+        })
         map.on('sourcedata', (event) => {
           if (event.sourceId) console.debug('[RESQ map] Source data received', {
             sourceId: event.sourceId,
@@ -105,6 +109,9 @@ const MapContainer = ({ markers = [] }) => {
             isSourceLoaded: event.isSourceLoaded,
           })
         })
+        map.on('idle', () => console.info('[RESQ map] Map idle', {
+          loadedSources: Object.keys(map.getStyle().sources || {}).filter((sourceId) => map.isSourceLoaded(sourceId)),
+        }))
         map.on('error', (event) => console.error('[RESQ map] Resource failed', {
           error: event.error || event,
           resourceUrl: event.error?.url,
