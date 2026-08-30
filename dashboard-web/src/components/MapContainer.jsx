@@ -73,22 +73,46 @@ const createMarkerElement = (color = '#dc2626', icon = null) => {
   el.style.height = icon ? '28px' : '16px'
   el.style.borderRadius = icon ? '50%' : '50%'
   el.style.background = icon ? '#fff7ed' : color
-  el.style.border = icon ? '2px solid #f59e0b' : '2px solid white'
+  el.style.border = icon ? `2px solid ${color}` : '2px solid white'
   el.style.boxShadow = '0 2px 6px rgba(0,0,0,0.3)'
-  el.style.color = icon ? '#b45309' : '#ffffff'
+  el.style.color = icon ? color : '#ffffff'
   el.style.fontSize = icon ? '16px' : '0'
   el.style.fontWeight = '700'
   el.textContent = icon || ''
   return el
 }
 
-const MapContainer = ({ markers = [] }) => {
+const MapContainer = ({ markers = [], route = null }) => {
   const mapContainerRef = useRef(null)
   const mapRef = useRef(null)
   const markerInstancesRef = useRef([])
   const deviceMarkerRef = useRef(null)
   const watchIdRef = useRef(null)
   const hasCenteredOnDeviceRef = useRef(false)
+  const markersRef = useRef(markers)
+  const routeRef = useRef(route)
+
+  const renderMarkers = (map, nextMarkers) => {
+    markerInstancesRef.current.forEach((marker) => marker.remove())
+    markerInstancesRef.current = []
+    nextMarkers.forEach((marker) => {
+      const [lng, lat] = normalizeCoordinates(marker.position)
+      markerInstancesRef.current.push(new maplibregl.Marker({ element: createMarkerElement(marker.color, marker.icon) })
+        .setLngLat([lng, lat])
+        .setPopup(new maplibregl.Popup({ offset: 25 }).setHTML(`<strong>${marker.label}</strong>`))
+        .addTo(map))
+    })
+  }
+
+  const updateRoute = (map, nextRoute) => {
+    routeRef.current = nextRoute
+    const source = map.getSource('citizen-route')
+    if (!source) return
+    source.setData(nextRoute || { type: 'FeatureCollection', features: [] })
+    if (!nextRoute?.coordinates?.length) return
+    const bounds = nextRoute.coordinates.reduce((currentBounds, coordinate) => currentBounds.extend(coordinate), new maplibregl.LngLatBounds(nextRoute.coordinates[0], nextRoute.coordinates[0]))
+    map.fitBounds(bounds, { padding: 70, maxZoom: 15, duration: 700 })
+  }
 
   useEffect(() => {
     if (!mapContainerRef.current || mapRef.current) return
@@ -137,6 +161,10 @@ const MapContainer = ({ markers = [] }) => {
           if (fallbackTimer !== null) window.clearTimeout(fallbackTimer)
           map.resize()
           console.info('[RESQ map] Map loaded successfully', { sources: Object.keys(map.getStyle().sources || {}) })
+          map.addSource('citizen-route', { type: 'geojson', data: routeRef.current || { type: 'FeatureCollection', features: [] } })
+          map.addLayer({ id: 'citizen-route-line', type: 'line', source: 'citizen-route', paint: { 'line-color': '#50a8ff', 'line-width': 5, 'line-opacity': 0.9 } })
+          renderMarkers(map, markersRef.current)
+          if (routeRef.current) updateRoute(map, routeRef.current)
         })
         map.on('styledata', () => console.info('[RESQ map] Style data received'))
         map.on('sourcedataloading', (event) => {
@@ -229,23 +257,17 @@ const MapContainer = ({ markers = [] }) => {
   }, [])
 
   useEffect(() => {
-    if (!mapRef.current) return
-
-    markerInstancesRef.current.forEach((marker) => marker.remove())
-    markerInstancesRef.current = []
-
-    const map = mapRef.current
-
-    markers.forEach((marker) => {
-      const [lng, lat] = normalizeCoordinates(marker.position)
-      const markerInstance = new maplibregl.Marker({ element: createMarkerElement(marker.color, marker.icon) })
-        .setLngLat([lng, lat])
-        .setPopup(new maplibregl.Popup({ offset: 25 }).setHTML(`<strong>${marker.label}</strong>`))
-        .addTo(map)
-
-      markerInstancesRef.current.push(markerInstance)
-    })
+    markersRef.current = markers
+    if (mapRef.current) renderMarkers(mapRef.current, markers)
   }, [markers])
+
+  useEffect(() => {
+    if (mapRef.current?.isStyleLoaded() && mapRef.current.getSource('citizen-route')) {
+      updateRoute(mapRef.current, route)
+    } else {
+      routeRef.current = route
+    }
+  }, [route])
 
   return (
     <div className="map-container" style={{ height: '100%', width: '100%', position: 'relative', zIndex: 1 }}>

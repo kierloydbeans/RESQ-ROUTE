@@ -13,7 +13,7 @@ const getStoredAuth = () => {
 
 const normalizeRole = (role) => String(role?.value || role || '').toLowerCase().split('.').pop()
 const statusLabel = (status) => String(status || 'unknown').replace(/_/g, ' ').toUpperCase()
-const alertMarkerColors = { pending: '#dc2626', assigned: '#f59e0b', resolving: '#2563eb', closed: '#dc2626' }
+const alertMarkerColors = { flood: '#3298df', earthquake: '#d18c48', fire: '#f04444', medical: '#dd5ca8', trapped: '#a56ee7', other: '#dc2626' }
 const rescuerMarkerColors = { available: '#00d6a0', recovering: '#f59e0b', in_transit: '#2563eb' }
 const vehicleMarkerColors = { available: '#00d6a0', in_transit: '#2563eb', maintenance: '#dc2626' }
 
@@ -59,6 +59,9 @@ export const Dashboard = () => {
   const [alertStatus, setAlertStatus] = useState('')
   const [alerts, setAlerts] = useState([])
   const [centers, setCenters] = useState([])
+  const [evacuationRecommendation, setEvacuationRecommendation] = useState(null)
+  const [evacuationLoading, setEvacuationLoading] = useState(false)
+  const [evacuationRoute, setEvacuationRoute] = useState(null)
   const [rescuers, setRescuers] = useState([])
   const [selectedRescuerId, setSelectedRescuerId] = useState('')
   const [selectedIncident, setSelectedIncident] = useState('')
@@ -233,6 +236,87 @@ export const Dashboard = () => {
     }
   }
 
+  const handleFindEvacuationCenter = () => {
+    setEvacuationLoading(true)
+    setAlertStatus('')
+
+    const findNearestCenter = (location) => {
+      const candidates = centers
+        .filter((center) => center.is_active !== false)
+        .map((center) => {
+          const capacity = Number(center.capacity) || 0
+          const occupancy = Number(center.current_occupancy) || 0
+          const remainingCapacity = Math.max(0, capacity - occupancy)
+          const distance = distanceBetween(location.latitude, location.longitude, Number(center.latitude), Number(center.longitude))
+          const supportedTypes = center.disaster_types || center.supported_disaster_types || []
+          const supportsIncident = selectedIncident && (Array.isArray(supportedTypes) ? supportedTypes.includes(selectedIncident) : supportedTypes === selectedIncident)
+          const score = (distance ?? Number.POSITIVE_INFINITY) + (remainingCapacity > 0 ? 0 : 10000) - (supportsIncident ? 5 : 0) - Math.min(remainingCapacity, 100) / 100
+          return { ...center, capacity, occupancy, remainingCapacity, distance, supportsIncident, score }
+        })
+        .filter((center) => center.remainingCapacity > 0 && center.distance !== null)
+        .sort((first, second) => first.score - second.score)
+
+      const recommendation = candidates[0]
+      if (!recommendation) {
+        setEvacuationRecommendation(null)
+        setAlertStatus('No active evacuation center with available capacity was found.')
+      } else {
+        const walkingMinutes = Math.max(1, Math.round((recommendation.distance / 5) * 60))
+        setEvacuationRecommendation({ ...recommendation, etaMinutes: walkingMinutes })
+        console.info('[RESQ citizen] Evacuation center recommended', {
+          centerId: recommendation.id,
+          distanceKm: recommendation.distance,
+          etaMinutes: walkingMinutes,
+          incident: selectedIncident || 'unspecified'
+        })
+      }
+      setEvacuationLoading(false)
+    }
+
+    if (latestGps) {
+      findNearestCenter(latestGps)
+      return
+    }
+
+    if (!('geolocation' in navigator)) {
+      setAlertStatus('Location access is unavailable on this device.')
+      setEvacuationLoading(false)
+      return
+    }
+
+    navigator.geolocation.getCurrentPosition(
+      (position) => findNearestCenter({ latitude: position.coords.latitude, longitude: position.coords.longitude }),
+      () => {
+        setAlertStatus('Allow location access to find the nearest evacuation center.')
+        setEvacuationLoading(false)
+      },
+      { enableHighAccuracy: true, maximumAge: 5000, timeout: 10000 }
+    )
+  }
+
+  const handleRouteToCenter = async (center) => {
+    if (!latestGps) {
+      setAlertStatus('Waiting for your location before creating a route.')
+      return
+    }
+
+    const origin = `${latestGps.longitude},${latestGps.latitude}`
+    const destination = `${Number(center.longitude)},${Number(center.latitude)}`
+    setEvacuationRecommendation(center)
+    try {
+      const response = await fetch(`https://router.project-osrm.org/route/v1/walking/${origin};${destination}?overview=full&geometries=geojson`)
+      if (!response.ok) throw new Error(`Routing service returned HTTP ${response.status}`)
+      const data = await response.json()
+      const geometry = data.routes?.[0]?.geometry
+      if (!geometry) throw new Error('Routing service returned no route')
+      setEvacuationRoute(geometry)
+      console.info('[RESQ citizen] Walking route loaded', { centerId: center.id, distanceMeters: data.routes[0].distance, durationSeconds: data.routes[0].duration })
+    } catch (error) {
+      console.warn('[RESQ citizen] Walking route unavailable, using direct route', error)
+      setEvacuationRoute({ type: 'LineString', coordinates: [[Number(latestGps.longitude), Number(latestGps.latitude)], [Number(center.longitude), Number(center.latitude)]] })
+    }
+  }
+
   const handleAssignAlert = async (alertId, rescuerSelection = selectedRescuerId) => {
     if (!rescuerSelection) {
       const alert = alerts.find((entry) => entry.id === alertId)
@@ -352,8 +436,8 @@ export const Dashboard = () => {
   const alertMarkers = alerts.map((alert) => ({
     position: [alert.longitude, alert.latitude],
     label: `${alert.sender_name} · ${statusLabel(alert.status)}`,
-    color: alertMarkerColors[alert.status] || '#dc2626',
-    icon: '⚠'
+    color: alertMarkerColors[alert.disaster_type] || alertMarkerColors.other,
+    icon: disasterIcons[alert.disaster_type] || disasterIcons.other
   }))
 
   const rescuerMarkers = rescueUnits.rescuers.filter((rescuer) => rescuer.current_latitude !== null && rescuer.current_longitude !== null).map((rescuer) => ({
@@ -441,7 +525,7 @@ export const Dashboard = () => {
       <main className="citizen-console">
         <header className="citizen-header"><div className="brand-lockup"><Logo size="small" /><div><strong>RESQ-ROUTE</strong><span>CITIZEN SAFETY NETWORK</span></div></div><div className="header-actions"><span className={`connection ${isConnected ? 'online' : 'offline'}`}><i /> {isConnected ? 'Connected' : 'Reconnecting'}</span><button className="icon-button" onClick={() => setIsDark((value) => !value)} aria-label="Toggle light and dark mode">{isDark ? '☼' : '☾'}</button>{accountMenu}</div></header>
         <section className="citizen-hero"><div><span className="eyebrow">CITIZEN EMERGENCY CHANNEL</span><h1>Get help when every second counts.</h1><p>Your alert shares your current location with the response team so dispatchers can coordinate assistance.</p></div><div className={`signal-card ${isConnected ? 'signal-live' : ''}`}><i /><b>{isConnected ? 'RESPONSE NETWORK ONLINE' : 'CONNECTING TO RESPONSE NETWORK'}</b><small>Last checked just now</small></div></section>
-        <section className="citizen-grid"><div className="alert-composer"><div className="panel-title"><h2>SEND EMERGENCY ALERT</h2><span>PRIORITY CHANNEL</span></div><div className="composer-body"><label>Choose what is happening</label><div className="quick-alerts">{[['flood', '⌁', 'Stranded by flood'], ['earthquake', '⌂', 'Stranded by earthquake'], ['fire', '♨', 'Fire'], ['medical', '+', 'Medical emergency'], ['trapped', '!', 'Trapped / rescue']].map(([value, icon, label]) => <button className={`quick-alert ${value} ${selectedIncident === value ? 'selected' : ''}`} key={value} onClick={() => setSelectedIncident(value)}><span>{icon}</span>{label}</button>)}</div><label>How serious is it?</label><div className="severity-options">{['low', 'medium', 'high', 'critical'].map((severity) => <button className={`severity-option ${severity} ${selectedSeverity === severity ? 'selected' : ''}`} key={severity} onClick={() => setSelectedSeverity(severity)}>{severity}</button>)}</div><label htmlFor="citizen-alert-message">Additional details <small>(optional)</small></label><textarea id="citizen-alert-message" value={alertMessage} onChange={(event) => setAlertMessage(event.target.value)} placeholder="Add injuries, landmarks, or other details if useful" /><div className="location-confirm"><span>⌖</span><div><b>Location attached</b><small>{latestGps ? `${latestGps.latitude.toFixed(5)}° N, ${latestGps.longitude.toFixed(5)}° E` : 'Waiting for device location...'}</small></div><i /></div><button className="emergency-button" onClick={handleSendEmergencyAlert}>SEND ALERT TO DISPATCH</button>{alertStatus && <p className="alert-status">{alertStatus}</p>}</div></div><div className="citizen-side"><div className="citizen-card"><span className="card-kicker">YOUR SAFETY STATUS</span><strong>Ready to respond</strong><p>Keep this page open after sending an alert. Dispatchers may use it to share updates.</p><div className="status-line"><i className="status-dot green" /> GPS telemetry active</div><div className="status-line"><i className={`status-dot ${isConnected ? 'green' : 'red'}`} /> Dispatch connection {isConnected ? 'stable' : 'offline'}</div></div><div className="citizen-card quiet-card"><span className="card-kicker">EMERGENCY TIP</span><strong>Move to a safe, visible area</strong><p>Stay away from floodwater, live wires, and unstable structures. Signal responders if it is safe to do so.</p></div></div></section>
+        <section className="citizen-grid"><div className="citizen-evacuation"><div className="panel-title"><h2>EVACUATION ROUTING</h2><span>{evacuationRecommendation ? 'ROUTE READY' : 'SELECT A CENTER'}</span></div><div className="citizen-map"><MapContainer markers={centerMarkers} route={evacuationRoute} /></div><div className="evacuation-centers">{centers.filter((center) => center.is_active !== false && Number(center.capacity) > Number(center.current_occupancy || 0)).map((center) => { const occupancy = center.capacity > 0 ? Math.round((center.current_occupancy / center.capacity) * 100) : 0; return <button className={`evacuation-center-choice ${evacuationRecommendation?.id === center.id ? 'selected' : ''}`} key={center.id} onClick={() => handleRouteToCenter(center)}><span><b>{center.name}</b><small>{center.address} · {occupancy}% occupied · {center.capacity - center.current_occupancy} spaces available</small></span><em>{evacuationRecommendation?.id === center.id ? 'ROUTING...' : 'ROUTE HERE'}</em></button>})}</div>{alertStatus && <p className="alert-status">{alertStatus}</p>}</div><div className="alert-composer"><div className="panel-title"><h2>SEND EMERGENCY ALERT</h2><span>PRIORITY CHANNEL</span></div><div className="composer-body"><label>Choose what is happening</label><div className="quick-alerts">{[['flood', '⌁', 'Stranded by flood'], ['earthquake', '⌂', 'Stranded by earthquake'], ['fire', '♨', 'Fire'], ['medical', '+', 'Medical emergency'], ['trapped', '!', 'Trapped / rescue']].map(([value, icon, label]) => <button className={`quick-alert ${value} ${selectedIncident === value ? 'selected' : ''}`} key={value} onClick={() => setSelectedIncident(value)}><span>{icon}</span>{label}</button>)}</div><label>How serious is it?</label><div className="severity-options">{['low', 'medium', 'high', 'critical'].map((severity) => <button className={`severity-option ${severity} ${selectedSeverity === severity ? 'selected' : ''}`} key={severity} onClick={() => setSelectedSeverity(severity)}>{severity}</button>)}</div><label htmlFor="citizen-alert-message">Additional details <small>(optional)</small></label><textarea id="citizen-alert-message" value={alertMessage} onChange={(event) => setAlertMessage(event.target.value)} placeholder="Add injuries, landmarks, or other details if useful" /><div className="location-confirm"><span>⌖</span><div><b>Location attached</b><small>{latestGps ? `${latestGps.latitude.toFixed(5)}° N, ${latestGps.longitude.toFixed(5)}° E` : 'Waiting for device location...'}</small></div><i /></div><button className="emergency-button" onClick={handleSendEmergencyAlert}>SEND ALERT TO DISPATCH</button>{alertStatus && <p className="alert-status">{alertStatus}</p>}</div></div><div className="citizen-side"><div className="citizen-card"><span className="card-kicker">YOUR SAFETY STATUS</span><strong>Ready to respond</strong><p>Keep this page open after sending an alert. Dispatchers may use it to share updates.</p><div className="status-line"><i className="status-dot green" /> GPS telemetry active</div><div className="status-line"><i className={`status-dot ${isConnected ? 'green' : 'red'}`} /> Dispatch connection {isConnected ? 'stable' : 'offline'}</div></div><div className="citizen-card quiet-card"><span className="card-kicker">EMERGENCY TIP</span><strong>Move to a safe, visible area</strong><p>Stay away from floodwater, live wires, and unstable structures. Signal responders if it is safe to do so.</p></div></div></section>
       </main>
     )
   }
@@ -470,7 +554,7 @@ export const Dashboard = () => {
       <section className="ops-grid">
         <aside className="feed-panel"><PanelTitle title="LIVE SOS FEED" badge="LIVE" onClick={() => openModal('alerts')} /><div className="feed-list">{alerts.slice(0, 5).map((alert) => { const disasterType = alert.disaster_type || 'other'; const severity = alert.severity || 'high'; return <article className="sos-item" key={alert.id}><div className="sos-meta"><span className={`severity ${severity}`}>{severity.toUpperCase()}</span><time>{formatTime(alert.created_at)} ago</time></div><div className="sos-person"><span className={`sos-icon disaster-${disasterType}`}>{disasterIcons[disasterType] || disasterIcons.other}</span><div><b>{alert.sender_name}</b><small>{disasterLabels[disasterType] || 'Other'} · {statusLabel(alert.status)}{alert.message ? ` · ${alert.message}` : ''}</small></div></div><div className="coordinates">{alert.latitude?.toFixed?.(5) || 'Unknown'}° N, {alert.longitude?.toFixed?.(5) || 'Unknown'}° E</div><div className="sos-actions"><button onClick={() => handleAssignAlert(alert.id)}>ASSIGN</button><button>VERIFY</button><button>MERGE</button></div></article>})}</div></aside>
 
-        <section className="map-panel"><PanelTitle title="CDRRMO TACTICAL MAP AREA" badge="TRACKING MAP" /><div className="map-stage" style={{ height: `${mapHeight}px` }}><DraggableMapOverlay className="map-coordinate" label="Map center coordinates" defaultPosition={{ left: 12, top: 12 }}>{primaryCenter ? <>CENTER: {Number(primaryCenter.latitude).toFixed(5)}° N<br />LONG: {Number(primaryCenter.longitude).toFixed(5)}° E</> : 'CENTER: NO ACTIVE CENTER'}</DraggableMapOverlay><DraggableMapOverlay className="map-legend" label="Map legend" defaultPosition={{ right: 12, top: 12 }}><span><i className="dot red" /> PENDING / CLOSED ALERT</span><span><i className="dot amber" /> ASSIGNED / RECOVERING</span><span><i className="dot green" /> AVAILABLE / CENTER</span><span><i className="dot blue" /> RESOLVING / IN TRANSIT</span></DraggableMapOverlay><MapContainer markers={mapMarkers} />{primaryCenter && <DraggableMapOverlay className="evac-label" label="Evacuation center status" defaultPosition={{ left: 580, top: 164 }}>♧ {primaryCenter.name} ({primaryOccupancy}%)<b /></DraggableMapOverlay>}<DraggableMapOverlay className="map-scale" label="Map scale" defaultPosition={{ left: 12, top: 340 }}>SCALE: 1:25,000</DraggableMapOverlay><DraggableMapOverlay className="map-live" label="Live radar feed status" defaultPosition={{ left: 600, top: 340 }}>LIVE RADAR FEED [WSS_003]</DraggableMapOverlay><button className="map-resize-handle" onMouseDown={startMapResize} aria-label="Drag to resize map" title="Drag to resize map">↕</button></div></section>
+        <section className="map-panel"><PanelTitle title="CDRRMO TACTICAL MAP AREA" badge="TRACKING MAP" /><div className="map-stage" style={{ height: `${mapHeight}px` }}><DraggableMapOverlay className="map-coordinate" label="Map center coordinates" defaultPosition={{ left: 12, top: 12 }}>{primaryCenter ? <>CENTER: {Number(primaryCenter.latitude).toFixed(5)}° N<br />LONG: {Number(primaryCenter.longitude).toFixed(5)}° E</> : 'CENTER: NO ACTIVE CENTER'}</DraggableMapOverlay><DraggableMapOverlay className="map-legend" label="Map legend" defaultPosition={{ right: 12, top: 12 }}><span><i className="dot red" /> PENDING / CLOSED ALERT</span><span><i className="dot amber" /> ASSIGNED / RECOVERING</span><span><i className="dot green" /> AVAILABLE / CENTER</span><span><i className="dot blue" /> RESOLVING / IN TRANSIT</span></DraggableMapOverlay><MapContainer markers={mapMarkers} />{centers.length > 0 && <DraggableMapOverlay className="evac-label evac-label-list" label="Evacuation center list" defaultPosition={{ left: 580, top: 164 }}><b>EVACUATION CENTERS</b>{centers.filter((center) => center.is_active !== false).map((center) => { const occupancy = center.capacity > 0 ? Math.round((center.current_occupancy / center.capacity) * 100) : 0; return <span key={center.id}>{center.name} ({occupancy}%)</span>})}</DraggableMapOverlay>}<DraggableMapOverlay className="map-scale" label="Map scale" defaultPosition={{ left: 12, top: 340 }}>SCALE: 1:25,000</DraggableMapOverlay><DraggableMapOverlay className="map-live" label="Live radar feed status" defaultPosition={{ left: 600, top: 340 }}>LIVE RADAR FEED [WSS_003]</DraggableMapOverlay><button className="map-resize-handle" onMouseDown={startMapResize} aria-label="Drag to resize map" title="Drag to resize map">↕</button></div></section>
 
         <aside className="right-rail"><section className="metric-card response-card"><small>AVG RESPONSE</small><strong>8.2 min</strong><span>Below target (10m)</span></section><section className="rail-section"><div className="unit-panel-heading"><PanelTitle title="ACTIVE RESCUE UNITS" badge={`${rescueUnits.rescuers.length + rescueUnits.vehicles.length} FOUND`} onClick={() => openModal('units')} /><select value={unitSort} onChange={(event) => setUnitSort(event.target.value)} aria-label="Sort rescue units"><option value="status">Sort: Status</option><option value="name">Sort: Name</option><option value="type">Sort: Type</option></select></div><div className="unit-list-label">RESCUER PROFILES</div>{sortedRescuers.length === 0 ? <p className="unit-empty">No rescuer profiles</p> : sortedRescuers.map((rescuer) => <Unit key={`rescuer-${rescuer.id}`} name={rescuer.full_name || rescuer.username} detail={`${rescuer.station_name || 'No station'} · @${rescuer.username}`} status={rescuer.status} />)}<div className="unit-list-label">VEHICLES</div>{sortedVehicles.length === 0 ? <p className="unit-empty">No vehicles</p> : sortedVehicles.map((vehicle) => <Unit key={`vehicle-${vehicle.id}`} name={`${vehicle.vehicle_type} · ${vehicle.plate_number}`} detail={`${vehicle.driver_name} · capacity ${vehicle.capacity}`} status={vehicle.status} />)}</section><section className="rail-section operational"><PanelTitle title="OPERATIONAL METRICS" /><Metric label="ACTIVE SOS" value={alertCount} note="+4 in last 10m" color="red" /><Metric label="DISPATCHED" value={`${rescueUnits.dispatched_count || 0} / ${rescueUnits.rescuer_count || 0}`} note="Rescuer profiles in transit" color="red" /><Metric label="RESCUED TODAY" value={rescueUnits.closed_alert_count || 0} note="Closed emergency alerts" color="green" /></section></aside>
       </section>
@@ -483,6 +567,7 @@ export const Dashboard = () => {
 
 const DraggableMapOverlay = ({ className, label, defaultPosition, children }) => {
   const [position, setPosition] = useState(defaultPosition)
+  const [minimized, setMinimized] = useState(false)
   const dragRef = React.useRef(null)
 
   const moveOverlay = (clientX, clientY) => {
@@ -518,7 +603,7 @@ const DraggableMapOverlay = ({ className, label, defaultPosition, children }) =>
     }
   }
 
-  return <div ref={dragRef} className={`map-overlay-draggable ${className}`} style={{ left: position.left, top: position.top, right: 'auto', bottom: 'auto' }} onPointerDown={handlePointerDown} onKeyDown={handleKeyDown} role="group" tabIndex="0" aria-label={`${label}. Use arrow keys to move.`}>{children}</div>
+  return <div ref={dragRef} className={`map-overlay-draggable ${className} ${minimized ? 'minimized' : ''}`} style={{ left: position.left ?? 'auto', top: position.top ?? 'auto', right: position.right ?? 'auto', bottom: position.bottom ?? 'auto' }} onPointerDown={handlePointerDown} onKeyDown={handleKeyDown} role="group" tabIndex="0" aria-label={`${label}. Use arrow keys to move.`}><button className="map-overlay-toggle" onPointerDown={(event) => event.stopPropagation()} onClick={() => setMinimized((value) => !value)} aria-label={`${minimized ? 'Expand' : 'Minimize'} ${label}`} title={minimized ? 'Expand' : 'Minimize'}>{minimized ? '+' : '-'}</button>{!minimized && children}</div>
 }
 
 const PanelTitle = ({ title, badge, onClick }) => <div className={`panel-title ${onClick ? 'panel-title-clickable' : ''}`} onClick={onClick} onKeyDown={(event) => event.key === 'Enter' && onClick?.()} role={onClick ? 'button' : undefined} tabIndex={onClick ? 0 : undefined}><h2>{title}</h2>{badge && <span>{badge}</span>}</div>
