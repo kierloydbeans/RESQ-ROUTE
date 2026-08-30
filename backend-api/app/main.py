@@ -11,7 +11,8 @@ app = FastAPI(title="RESQ-Route API", version="1.0.0")
 origins = [
     "http://localhost:3000",  # React frontend
     "http://localhost:8000",   # FastAPI backend
-    "https://resq-route-frontend.onrender.com"  # Production frontend
+    "https://resq-route-frontend.onrender.com",  # Production frontend
+    "https://resq-route-test.onrender.com",  # Develop deployed frontend
 ]
 
 configured_origins = getattr(settings, "CORS_ORIGINS", [])

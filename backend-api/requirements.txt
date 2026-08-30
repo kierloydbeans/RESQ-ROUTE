@@ -1,6 +1,6 @@
 fastapi==0.104.1  # for building the FastAPI application
 uvicorn[standard]==0.24.0  # for running the FastAPI application with ASGI server
-sqlmodel==0.0.22  # for SQL database interaction and ORM
+sqlmodel==0.0.14  # for SQL database interaction and ORM
 asyncpg==0.29.0  # for PostgreSQL database interaction
 python-jose[cryptography]==3.3.0  # for JWT token creation and verification
 passlib[bcrypt]==1.7.4  # for password hashing
