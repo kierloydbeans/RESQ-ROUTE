@@ -10,8 +10,8 @@ const Logo = ({ size = 'medium' }) => {
   const currentSize = sizes[size] || sizes.medium
 
   return (
-    <img
-      src="/resq_logo_with_label.png" 
+    <img 
+      src="/resq_logo.png" 
       alt="ResQ-Route Logo" 
       style={{ 
         height: currentSize.height,

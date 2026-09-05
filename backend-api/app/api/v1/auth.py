@@ -3,20 +3,26 @@ from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlmodel import select
 from pydantic import BaseModel, EmailStr, field_validator
+from sqlalchemy import func, cast, String
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.security import (
     create_access_token, 
     verify_password, 
-    get_password_hash,   
+    get_password_hash,
     generate_reset_token,
     verify_reset_token,
     generate_otp_code,
+    get_current_user,
 )
 from app.db.session import get_session
 from app.models.user import User, UserRead, UserRole
 from app.models.otp import OTPVerification
+from app.models.rescuer import RescuerProfile, RescuerProfileRead, RescuerStatus
+from app.models.emergency_alert import EmergencyAlert, EmergencyAlertRead, AlertStatus
+from app.models.vehicle import Vehicle
 from app.core.mail import send_reset_password_email, send_otp_email
+from app.api.websockets.telemetry import manager as telemetry_manager
 
 router = APIRouter()
 
@@ -51,6 +57,12 @@ class UserRegisterWithOTP(BaseModel):
 
 # --- ENDPOINTS ---
 
+class LoginRequest(BaseModel):
+    username: str
+    password: str
+    role: str
+
+
 @router.post("/login")
 async def login(
     form_data: OAuth2PasswordRequestForm = Depends(),
@@ -74,17 +86,305 @@ async def login(
     
     access_token = create_access_token(data={"sub": user.username, "role": user.role})
     return {
-        "access_token": access_token, 
+        "access_token": access_token,
         "token_type": "bearer",
         "user": {
             "id": user.id,
             "username": user.username,
             "email": user.email,
             "full_name": user.full_name,
-            "role": user.role
+            "role": user.role.value if hasattr(user.role, "value") else str(user.role)
         }
     }
 
+
+@router.post("/login-role")
+async def login_role(
+    payload: LoginRequest,
+    session: AsyncSession = Depends(get_session)
+):
+    statement = select(User).where(User.username == payload.username)
+    result = await session.execute(statement)
+    user = result.scalar_one_or_none()
+
+    if not user or not verify_password(payload.password, user.hashed_password):
+        raise HTTPException(status_code=401, detail="Incorrect username or password")
+
+    if not user.is_active:
+        raise HTTPException(status_code=403, detail="User account is inactive")
+
+    requested_role = payload.role.lower()
+    if user.role.value != requested_role:
+        raise HTTPException(status_code=403, detail=f"This account is not registered as a {requested_role}")
+
+    access_token = create_access_token(data={"sub": user.username, "role": user.role})
+    return {
+        "access_token": access_token,
+        "token_type": "bearer",
+        "user": {
+            "id": user.id,
+            "username": user.username,
+            "email": user.email,
+            "full_name": user.full_name,
+            "role": user.role.value if hasattr(user.role, "value") else str(user.role)
+        }
+    }
+
+
+@router.get("/me")
+async def get_me(
+    credentials: str = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session)
+):
+    return {"user": credentials}
+
+
+@router.post("/rescuers", response_model=RescuerProfileRead, status_code=status.HTTP_201_CREATED)
+async def create_rescuer_profile(
+    payload: dict,
+    session: AsyncSession = Depends(get_session)
+):
+    statement = select(User).where(User.id == payload.get("user_id"))
+    result = await session.execute(statement)
+    user = result.scalar_one_or_none()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    if user.role != UserRole.RESCUER:
+        raise HTTPException(status_code=400, detail="Only rescuer accounts can have a rescue profile")
+
+    existing_statement = select(RescuerProfile).where(RescuerProfile.user_id == payload.get("user_id"))
+    existing_result = await session.execute(existing_statement)
+    if existing_result.scalar_one_or_none():
+        raise HTTPException(status_code=400, detail="Rescuer profile already exists")
+
+    rescuer_profile = RescuerProfile(
+        user_id=payload.get("user_id"),
+        status=payload.get("status", RescuerStatus.AVAILABLE),
+        station_name=payload.get("station_name"),
+        phone=payload.get("phone"),
+        current_latitude=payload.get("current_latitude"),
+        current_longitude=payload.get("current_longitude")
+    )
+    session.add(rescuer_profile)
+    await session.commit()
+    await session.refresh(rescuer_profile)
+    return rescuer_profile
+
+
+@router.get("/rescuers")
+async def list_rescuers(session: AsyncSession = Depends(get_session)):
+    statement = select(User, RescuerProfile).outerjoin(
+        RescuerProfile, RescuerProfile.user_id == User.id
+    ).where(
+        func.lower(cast(User.role, String)) == "rescuer"
+    )
+
+    result = await session.execute(statement)
+    rescuer_users = result.all()
+
+    return [
+        {
+            "id": user.id,
+            "username": user.username,
+            "full_name": user.full_name,
+            "display_name": user.full_name or user.username,
+            "email": user.email,
+            "role": user.role.value if hasattr(user.role, 'value') else str(user.role),
+            "status": profile.status.value if profile and hasattr(profile.status, 'value') else (str(profile.status) if profile else RescuerStatus.AVAILABLE.value),
+            "current_latitude": profile.current_latitude if profile else None,
+            "current_longitude": profile.current_longitude if profile else None,
+        }
+        for user, profile in rescuer_users
+    ]
+
+
+@router.get("/rescue-units")
+async def list_rescue_units(session: AsyncSession = Depends(get_session)):
+    profile_result = await session.execute(
+        select(RescuerProfile, User)
+        .join(User, RescuerProfile.user_id == User.id)
+        .where(User.role == UserRole.RESCUER)
+    )
+    vehicle_result = await session.execute(select(Vehicle))
+    alert_result = await session.execute(select(EmergencyAlert))
+    rescuer_profiles = profile_result.all()
+    alerts = alert_result.scalars().all()
+    dispatched_count = sum(
+        1 for profile, _user in rescuer_profiles
+        if (profile.status.value if hasattr(profile.status, "value") else str(profile.status)).lower() == "in_transit"
+    )
+
+    return {
+        "rescuer_count": len(rescuer_profiles),
+        "dispatched_count": dispatched_count,
+        "closed_alert_count": sum(
+            1 for alert in alerts
+            if (alert.status.value if hasattr(alert.status, "value") else str(alert.status)).lower() == "closed"
+        ),
+        "rescuers": [
+            {
+                "id": profile.id,
+                "user_id": profile.user_id,
+                    "status": profile.status.value if hasattr(profile.status, "value") else str(profile.status),
+                    "username": user.username,
+                    "full_name": user.full_name,
+                    "email": user.email,
+                "station_name": profile.station_name,
+                "phone": profile.phone,
+                "current_latitude": profile.current_latitude,
+                "current_longitude": profile.current_longitude,
+            }
+            for profile, user in rescuer_profiles
+        ],
+        "vehicles": [
+            {
+                "id": vehicle.id,
+                "plate_number": vehicle.plate_number,
+                "vehicle_type": vehicle.vehicle_type,
+                "driver_name": vehicle.driver_name,
+                "capacity": vehicle.capacity,
+                "status": vehicle.status,
+                "center_id": vehicle.center_id,
+                "current_location_lat": vehicle.current_location_lat,
+                "current_location_lng": vehicle.current_location_lng,
+            }
+            for vehicle in vehicle_result.scalars().all()
+        ],
+    }
+
+@router.post("/alerts", response_model=EmergencyAlertRead, status_code=status.HTTP_201_CREATED)
+async def create_alert(
+    payload: dict,
+    session: AsyncSession = Depends(get_session)
+):
+    statement = select(User).where(User.id == payload.get("sender_id"))
+    result = await session.execute(statement)
+    sender = result.scalar_one_or_none()
+    if not sender:
+        raise HTTPException(status_code=404, detail="Sender not found")
+
+    alert_data = {
+        "sender_id": sender.id,
+        "sender_name": payload.get("sender_name", sender.full_name or sender.username),
+        "sender_role": payload.get("sender_role", sender.role.value if hasattr(sender.role, 'value') else str(sender.role)),
+        "latitude": payload.get("latitude"),
+        "longitude": payload.get("longitude"),
+        "disaster_type": payload.get("disaster_type", "other"),
+        "severity": payload.get("severity", "high"),
+        "message": payload.get("message", "Emergency alert"),
+        "status": payload.get("status", AlertStatus.PENDING),
+        "assigned_rescuer_id": payload.get("assigned_rescuer_id"),
+        "assigned_rescuer_name": payload.get("assigned_rescuer_name")
+    }
+    alert = EmergencyAlert.model_validate(alert_data)
+
+    session.add(alert)
+    await session.commit()
+    await session.refresh(alert)
+    await telemetry_manager.broadcast({
+        "type": "alert_created",
+        "data": EmergencyAlertRead.model_validate(alert).model_dump(mode="json"),
+        "timestamp": datetime.utcnow().timestamp(),
+    })
+    return alert
+
+
+@router.get("/alerts", response_model=list[EmergencyAlertRead])
+async def list_alerts(session: AsyncSession = Depends(get_session)):
+    statement = select(EmergencyAlert).order_by(EmergencyAlert.created_at.desc())
+    result = await session.execute(statement)
+    return result.scalars().all()
+
+
+@router.patch("/alerts/{alert_id}")
+async def update_alert(
+    alert_id: int, 
+    payload: dict, 
+    session: AsyncSession = Depends(get_session)
+):
+    statement = select(EmergencyAlert).where(EmergencyAlert.id == alert_id)
+    result = await session.execute(statement)
+    alert = result.scalar_one_or_none()
+    if not alert:
+        raise HTTPException(status_code=404, detail="Alert not found")
+    assigned_user_id = payload.get("assigned_rescuer_id")
+
+    if assigned_user_id:
+        # Verify the user exists and has role rescuer
+        user_stmt = select(User).where(User.id == assigned_user_id)
+        user_res = await session.execute(user_stmt)
+        rescuer_user = user_res.scalar_one_or_none()
+        if not rescuer_user:
+            raise HTTPException(status_code=404, detail="Rescuer user not found")
+
+        # Ensure a RescuerProfile exists for this user (create if missing).
+        profile_stmt = select(RescuerProfile).where(RescuerProfile.user_id == assigned_user_id)
+        profile_res = await session.execute(profile_stmt)
+        rescuer_profile = profile_res.scalar_one_or_none()
+        if not rescuer_profile:
+            rescuer_profile = RescuerProfile(
+                user_id=assigned_user_id,
+                status=RescuerStatus.AVAILABLE,
+                station_name="Default Station"
+            )
+            session.add(rescuer_profile)
+            await session.commit()
+            await session.refresh(rescuer_profile)
+
+        # The alert field references user.id, so acknowledgement can resolve the profile later.
+        payload["assigned_rescuer_id"] = assigned_user_id
+        # set a friendly name if not provided
+        payload.setdefault("assigned_rescuer_name", rescuer_user.full_name or rescuer_user.username)
+        # default status to assigned if caller didn't set it
+        payload.setdefault("status", AlertStatus.ASSIGNED)
+
+    for field, value in payload.items():
+        if hasattr(alert, field):
+            setattr(alert, field, value)
+
+    await session.commit()
+    await session.refresh(alert)
+    await telemetry_manager.broadcast({
+        "type": "alert_updated",
+        "data": EmergencyAlertRead.model_validate(alert).model_dump(mode="json"),
+        "timestamp": datetime.utcnow().timestamp(),
+    })
+    return alert
+
+
+@router.post("/alerts/{alert_id}/acknowledge")
+async def acknowledge_alert(
+    alert_id: int,
+    payload: dict,
+    session: AsyncSession = Depends(get_session)
+):
+    statement = select(EmergencyAlert).where(EmergencyAlert.id == alert_id)
+    result = await session.execute(statement)
+    alert = result.scalar_one_or_none()
+    if not alert:
+        raise HTTPException(status_code=404, detail="Alert not found")
+
+    rescuer_user_id = payload.get("user_id")
+    if alert.assigned_rescuer_id != rescuer_user_id:
+        raise HTTPException(status_code=403, detail="This alert is assigned to another rescuer")
+
+    profile_statement = select(RescuerProfile).where(RescuerProfile.user_id == rescuer_user_id)
+    profile_result = await session.execute(profile_statement)
+    profile = profile_result.scalar_one_or_none()
+    if not profile:
+        raise HTTPException(status_code=404, detail="Rescuer profile not found")
+
+    profile.status = RescuerStatus.IN_TRANSIT
+    alert.status = AlertStatus.RESOLVING
+    await session.commit()
+    await session.refresh(alert)
+    await telemetry_manager.broadcast({
+        "type": "alert_updated",
+        "data": EmergencyAlertRead.model_validate(alert).model_dump(mode="json"),
+        "timestamp": datetime.utcnow().timestamp(),
+    })
+    return alert
 
 @router.post("/register", response_model=UserRead, status_code=status.HTTP_201_CREATED)
 async def register(

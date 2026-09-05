@@ -29,8 +29,11 @@ const BackgroundPin = ({ top, left, delay }) => (
 )
 
 const Login = () => {
-  const [isPageLoading, setIsPageLoading] = useState(true)
-  const [formData, setFormData] = useState({ username: '', password: '' })
+  const [formData, setFormData] = useState({
+    username: '',
+    password: '',
+    role: 'citizen'
+  })
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
 
@@ -56,16 +59,39 @@ const Login = () => {
     setError('')
     setLoading(true)
     try {
-      const response = await fetch(`${API_URL}/auth/login`, {
+      console.info('[RESQ auth] Login request', {
+        url: `${API_URL}/auth/login-role`,
+        username: formData.username,
+        role: formData.role,
+        origin: window.location.origin
+      })
+      const response = await fetch(`${API_URL}/auth/login-role`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        body: new URLSearchParams({ username: formData.username, password: formData.password })
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          username: formData.username,
+          password: formData.password,
+          role: formData.role
+        })
+      })
+
+      console.info('[RESQ auth] Login response', {
+        url: response.url,
+        status: response.status,
+        ok: response.ok
       })
       const data = await response.json()
       if (!response.ok) throw new Error(data.detail || 'Login failed')
       localStorage.setItem('auth', JSON.stringify({ token: data.access_token, user: data.user }))
       navigate('/')
     } catch (err) {
+      console.error('[RESQ auth] Login request failed', {
+        message: err.message,
+        apiUrl: API_URL,
+        origin: window.location.origin
+      })
       setError(err.message)
     } finally {
       setLoading(false)
@@ -256,6 +282,29 @@ const Login = () => {
                   boxSizing: 'border-box'
                 }}
               />
+            </div>
+
+            <div style={{ marginBottom: '1rem' }}>
+              <select
+                name="role"
+                value={formData.role}
+                onChange={handleChange}
+                style={{
+                  width: '100%',
+                  padding: '0.875rem 1.25rem',
+                  borderRadius: '9999px',
+                  border: '1px solid #e5e7eb',
+                  backgroundColor: '#f9fafb',
+                  fontSize: '0.95rem',
+                  outline: 'none',
+                  boxSizing: 'border-box'
+                }}
+              >
+                <option value="citizen">Citizen</option>
+                <option value="rescuer">Rescuer</option>
+                <option value="coordinator">Coordinator</option>
+                <option value="dispatcher">Dispatcher</option>
+              </select>
             </div>
 
             <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '1.75rem' }}>

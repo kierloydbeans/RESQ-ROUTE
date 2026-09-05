@@ -20,7 +20,7 @@ mock_inventory = [
     InventoryItem(
         id="1",
         name="Water Bottles",
-        category="Food & Water",
+        category="Foods & Water",
         quantity=500,
         threshold=200,
         critical=False

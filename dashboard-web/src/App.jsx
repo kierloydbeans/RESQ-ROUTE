@@ -6,19 +6,24 @@ import { authProvider } from './authProvider'
 import { Dashboard } from './views/Dashboard'
 import { InventoryHub } from './views/InventoryHub'
 import { IncidentTriage } from './views/IncidentTriage'
-import Sidebar from './components/Sidebar'
 import Login from './views/Login'
 import Register from './views/Register'
 import ResetPassword from './views/ResetPassword'
 import { theme } from './theme'
 
 const AppLayout = (props) => (
-  <Layout {...props} sidebar={Sidebar} />
+  <Layout {...props} sidebar={() => null} appBar={() => null} />
 )
 
 const ProtectedAdmin = () => {
-  const auth = localStorage.getItem('auth')
-  if (!auth) {
+  let auth = null
+  try {
+    auth = JSON.parse(localStorage.getItem('auth'))
+  } catch {
+    localStorage.removeItem('auth')
+  }
+
+  if (!auth?.token || !auth?.user?.role) {
     return <Navigate to="/login" replace />
   }
   return (
