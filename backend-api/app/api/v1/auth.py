@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlmodel import select
@@ -285,7 +285,7 @@ async def create_alert(
     await telemetry_manager.broadcast({
         "type": "alert_created",
         "data": EmergencyAlertRead.model_validate(alert).model_dump(mode="json"),
-        "timestamp": datetime.utcnow().timestamp(),
+        "timestamp": datetime.now(timezone.utc).timestamp(),
     })
     return alert
 
@@ -348,7 +348,7 @@ async def update_alert(
     await telemetry_manager.broadcast({
         "type": "alert_updated",
         "data": EmergencyAlertRead.model_validate(alert).model_dump(mode="json"),
-        "timestamp": datetime.utcnow().timestamp(),
+        "timestamp": datetime.now(timezone.utc).timestamp(),
     })
     return alert
 
@@ -382,7 +382,7 @@ async def acknowledge_alert(
     await telemetry_manager.broadcast({
         "type": "alert_updated",
         "data": EmergencyAlertRead.model_validate(alert).model_dump(mode="json"),
-        "timestamp": datetime.utcnow().timestamp(),
+        "timestamp": datetime.now(timezone.utc).timestamp(),
     })
     return alert
 
@@ -403,7 +403,7 @@ async def register(
         )
 
     # Timezone-safe UTC check
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
     record_expiry = otp_record.expires_at
     if record_expiry.tzinfo is not None:
         record_expiry = record_expiry.replace(tzinfo=None)
@@ -439,7 +439,9 @@ async def register(
         full_name=user_data.full_name,
         role=user_data.role,
         hashed_password=get_password_hash(user_data.password),
-        is_active=True
+        is_active=True,
+        created_at=datetime.now(timezone.utc),
+        updated_at=datetime.now(timezone.utc)
     )
     
     session.add(db_user)
@@ -468,7 +470,7 @@ async def send_otp(
 
     # 2. Generate 6-digit OTP code valid for 10 minutes
     otp_code = generate_otp_code()
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
     expires_at = now + timedelta(minutes=10)
 
     # 3. Create or update the pending OTP record

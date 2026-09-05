@@ -2,7 +2,6 @@ from sqlmodel import SQLModel, Field, select
 from typing import Optional
 from datetime import datetime, timezone
 from enum import Enum
-from sqlmodel import SQLModel, Field
 
 class UserRole(str, Enum):
     ADMIN = "admin"
@@ -15,8 +14,8 @@ class UserBase(SQLModel):
     username: str = Field(index=True, unique=True)
     email: str = Field(index=True, unique=True)
     full_name: Optional[str] = None
-    role: UserRole = Field(default=UserRole.RESCUER)
-    is_active: bool = Field(default=True)
+    role: UserRole = UserRole.RESCUER
+    is_active: bool = True
 
 class User(UserBase, table=True):
     __tablename__ = "user"
@@ -28,12 +27,6 @@ class User(UserBase, table=True):
     updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 print("Mapped table name is:", User.__tablename__)
-
-# class User(UserBase, table=True):
-#     id: Optional[int] = Field(default=None, primary_key=True)
-#     hashed_password: str
-#     created_at: datetime = Field(default_factory=datetime.utcnow)
-#     updated_at: datetime = Field(default_factory=datetime.utcnow)
 
 class UserCreate(UserBase):
     password: str
@@ -54,12 +47,3 @@ class UserUpdate(SQLModel):
 class UserLogin(SQLModel):
     username: str
     password: str
-
-# class OTPVerification(SQLModel, table=True):
-#     __tablename__ = "otp_verifications"
-#     __table_args__ = {"extend_existing": True}
-    
-#     id: int | None = Field(default=None, primary_key=True)
-#     user_id: int = Field(foreign_key="users.id")
-#     otp_code: str
-#     expires_at: datetime
