@@ -1,10 +1,10 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from .api.v1 import auth, shelters, inventory, hazards
+from .api.v1 import auth, shelters, inventory, hazards, road_hazards, routing
 from .api.websockets import telemetry
 from .core.config import settings
 from .db.base import init_db
-from .models import center, evacuee, vehicle, report, user, rescuer, emergency_alert
+from .models import center, evacuee, vehicle, report, user, rescuer, emergency_alert, road_hazard
 
 app = FastAPI(title="RESQ-Route API", version="1.0.0")
 
@@ -35,6 +35,8 @@ app.include_router(auth.router, prefix="/api/v1/auth", tags=["auth"])
 app.include_router(shelters.router, prefix="/api/v1/shelters", tags=["shelters"])
 app.include_router(inventory.router, prefix="/api/v1/inventory", tags=["inventory"])
 app.include_router(hazards.router, prefix="/api/v1/hazards", tags=["hazards"])
+app.include_router(road_hazards.router, prefix="/api/v1/road-hazards", tags=["road-hazards"])
+app.include_router(routing.router, prefix="/api/v1/routing", tags=["routing"])
 app.include_router(telemetry.router, tags=["websockets"])
 # app.include_router(auth.router, prefix="/api/v1/auth", tags=["rescuers"])
 
