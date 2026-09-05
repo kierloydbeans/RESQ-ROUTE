@@ -62,6 +62,8 @@ export const Dashboard = () => {
   const [evacuationRecommendation, setEvacuationRecommendation] = useState(null)
   const [evacuationLoading, setEvacuationLoading] = useState(false)
   const [evacuationRoute, setEvacuationRoute] = useState(null)
+  const [roadHazards, setRoadHazards] = useState([])
+  const [routeRerouted, setRouteRerouted] = useState(false)
   const [rescuers, setRescuers] = useState([])
   const [selectedRescuerId, setSelectedRescuerId] = useState('')
   const [selectedIncident, setSelectedIncident] = useState('')
@@ -192,10 +194,20 @@ export const Dashboard = () => {
       }
     }
 
+    const loadRoadHazards = async () => {
+      try {
+        const response = await fetch(`${API_BASE_URL}/api/v1/road-hazards/?limit=100`)
+        if (response.ok) setRoadHazards(await response.json())
+      } catch (error) {
+        console.error('Failed to load road hazards', error)
+      }
+    }
+
     loadAlerts()
     loadRescuers()
     loadRescueUnits()
     loadCenters()
+    loadRoadHazards()
   }, [API_BASE_URL])
 
   const handleSendEmergencyAlert = async () => {
@@ -300,20 +312,46 @@ export const Dashboard = () => {
       return
     }
 
-    const origin = `${latestGps.longitude},${latestGps.latitude}`
-    const destination = `${Number(center.longitude)},${Number(center.latitude)}`
     setEvacuationRecommendation(center)
+    setRouteRerouted(false)
+    setAlertStatus('Calculating walking route...')
     try {
-      const response = await fetch(`https://router.project-osrm.org/route/v1/walking/${origin};${destination}?overview=full&geometries=geojson`)
+      const response = await fetch(`${API_BASE_URL}/api/v1/routing/walk`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          origin_latitude: latestGps.latitude,
+          origin_longitude: latestGps.longitude,
+          destination_latitude: Number(center.latitude),
+          destination_longitude: Number(center.longitude)
+        })
+      })
       if (!response.ok) throw new Error(`Routing service returned HTTP ${response.status}`)
       const data = await response.json()
-      const geometry = data.routes?.[0]?.geometry
-      if (!geometry) throw new Error('Routing service returned no route')
+      const geometry = data.geometry
+      if (!geometry?.coordinates?.length) throw new Error('Routing service returned no route')
       setEvacuationRoute(geometry)
-      console.info('[RESQ citizen] Walking route loaded', { centerId: center.id, distanceMeters: data.routes[0].distance, durationSeconds: data.routes[0].duration })
+      setRouteRerouted(Boolean(data.rerouted))
+      const avoided = data.avoided_hazards || []
+      if (data.rerouted && avoided.length) {
+        const names = avoided.map((hazard) => hazard.road_name || hazard.hazard_type).join(', ')
+        setAlertStatus(`Rerouted around road hazards: ${names}.`)
+      } else {
+        setAlertStatus(data.message || 'Walking route ready.')
+      }
+      console.info('[RESQ citizen] Walking route loaded', {
+        centerId: center.id,
+        engine: data.engine,
+        algorithm: data.algorithm,
+        rerouted: data.rerouted,
+        distanceMeters: data.distance_meters,
+        durationSeconds: data.duration_seconds
+      })
     } catch (error) {
       console.warn('[RESQ citizen] Walking route unavailable, using direct route', error)
+      setRouteRerouted(false)
       setEvacuationRoute({ type: 'LineString', coordinates: [[Number(latestGps.longitude), Number(latestGps.latitude)], [Number(center.longitude), Number(center.latitude)]] })
+      setAlertStatus('Walking route unavailable. Showing a direct path.')
     }
   }
 
@@ -454,7 +492,14 @@ export const Dashboard = () => {
     icon: '▣'
   }))
 
-  const mapMarkers = [...centerMarkers, ...alertMarkers, ...rescuerMarkers, ...vehicleMarkers]
+  const hazardMarkers = roadHazards.filter((hazard) => hazard.is_active !== false && !hazard.is_resolved).map((hazard) => ({
+    position: [hazard.longitude, hazard.latitude],
+    label: `${hazard.road_name || 'Road hazard'} · ${String(hazard.hazard_type).replace(/_/g, ' ')} (${hazard.radius_meters}m)`,
+    color: '#ea580c',
+    icon: '!'
+  }))
+
+  const mapMarkers = [...centerMarkers, ...alertMarkers, ...rescuerMarkers, ...vehicleMarkers, ...hazardMarkers]
   const primaryCenter = centers.find((center) => center.is_active !== false) || centers[0]
   const primaryOccupancy = primaryCenter?.capacity > 0 ? Math.round((primaryCenter.current_occupancy / primaryCenter.capacity) * 100) : 0
 
@@ -525,7 +570,7 @@ export const Dashboard = () => {
       <main className="citizen-console">
         <header className="citizen-header"><div className="brand-lockup"><Logo size="small" /><div><strong>RESQ-ROUTE</strong><span>CITIZEN SAFETY NETWORK</span></div></div><div className="header-actions"><span className={`connection ${isConnected ? 'online' : 'offline'}`}><i /> {isConnected ? 'Connected' : 'Reconnecting'}</span><button className="icon-button" onClick={() => setIsDark((value) => !value)} aria-label="Toggle light and dark mode">{isDark ? '☼' : '☾'}</button>{accountMenu}</div></header>
         <section className="citizen-hero"><div><span className="eyebrow">CITIZEN EMERGENCY CHANNEL</span><h1>Get help when every second counts.</h1><p>Your alert shares your current location with the response team so dispatchers can coordinate assistance.</p></div><div className={`signal-card ${isConnected ? 'signal-live' : ''}`}><i /><b>{isConnected ? 'RESPONSE NETWORK ONLINE' : 'CONNECTING TO RESPONSE NETWORK'}</b><small>Last checked just now</small></div></section>
-        <section className="citizen-grid"><div className="citizen-evacuation"><div className="panel-title"><h2>EVACUATION ROUTING</h2><span>{evacuationRecommendation ? 'ROUTE READY' : 'SELECT A CENTER'}</span></div><div className="citizen-map"><MapContainer markers={centerMarkers} route={evacuationRoute} /></div><div className="evacuation-centers">{centers.filter((center) => center.is_active !== false && Number(center.capacity) > Number(center.current_occupancy || 0)).map((center) => { const occupancy = center.capacity > 0 ? Math.round((center.current_occupancy / center.capacity) * 100) : 0; return <button className={`evacuation-center-choice ${evacuationRecommendation?.id === center.id ? 'selected' : ''}`} key={center.id} onClick={() => handleRouteToCenter(center)}><span><b>{center.name}</b><small>{center.address} · {occupancy}% occupied · {center.capacity - center.current_occupancy} spaces available</small></span><em>{evacuationRecommendation?.id === center.id ? 'ROUTING...' : 'ROUTE HERE'}</em></button>})}</div>{alertStatus && <p className="alert-status">{alertStatus}</p>}</div><div className="alert-composer"><div className="panel-title"><h2>SEND EMERGENCY ALERT</h2><span>PRIORITY CHANNEL</span></div><div className="composer-body"><label>Choose what is happening</label><div className="quick-alerts">{[['flood', '⌁', 'Stranded by flood'], ['earthquake', '⌂', 'Stranded by earthquake'], ['fire', '♨', 'Fire'], ['medical', '+', 'Medical emergency'], ['trapped', '!', 'Trapped / rescue']].map(([value, icon, label]) => <button className={`quick-alert ${value} ${selectedIncident === value ? 'selected' : ''}`} key={value} onClick={() => setSelectedIncident(value)}><span>{icon}</span>{label}</button>)}</div><label>How serious is it?</label><div className="severity-options">{['low', 'medium', 'high', 'critical'].map((severity) => <button className={`severity-option ${severity} ${selectedSeverity === severity ? 'selected' : ''}`} key={severity} onClick={() => setSelectedSeverity(severity)}>{severity}</button>)}</div><label htmlFor="citizen-alert-message">Additional details <small>(optional)</small></label><textarea id="citizen-alert-message" value={alertMessage} onChange={(event) => setAlertMessage(event.target.value)} placeholder="Add injuries, landmarks, or other details if useful" /><div className="location-confirm"><span>⌖</span><div><b>Location attached</b><small>{latestGps ? `${latestGps.latitude.toFixed(5)}° N, ${latestGps.longitude.toFixed(5)}° E` : 'Waiting for device location...'}</small></div><i /></div><button className="emergency-button" onClick={handleSendEmergencyAlert}>SEND ALERT TO DISPATCH</button>{alertStatus && <p className="alert-status">{alertStatus}</p>}</div></div><div className="citizen-side"><div className="citizen-card"><span className="card-kicker">YOUR SAFETY STATUS</span><strong>Ready to respond</strong><p>Keep this page open after sending an alert. Dispatchers may use it to share updates.</p><div className="status-line"><i className="status-dot green" /> GPS telemetry active</div><div className="status-line"><i className={`status-dot ${isConnected ? 'green' : 'red'}`} /> Dispatch connection {isConnected ? 'stable' : 'offline'}</div></div><div className="citizen-card quiet-card"><span className="card-kicker">EMERGENCY TIP</span><strong>Move to a safe, visible area</strong><p>Stay away from floodwater, live wires, and unstable structures. Signal responders if it is safe to do so.</p></div></div></section>
+        <section className="citizen-grid"><div className="citizen-evacuation"><div className="panel-title"><h2>EVACUATION ROUTING</h2><span>{routeRerouted ? 'REROUTED' : evacuationRecommendation ? 'ROUTE READY' : 'SELECT A CENTER'}</span></div><div className="citizen-map"><MapContainer markers={[...centerMarkers, ...hazardMarkers]} route={evacuationRoute} /></div><div className="evacuation-centers">{centers.filter((center) => center.is_active !== false && Number(center.capacity) > Number(center.current_occupancy || 0)).map((center) => { const occupancy = center.capacity > 0 ? Math.round((center.current_occupancy / center.capacity) * 100) : 0; return <button className={`evacuation-center-choice ${evacuationRecommendation?.id === center.id ? 'selected' : ''}`} key={center.id} onClick={() => handleRouteToCenter(center)}><span><b>{center.name}</b><small>{center.address} · {occupancy}% occupied · {center.capacity - center.current_occupancy} spaces available</small></span><em>{evacuationRecommendation?.id === center.id ? 'ROUTING...' : 'ROUTE HERE'}</em></button>})}</div>{alertStatus && <p className="alert-status">{alertStatus}</p>}</div><div className="alert-composer"><div className="panel-title"><h2>SEND EMERGENCY ALERT</h2><span>PRIORITY CHANNEL</span></div><div className="composer-body"><label>Choose what is happening</label><div className="quick-alerts">{[['flood', '⌁', 'Stranded by flood'], ['earthquake', '⌂', 'Stranded by earthquake'], ['fire', '♨', 'Fire'], ['medical', '+', 'Medical emergency'], ['trapped', '!', 'Trapped / rescue']].map(([value, icon, label]) => <button className={`quick-alert ${value} ${selectedIncident === value ? 'selected' : ''}`} key={value} onClick={() => setSelectedIncident(value)}><span>{icon}</span>{label}</button>)}</div><label>How serious is it?</label><div className="severity-options">{['low', 'medium', 'high', 'critical'].map((severity) => <button className={`severity-option ${severity} ${selectedSeverity === severity ? 'selected' : ''}`} key={severity} onClick={() => setSelectedSeverity(severity)}>{severity}</button>)}</div><label htmlFor="citizen-alert-message">Additional details <small>(optional)</small></label><textarea id="citizen-alert-message" value={alertMessage} onChange={(event) => setAlertMessage(event.target.value)} placeholder="Add injuries, landmarks, or other details if useful" /><div className="location-confirm"><span>⌖</span><div><b>Location attached</b><small>{latestGps ? `${latestGps.latitude.toFixed(5)}° N, ${latestGps.longitude.toFixed(5)}° E` : 'Waiting for device location...'}</small></div><i /></div><button className="emergency-button" onClick={handleSendEmergencyAlert}>SEND ALERT TO DISPATCH</button>{alertStatus && <p className="alert-status">{alertStatus}</p>}</div></div><div className="citizen-side"><div className="citizen-card"><span className="card-kicker">YOUR SAFETY STATUS</span><strong>Ready to respond</strong><p>Keep this page open after sending an alert. Dispatchers may use it to share updates.</p><div className="status-line"><i className="status-dot green" /> GPS telemetry active</div><div className="status-line"><i className={`status-dot ${isConnected ? 'green' : 'red'}`} /> Dispatch connection {isConnected ? 'stable' : 'offline'}</div></div><div className="citizen-card quiet-card"><span className="card-kicker">EMERGENCY TIP</span><strong>Move to a safe, visible area</strong><p>Stay away from floodwater, live wires, and unstable structures. Signal responders if it is safe to do so.</p></div></div></section>
       </main>
     )
   }
