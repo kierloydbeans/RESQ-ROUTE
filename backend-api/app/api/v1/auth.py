@@ -285,7 +285,7 @@ async def create_alert(
     await telemetry_manager.broadcast({
         "type": "alert_created",
         "data": EmergencyAlertRead.model_validate(alert).model_dump(mode="json"),
-        "timestamp": datetime.now(timezone.utc).timestamp(),
+        "timestamp": datetime.utcnow().timestamp(),
     })
     return alert
 
@@ -348,7 +348,7 @@ async def update_alert(
     await telemetry_manager.broadcast({
         "type": "alert_updated",
         "data": EmergencyAlertRead.model_validate(alert).model_dump(mode="json"),
-        "timestamp": datetime.now(timezone.utc).timestamp(),
+        "timestamp": datetime.utcnow().timestamp(),
     })
     return alert
 
@@ -382,7 +382,7 @@ async def acknowledge_alert(
     await telemetry_manager.broadcast({
         "type": "alert_updated",
         "data": EmergencyAlertRead.model_validate(alert).model_dump(mode="json"),
-        "timestamp": datetime.now(timezone.utc).timestamp(),
+        "timestamp": datetime.utcnow().timestamp(),
     })
     return alert
 
@@ -403,7 +403,7 @@ async def register(
         )
 
     # Timezone-safe UTC check
-    now = datetime.now(timezone.utc)
+    now = datetime.utcnow()
     record_expiry = otp_record.expires_at
     if record_expiry.tzinfo is not None:
         record_expiry = record_expiry.replace(tzinfo=None)
@@ -470,7 +470,7 @@ async def send_otp(
 
     # 2. Generate 6-digit OTP code valid for 10 minutes
     otp_code = generate_otp_code()
-    now = datetime.now(timezone.utc)
+    now = datetime.utcnow()
     expires_at = now + timedelta(minutes=10)
 
     # 3. Create or update the pending OTP record
