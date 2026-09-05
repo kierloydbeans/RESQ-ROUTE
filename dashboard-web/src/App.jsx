@@ -8,6 +8,7 @@ import { InventoryHub } from './views/InventoryHub'
 import { IncidentTriage } from './views/IncidentTriage'
 import Login from './views/Login'
 import Register from './views/Register'
+import RescuerDashboard from './views/RescuerDashboard'
 import ResetPassword from './views/ResetPassword'
 import { theme } from './theme'
 
@@ -26,6 +27,7 @@ const ProtectedAdmin = () => {
   if (!auth?.token || !auth?.user?.role) {
     return <Navigate to="/login" replace />
   }
+
   return (
     <Admin
       theme={theme}
@@ -47,8 +49,9 @@ function App() {
       <Routes>
         <Route path="/login" element={<Login />} />
         <Route path="/register" element={<Register />} />
-        <Route path="/*" element={<ProtectedAdmin />} />
         <Route path="/reset-password" element={<ResetPassword />} />
+        <Route path="/rescuer" element={<RescuerDashboard />} />
+        <Route path="/*" element={<ProtectedAdmin />} />
       </Routes>
     </Router>
   )

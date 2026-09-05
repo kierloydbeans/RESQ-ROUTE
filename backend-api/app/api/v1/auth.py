@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlmodel import select
@@ -439,7 +439,9 @@ async def register(
         full_name=user_data.full_name,
         role=user_data.role,
         hashed_password=get_password_hash(user_data.password),
-        is_active=True
+        is_active=True,
+        created_at=datetime.now(timezone.utc),
+        updated_at=datetime.now(timezone.utc)
     )
     
     session.add(db_user)
