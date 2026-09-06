@@ -8,6 +8,7 @@ class VehicleBase(SQLModel):
     driver_name: str
     driver_phone: str
     capacity: int
+    rescuer_onboard: Optional[str] = None
     current_location_lat: Optional[float] = None
     current_location_lng: Optional[float] = None
     status: str = "available"  # available, in_transit, maintenance
@@ -33,6 +34,7 @@ class VehicleUpdate(SQLModel):
     driver_name: Optional[str] = None
     driver_phone: Optional[str] = None
     capacity: Optional[int] = None
+    rescuer_onboard: Optional[str] = None
     current_location_lat: Optional[float] = None
     current_location_lng: Optional[float] = None
     status: Optional[str] = None

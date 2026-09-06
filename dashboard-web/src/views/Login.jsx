@@ -1,6 +1,9 @@
 import React, { useState } from 'react'
-import { useNavigate, Link } from 'react-router-dom'
+import { useNavigate, Link, useParams } from 'react-router-dom'
+import { Eye, EyeOff } from 'lucide-react'
 import Logo from '../components/Logo'
+import GradientBackground from '../components/GradientBackground'
+import { useTheme } from '../ThemeContext'
 
 <img src="/resq_logo_with_label.png" alt="ResQ Route Logo" />
 
@@ -8,14 +11,24 @@ const rawApiBase = (import.meta.env.VITE_API_URL || import.meta.env.VITE_API_BAS
 const API_BASE_URL = rawApiBase.endsWith('/api/v1') ? rawApiBase.replace(/\/api\/v1$/, '') : rawApiBase
 const API_URL = `${API_BASE_URL}/api/v1`
 
+const roles = [
+  { value: 'citizen', label: 'Citizen' },
+  { value: 'dispatcher', label: 'Dispatcher' },
+  { value: 'rescuer', label: 'Rescuer' },
+  { value: 'coordinator', label: 'Coordinator' }
+]
+
 const Login = () => {
+  const { role: routeRole } = useParams()
+  const role = roles.some((item) => item.value === routeRole) ? routeRole : 'citizen'
+  const { isShaderGradient } = useTheme()
   const [formData, setFormData] = useState({
     username: '',
-    password: '',
-    role: 'citizen'
+    password: ''
   })
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
+  const [showPassword, setShowPassword] = useState(false)
 
   // Forgot Password Modal States
   const [showForgotModal, setShowForgotModal] = useState(false)
@@ -41,7 +54,7 @@ const Login = () => {
       console.info('[RESQ auth] Login request', {
         url: `${API_URL}/auth/login-role`,
         username: formData.username,
-        role: formData.role,
+        role,
         origin: window.location.origin
       })
       const response = await fetch(`${API_URL}/auth/login-role`, {
@@ -52,7 +65,7 @@ const Login = () => {
         body: JSON.stringify({
           username: formData.username,
           password: formData.password,
-          role: formData.role
+          role
         })
       })
 
@@ -124,7 +137,7 @@ const Login = () => {
   }
 
   return (
-    <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', backgroundColor: '#f3f4f6', padding: '1.5rem' }}>
+    <div className="login-page" style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', backgroundColor: '#f3f4f6', padding: '1.5rem' }}>
       <div style={{
         maxWidth: '960px',
         width: '100%',
@@ -147,13 +160,31 @@ const Login = () => {
           position: 'relative',
           overflow: 'hidden'
         }}>
+          <GradientBackground animated={isShaderGradient} />
           {/* Subtle Decorative Pattern SVG */}
-          <svg style={{ position: 'absolute', top: 0, left: 0, opacity: 0.1, pointerEvents: 'none' }} width="100%" height="100%">
+          <svg className={isShaderGradient ? 'shader-decoration-hidden' : ''} style={{ position: 'absolute', top: 0, left: 0, opacity: 0.1, pointerEvents: 'none' }} width="100%" height="100%">
             <circle cx="10%" cy="20%" r="120" stroke="#fff" strokeWidth="2" fill="none" />
             <circle cx="80%" cy="80%" r="180" stroke="#fff" strokeWidth="2" fill="none" />
           </svg>
 
           <div style={{ position: 'relative', zIndex: 1 }}>
+            <div style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '0.5rem',
+              padding: '0.45rem 0.75rem',
+              marginBottom: '1.25rem',
+              border: '1px solid rgba(255, 255, 255, 0.35)',
+              borderRadius: '9999px',
+              backgroundColor: 'rgba(255, 255, 255, 0.12)',
+              fontSize: '0.8rem',
+              fontWeight: '700',
+              letterSpacing: '0.08em',
+              textTransform: 'uppercase'
+            }}>
+              <span style={{ width: '0.45rem', height: '0.45rem', borderRadius: '50%', backgroundColor: '#ffffff' }} />
+              {roles.find((item) => item.value === role).label} login
+            </div>
             <h1 style={{ fontSize: '2.5rem', fontWeight: '800', lineHeight: 1.2, marginBottom: '1rem', color: '#ffffff' }}>
               Welcome back!
             </h1>
@@ -164,14 +195,36 @@ const Login = () => {
         </div>
 
         {/* RIGHT PANEL - FORM */}
-        <div style={{ flex: '1', padding: '3rem 2.5rem', display: 'flex', flexDirection: 'column', justifyContent: 'center', backgroundColor: '#ffffff' }}>
+        <div className="login-form-panel" style={{ flex: '1', padding: '3rem 2.5rem', display: 'flex', flexDirection: 'column', justifyContent: 'center', backgroundColor: '#ffffff' }}>
           <div style={{ marginBottom: '2rem' }}>
             <Logo size="large" />
             <h2 style={{ fontSize: '1.75rem', fontWeight: '700', color: '#111827', marginTop: '1rem' }}>Sign In</h2>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem', marginTop: '1.25rem' }} aria-label="Choose login role">
+              {roles.map((item) => (
+                <button
+                  key={item.value}
+                  type="button"
+                  onClick={() => navigate(`/login/${item.value}`)}
+                  aria-current={role === item.value ? 'page' : undefined}
+                  style={{
+                    padding: '0.45rem 0.7rem',
+                    borderRadius: '9999px',
+                    border: role === item.value ? '1px solid var(--ops-red)' : '1px solid var(--ops-border)',
+                    backgroundColor: role === item.value ? 'var(--auth-role-active-bg)' : 'var(--ops-surface-2)',
+                    color: role === item.value ? 'var(--ops-red)' : 'var(--ops-muted)',
+                    fontSize: '0.75rem',
+                    fontWeight: '700',
+                    cursor: 'pointer'
+                  }}
+                >
+                  {item.label}
+                </button>
+              ))}
+            </div>
           </div>
 
           {error && (
-            <div className="alert alert-error" style={{ marginBottom: '1.25rem', padding: '0.75rem 1rem', borderRadius: '8px', fontSize: '0.875rem' }}>
+            <div className="alert alert-error" style={{ marginBottom: '1.25rem', padding: '0.75rem 1rem', borderRadius: '8px', border: '1px solid #fecaca', backgroundColor: '#fef2f2', color: '#991b1b', fontSize: '0.875rem' }}>
               {error}
             </div>
           )}
@@ -191,6 +244,7 @@ const Login = () => {
                   borderRadius: '9999px',
                   border: '1px solid #e5e7eb',
                   backgroundColor: '#f9fafb',
+                  fontFamily: "'Rajdhani', 'Arial Narrow', sans-serif",
                   fontSize: '0.95rem',
                   outline: 'none',
                   boxSizing: 'border-box'
@@ -198,9 +252,9 @@ const Login = () => {
               />
             </div>
 
-            <div style={{ marginBottom: '1rem' }}>
+            <div style={{ position: 'relative', marginBottom: '1rem' }}>
               <input
-                type="password"
+                type={showPassword ? 'text' : 'password'}
                 name="password"
                 value={formData.password}
                 onChange={handleChange}
@@ -208,38 +262,38 @@ const Login = () => {
                 placeholder="Password"
                 style={{
                   width: '100%',
-                  padding: '0.875rem 1.25rem',
+                  padding: '0.875rem 3.25rem 0.875rem 1.25rem',
                   borderRadius: '9999px',
                   border: '1px solid #e5e7eb',
                   backgroundColor: '#f9fafb',
+                  fontFamily: "'Rajdhani', 'Arial Narrow', sans-serif",
                   fontSize: '0.95rem',
                   outline: 'none',
                   boxSizing: 'border-box'
                 }}
               />
-            </div>
-
-            <div style={{ marginBottom: '1rem' }}>
-              <select
-                name="role"
-                value={formData.role}
-                onChange={handleChange}
+              <button
+                type="button"
+                onClick={() => setShowPassword((visible) => !visible)}
+                aria-label={showPassword ? 'Hide password' : 'Show password'}
+                title={showPassword ? 'Hide password' : 'Show password'}
                 style={{
-                  width: '100%',
-                  padding: '0.875rem 1.25rem',
-                  borderRadius: '9999px',
-                  border: '1px solid #e5e7eb',
-                  backgroundColor: '#f9fafb',
-                  fontSize: '0.95rem',
-                  outline: 'none',
-                  boxSizing: 'border-box'
+                  position: 'absolute',
+                  top: '50%',
+                  right: '1rem',
+                  transform: 'translateY(-50%)',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  padding: '0.25rem',
+                  border: 'none',
+                  background: 'none',
+                  color: '#6b7280',
+                  cursor: 'pointer'
                 }}
               >
-                <option value="citizen">Citizen</option>
-                <option value="rescuer">Rescuer</option>
-                <option value="coordinator">Coordinator</option>
-                <option value="dispatcher">Dispatcher</option>
-              </select>
+                {showPassword ? <EyeOff size={18} strokeWidth={2} /> : <Eye size={18} strokeWidth={2} />}
+              </button>
             </div>
 
             <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '1.75rem' }}>
@@ -303,7 +357,7 @@ const Login = () => {
           zIndex: 1000,
           padding: '1rem'
         }}>
-          <div style={{ maxWidth: '420px', width: '100%', backgroundColor: '#fff', borderRadius: '16px', padding: '2rem', boxShadow: '0 20px 25px -5px rgba(0,0,0,0.2)' }}>
+          <div className="login-modal" style={{ maxWidth: '420px', width: '100%', backgroundColor: '#fff', borderRadius: '16px', padding: '2rem', boxShadow: '0 20px 25px -5px rgba(0,0,0,0.2)' }}>
             <h3 style={{ marginTop: 0, marginBottom: '0.5rem', fontSize: '1.25rem', fontWeight: '700', color: '#111827' }}>
               Reset Password
             </h3>
@@ -331,6 +385,7 @@ const Login = () => {
                     borderRadius: '9999px',
                     border: '1px solid #e5e7eb',
                     backgroundColor: '#f9fafb',
+                    fontFamily: "'Rajdhani', 'Arial Narrow', sans-serif",
                     fontSize: '0.95rem',
                     boxSizing: 'border-box'
                   }}
@@ -345,8 +400,8 @@ const Login = () => {
                     padding: '0.625rem 1.25rem',
                     borderRadius: '9999px',
                     border: 'none',
-                    backgroundColor: '#e5e7eb',
-                    color: '#374151',
+                    backgroundColor: 'var(--ops-border)',
+                    color: 'var(--ops-text)',
                     fontWeight: '600',
                     cursor: 'pointer'
                   }}

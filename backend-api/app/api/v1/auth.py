@@ -1,4 +1,5 @@
 from datetime import datetime, timedelta, timezone
+import json
 from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlmodel import select
@@ -245,6 +246,7 @@ async def list_rescue_units(session: AsyncSession = Depends(get_session)):
                 "driver_name": vehicle.driver_name,
                 "capacity": vehicle.capacity,
                 "status": vehicle.status,
+                "rescuer_onboard": vehicle.rescuer_onboard,
                 "center_id": vehicle.center_id,
                 "current_location_lat": vehicle.current_location_lat,
                 "current_location_lng": vehicle.current_location_lng,
@@ -275,7 +277,8 @@ async def create_alert(
         "message": payload.get("message", "Emergency alert"),
         "status": payload.get("status", AlertStatus.PENDING),
         "assigned_rescuer_id": payload.get("assigned_rescuer_id"),
-        "assigned_rescuer_name": payload.get("assigned_rescuer_name")
+        "assigned_rescuer_name": payload.get("assigned_rescuer_name"),
+        "assigned_vehicle_ids": payload.get("assigned_vehicle_ids")
     }
     alert = EmergencyAlert.model_validate(alert_data)
 
@@ -309,6 +312,7 @@ async def update_alert(
     if not alert:
         raise HTTPException(status_code=404, detail="Alert not found")
     assigned_user_id = payload.get("assigned_rescuer_id")
+    assigned_vehicle_ids = payload.get("assigned_vehicle_ids")
 
     if assigned_user_id:
         # Verify the user exists and has role rescuer
@@ -331,6 +335,7 @@ async def update_alert(
             session.add(rescuer_profile)
             await session.commit()
             await session.refresh(rescuer_profile)
+        rescuer_profile.status = RescuerStatus.ASSIGNED
 
         # The alert field references user.id, so acknowledgement can resolve the profile later.
         payload["assigned_rescuer_id"] = assigned_user_id
@@ -338,6 +343,16 @@ async def update_alert(
         payload.setdefault("assigned_rescuer_name", rescuer_user.full_name or rescuer_user.username)
         # default status to assigned if caller didn't set it
         payload.setdefault("status", AlertStatus.ASSIGNED)
+
+    try:
+        vehicle_ids = [int(vehicle_id) for vehicle_id in json.loads(assigned_vehicle_ids or "[]")]
+    except (TypeError, ValueError, json.JSONDecodeError):
+        vehicle_ids = []
+    if vehicle_ids:
+        vehicle_result = await session.execute(select(Vehicle).where(Vehicle.id.in_(vehicle_ids)))
+        for vehicle in vehicle_result.scalars().all():
+            vehicle.status = "assigned"
+            vehicle.rescuer_onboard = rescuer_user.full_name or rescuer_user.username
 
     for field, value in payload.items():
         if hasattr(alert, field):
@@ -376,6 +391,14 @@ async def acknowledge_alert(
         raise HTTPException(status_code=404, detail="Rescuer profile not found")
 
     profile.status = RescuerStatus.IN_TRANSIT
+    try:
+        vehicle_ids = [int(vehicle_id) for vehicle_id in json.loads(alert.assigned_vehicle_ids or "[]")]
+    except (TypeError, ValueError, json.JSONDecodeError):
+        vehicle_ids = []
+    if vehicle_ids:
+        vehicle_result = await session.execute(select(Vehicle).where(Vehicle.id.in_(vehicle_ids)))
+        for vehicle in vehicle_result.scalars().all():
+            vehicle.status = "in_transit"
     alert.status = AlertStatus.RESOLVING
     await session.commit()
     await session.refresh(alert)
