@@ -1,6 +1,8 @@
 import React, { useState } from 'react'
 import { useNavigate, Link } from 'react-router-dom'
 import Logo from '../components/Logo'
+import GradientBackground from '../components/GradientBackground'
+import { useTheme } from '../ThemeContext'
 
 <img src="/resq_logo_with_label.png" alt="ResQ Route Logo" />
 
@@ -9,6 +11,7 @@ const API_BASE_URL = rawApiBase.endsWith('/api/v1') ? rawApiBase.replace(/\/api\
 const API_URL = `${API_BASE_URL}/api/v1`
 
 const Register = () => {
+  const { isShaderGradient } = useTheme()
   const [formData, setFormData] = useState({
     username: '',
     email: '',
@@ -121,15 +124,16 @@ const Register = () => {
     width: '100%',
     padding: '0.75rem 1.25rem',
     borderRadius: '9999px',
-    border: '1px solid #e5e7eb',
-    backgroundColor: '#f9fafb',
+    border: '1px solid var(--ops-border)',
+    backgroundColor: 'var(--ops-surface-2)',
+    color: 'var(--ops-text)',
     fontSize: '0.9rem',
     outline: 'none',
     boxSizing: 'border-box'
   }
 
   return (
-    <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', backgroundColor: '#f3f4f6', padding: '1.5rem' }}>
+    <div className="auth-page" style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', backgroundColor: '#f3f4f6', padding: '1.5rem' }}>
       <div style={{
         maxWidth: '1000px',
         width: '100%',
@@ -150,6 +154,7 @@ const Register = () => {
           color: '#ffffff',
           position: 'relative'
         }}>
+          <GradientBackground animated={isShaderGradient} />
           <h1 style={{ fontSize: '2.5rem', fontWeight: '800', lineHeight: 1.2, marginBottom: '1rem', color: '#ffffff' }}>
             Join ResQ-Route
           </h1>
@@ -159,7 +164,7 @@ const Register = () => {
         </div>
 
         {/* RIGHT PANEL */}
-        <div style={{ flex: '1.2', padding: '2.5rem 2.5rem', display: 'flex', flexDirection: 'column', justifyContent: 'center', backgroundColor: '#ffffff' }}>
+        <div className="auth-form-panel" style={{ flex: '1.2', padding: '2.5rem 2.5rem', display: 'flex', flexDirection: 'column', justifyContent: 'center', backgroundColor: '#ffffff' }}>
           <div style={{ marginBottom: '1.5rem' }}>
             <Logo size="large" />
             <h2 style={{ fontSize: '1.5rem', fontWeight: '700', color: '#111827', marginTop: '0.5rem' }}>Create an Account</h2>

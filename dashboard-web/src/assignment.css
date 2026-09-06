@@ -1,0 +1,29 @@
+.assignment-back {
+  margin-bottom: 14px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--ops-muted);
+  cursor: pointer;
+  font: 10px var(--ops-mono);
+}
+
+.assignment-back:hover { color: var(--ops-red); }
+.assignment-selected-rescuer { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 14px; padding-bottom: 10px; border-bottom: 1px solid var(--ops-border); color: var(--ops-text); }
+.assignment-selected-rescuer span { color: var(--ops-green); font: 9px var(--ops-mono); text-transform: uppercase; }
+.vehicle-deployment-list { display: grid; gap: 6px; margin: 10px 0 16px; }
+.vehicle-deployment-choice { display: flex; align-items: center; gap: 10px; padding: 10px; border: 1px solid var(--ops-border); background: var(--ops-surface-2); color: var(--ops-text); cursor: pointer; }
+.vehicle-deployment-choice.selected { border-color: var(--ops-green); background: color-mix(in srgb, var(--ops-green) 10%, var(--ops-surface-2)); }
+.vehicle-deployment-choice input { accent-color: var(--ops-green); }
+.vehicle-deployment-choice span { flex: 1; }
+.vehicle-deployment-choice b, .vehicle-deployment-choice small { display: block; }
+.vehicle-deployment-choice small { margin-top: 3px; color: var(--ops-muted); font: 9px var(--ops-mono); }
+.vehicle-deployment-choice em { color: var(--ops-green); font: 9px var(--ops-mono); font-style: normal; text-transform: uppercase; }
+.assignment-confirm { width: 100%; padding: 11px; border: 1px solid var(--ops-green); background: var(--ops-green); color: #06130f; cursor: pointer; font-weight: 800; }
+.rescuer-deployed-vehicles { display: grid; gap: 4px; padding: 10px; border-left: 2px solid var(--ops-green); background: var(--ops-surface-2); }
+.rescuer-deployed-vehicles small { color: var(--ops-green); font: 9px var(--ops-mono); }
+.rescuer-deployed-vehicles span { color: var(--ops-text); font: 10px var(--ops-mono); }
+.rescuer-route-link { display: block; width: 100%; margin-top: 7px; padding: 8px 10px; border: 1px solid var(--ops-blue); background: transparent; color: var(--ops-blue); cursor: pointer; font: 9px var(--ops-mono); text-align: center; }
+.rescuer-route-link:hover { background: var(--ops-blue); color: #061321; }
+.rescuer-route-error { display: block; margin-top: 6px; color: var(--ops-red); font: 9px var(--ops-mono); }
+.rescuer-route-map { height: 220px; margin-top: 9px; overflow: hidden; border: 1px solid var(--ops-border); }
