@@ -32,7 +32,7 @@ const ProtectedAdmin = () => {
     <Admin
       theme={theme}
       dataProvider={dataProvider}
-      authProvider={authProvider}
+      /*authProvider={authProvider}*/
       layout={AppLayout}
       dashboard={Dashboard}
     >
