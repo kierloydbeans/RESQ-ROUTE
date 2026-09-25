@@ -15,7 +15,6 @@ const roles = [
   { value: 'rescuer', label: 'Rescuer' },
   { value: 'coordinator', label: 'Coordinator' }
 ]
-
 const BackgroundPin = ({ top, left, delay }) => (
   <svg
     className="pulsing-pin"
