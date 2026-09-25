@@ -1,11 +1,9 @@
-import React, { useState } from 'react'
+import React, { useState, useEffect } from 'react'
 import { useNavigate, Link, useParams } from 'react-router-dom'
 import { Eye, EyeOff } from 'lucide-react'
 import Logo from '../components/Logo'
 import GradientBackground from '../components/GradientBackground'
 import { useTheme } from '../ThemeContext'
-
-<img src="/resq_logo_with_label.png" alt="ResQ Route Logo" />
 
 const rawApiBase = (import.meta.env.VITE_API_URL || import.meta.env.VITE_API_BASE_URL || 'https://resq-route.onrender.com').replace(/\/$/, '')
 const API_BASE_URL = rawApiBase.endsWith('/api/v1') ? rawApiBase.replace(/\/api\/v1$/, '') : rawApiBase
@@ -18,50 +16,60 @@ const roles = [
   { value: 'coordinator', label: 'Coordinator' }
 ]
 
+const BackgroundPin = ({ top, left, delay }) => (
+  <svg
+    className="pulsing-pin"
+    style={{
+      position: 'absolute',
+      top,
+      left,
+      width: '32px',
+      height: '32px',
+      animationDelay: delay,
+      zIndex: 0
+    }}
+    viewBox="0 0 24 24"
+    xmlns="http://www.w3.org/2000/svg"
+  >
+    <path d="M12 21.5C16.5 16 19 12.5 19 8.5C19 4.35786 15.866 1 12 1C8.13401 1 5 4.35786 5 8.5C5 12.5 7.5 16 12 21.5Z" fill="#ffffff" />
+    <circle cx="12" cy="8.5" r="3.5" fill="#c52222" />
+  </svg>
+)
+
 const Login = () => {
   const { role: routeRole } = useParams()
   const role = roles.some((item) => item.value === routeRole) ? routeRole : 'citizen'
   const { isShaderGradient } = useTheme()
-  const [formData, setFormData] = useState({
-    username: '',
-    password: ''
-  })
+  const [formData, setFormData] = useState({ username: '', password: '' })
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
   const [showPassword, setShowPassword] = useState(false)
-
-  // Forgot Password Modal States
   const [showForgotModal, setShowForgotModal] = useState(false)
   const [resetEmail, setResetEmail] = useState('')
   const [resetLoading, setResetLoading] = useState(false)
   const [resetMessage, setResetMessage] = useState({ type: '', text: '' })
-
+  const [isPageLoading, setIsPageLoading] = useState(true)
   const navigate = useNavigate()
 
-  const handleChange = (e) => {
-    setFormData({
-      ...formData,
-      [e.target.name]: e.target.value
-    })
+  useEffect(() => {
+    const timer = setTimeout(() => setIsPageLoading(false), 1200)
+    return () => clearTimeout(timer)
+  }, [])
+
+  const handleChange = (event) => {
+    const { name, value } = event.target
+    setFormData((current) => ({ ...current, [name]: value }))
   }
 
-  const handleSubmit = async (e) => {
-    e.preventDefault()
+  const handleSubmit = async (event) => {
+    event.preventDefault()
     setError('')
     setLoading(true)
 
     try {
-      console.info('[RESQ auth] Login request', {
-        url: `${API_URL}/auth/login-role`,
-        username: formData.username,
-        role,
-        origin: window.location.origin
-      })
       const response = await fetch(`${API_URL}/auth/login-role`, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           username: formData.username,
           password: formData.password,
@@ -69,16 +77,8 @@ const Login = () => {
         })
       })
 
-      console.info('[RESQ auth] Login response', {
-        url: response.url,
-        status: response.status,
-        ok: response.ok
-      })
       const data = await response.json()
-
-      if (!response.ok) {
-        throw new Error(data.detail || 'Login failed')
-      }
+      if (!response.ok) throw new Error(data.detail || 'Login failed')
 
       localStorage.setItem('auth', JSON.stringify({
         token: data.access_token,
@@ -87,36 +87,26 @@ const Login = () => {
 
       navigate('/')
     } catch (err) {
-      console.error('[RESQ auth] Login request failed', {
-        message: err.message,
-        apiUrl: API_URL,
-        origin: window.location.origin
-      })
       setError(err.message)
     } finally {
       setLoading(false)
     }
   }
 
-  const handleForgotPasswordSubmit = async (e) => {
-    e.preventDefault()
+  const handleForgotPasswordSubmit = async (event) => {
+    event.preventDefault()
     setResetMessage({ type: '', text: '' })
     setResetLoading(true)
 
     try {
       const response = await fetch(`${API_URL}/auth/forgot-password`, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email: resetEmail })
       })
 
       const data = await response.json()
-
-      if (!response.ok) {
-        throw new Error(data.detail || 'Failed to send reset email')
-      }
+      if (!response.ok) throw new Error(data.detail || 'Failed to send reset email')
 
       setResetMessage({
         type: 'success',
@@ -136,8 +126,64 @@ const Login = () => {
     setResetMessage({ type: '', text: '' })
   }
 
+  const skeletonPulseStyle = `
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: .35; }
+    }
+    .skeleton-box {
+      animation: pulse 1.5s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+      background-color: #e5e7eb;
+    }
+  `
+
+  const pinPulseStyle = `
+    @keyframes opacityPulse {
+      0%, 100% { opacity: 0.1; }
+      50% { opacity: 0.75; }
+    }
+    .pulsing-pin {
+      animation: opacityPulse 4s ease-in-out infinite;
+      pointer-events: none;
+    }
+  `
+
+  if (isPageLoading) {
+    return (
+      <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', backgroundColor: '#f3f4f6', padding: '1.5rem' }}>
+        <style>{skeletonPulseStyle}</style>
+        <div style={{
+          maxWidth: '960px',
+          width: '100%',
+          minHeight: '560px',
+          display: 'flex',
+          borderRadius: '20px',
+          overflow: 'hidden',
+          boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04)',
+          backgroundColor: '#ffffff'
+        }}>
+          <div className="skeleton-box" style={{ flex: '1', backgroundColor: '#d1d5db' }}></div>
+          <div style={{ flex: '1', padding: '3rem 2.5rem', display: 'flex', flexDirection: 'column', justifyContent: 'center', backgroundColor: '#ffffff' }}>
+            <div style={{ marginBottom: '2rem' }}>
+              <div className="skeleton-box" style={{ height: '48px', width: '140px', borderRadius: '8px', marginBottom: '1rem' }}></div>
+              <div className="skeleton-box" style={{ height: '32px', width: '100px', borderRadius: '8px' }}></div>
+            </div>
+            <div className="skeleton-box" style={{ height: '46px', width: '100%', borderRadius: '9999px', marginBottom: '1.25rem' }}></div>
+            <div className="skeleton-box" style={{ height: '46px', width: '100%', borderRadius: '9999px', marginBottom: '1rem' }}></div>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '1.75rem' }}>
+              <div className="skeleton-box" style={{ height: '14px', width: '110px', borderRadius: '4px' }}></div>
+            </div>
+            <div className="skeleton-box" style={{ height: '48px', width: '100%', borderRadius: '9999px' }}></div>
+          </div>
+        </div>
+      </div>
+    )
+  }
+
   return (
-    <div className="login-page" style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', backgroundColor: '#f3f4f6', padding: '1.5rem' }}>
+    <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', backgroundColor: '#f3f4f6', padding: '1.5rem' }}>
+      <style>{pinPulseStyle}</style>
+
       <div style={{
         maxWidth: '960px',
         width: '100%',
@@ -148,10 +194,11 @@ const Login = () => {
         boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04)',
         backgroundColor: '#ffffff'
       }}>
-        {/* LEFT PANEL - BRAND BANNER */}
         <div style={{
           flex: '1',
-          background: 'linear-gradient(135deg, #c52222 0%, #a36b16 100%)',
+          background: `linear-gradient(135deg, rgba(197, 34, 34, 0.85) 0%, rgba(163, 107, 22, 0.85) 100%), url('https://preview.redd.it/was-there-any-urban-masterplan-for-caloocan-city-v0-rcfgre5qrpjc1.jpg?width=640&crop=smart&auto=webp&s=00978c251414bcb6fb0459978ca5eedcd113d39a')`,
+          backgroundSize: 'cover',
+          backgroundPosition: 'center',
           padding: '3rem 2.5rem',
           display: 'flex',
           flexDirection: 'column',
@@ -161,11 +208,16 @@ const Login = () => {
           overflow: 'hidden'
         }}>
           <GradientBackground animated={isShaderGradient} />
-          {/* Subtle Decorative Pattern SVG */}
           <svg className={isShaderGradient ? 'shader-decoration-hidden' : ''} style={{ position: 'absolute', top: 0, left: 0, opacity: 0.1, pointerEvents: 'none' }} width="100%" height="100%">
             <circle cx="10%" cy="20%" r="120" stroke="#fff" strokeWidth="2" fill="none" />
             <circle cx="80%" cy="80%" r="180" stroke="#fff" strokeWidth="2" fill="none" />
           </svg>
+          <BackgroundPin top="15%" left="15%" delay="0s" />
+          <BackgroundPin top="65%" left="10%" delay="1.5s" />
+          <BackgroundPin top="25%" left="75%" delay="0.8s" />
+          <BackgroundPin top="75%" left="80%" delay="2.2s" />
+          <BackgroundPin top="85%" left="40%" delay="3s" />
+          <BackgroundPin top="10%" left="50%" delay="1.2s" />
 
           <div style={{ position: 'relative', zIndex: 1 }}>
             <div style={{
@@ -183,7 +235,7 @@ const Login = () => {
               textTransform: 'uppercase'
             }}>
               <span style={{ width: '0.45rem', height: '0.45rem', borderRadius: '50%', backgroundColor: '#ffffff' }} />
-              {roles.find((item) => item.value === role).label} login
+              {roles.find((item) => item.value === role)?.label || 'Citizen'} login
             </div>
             <h1 style={{ fontSize: '2.5rem', fontWeight: '800', lineHeight: 1.2, marginBottom: '1rem', color: '#ffffff' }}>
               Welcome back!
@@ -194,7 +246,6 @@ const Login = () => {
           </div>
         </div>
 
-        {/* RIGHT PANEL - FORM */}
         <div className="login-form-panel" style={{ flex: '1', padding: '3rem 2.5rem', display: 'flex', flexDirection: 'column', justifyContent: 'center', backgroundColor: '#ffffff' }}>
           <div style={{ marginBottom: '2rem' }}>
             <Logo size="large" />
@@ -345,11 +396,13 @@ const Login = () => {
         </div>
       </div>
 
-      {/* FORGOT PASSWORD MODAL */}
       {showForgotModal && (
         <div style={{
           position: 'fixed',
-          top: 0, left: 0, right: 0, bottom: 0,
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
           backgroundColor: 'rgba(0, 0, 0, 0.5)',
           display: 'flex',
           alignItems: 'center',
@@ -376,7 +429,7 @@ const Login = () => {
                 <input
                   type="email"
                   value={resetEmail}
-                  onChange={(e) => setResetEmail(e.target.value)}
+                  onChange={(event) => setResetEmail(event.target.value)}
                   required
                   placeholder="name@example.com"
                   style={{
