@@ -353,6 +353,8 @@ export const Dashboard = () => {
     loadRescueUnits()
     loadCenters()
     loadRoadHazards()
+    const roadHazardRefresh = window.setInterval(loadRoadHazards, 60_000)
+    return () => window.clearInterval(roadHazardRefresh)
   }, [API_BASE_URL])
 
   const handleSendEmergencyAlert = async () => {

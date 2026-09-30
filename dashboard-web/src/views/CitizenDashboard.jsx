@@ -1,7 +1,8 @@
-import React, { useEffect, useState } from 'react'
+import React, { useEffect, useRef, useState } from 'react'
 import { useWebSocket } from '../hooks/useWebSocket'
 import MapContainer from '../components/MapContainer'
 import Logo from '../components/Logo'
+import { UploadCloud } from 'lucide-react'
 import 'maplibre-gl/dist/maplibre-gl.css'
 import '../theme.css'
 
@@ -216,6 +217,15 @@ export const CitizenDashboard = ({ auth, onLogout }) => {
   const [selectedSeverity, setSelectedSeverity] = useState('high')
   const [alertMessage, setAlertMessage] = useState('')
   const [alertStatus, setAlertStatus] = useState('')
+  const [attachmentFiles, setAttachmentFiles] = useState([])
+  const [pendingMediaAlertId, setPendingMediaAlertId] = useState(null)
+  const [pendingMediaUploadToken, setPendingMediaUploadToken] = useState(null)
+  const [isSubmittingAlert, setIsSubmittingAlert] = useState(false)
+  const [isUploadingMedia, setIsUploadingMedia] = useState(false)
+  const mediaInputRef = useRef(null)
+  const cameraInputRef = useRef(null)
+  const selectedPhotoCount = attachmentFiles.filter((file) => file.type.startsWith('image/')).length
+  const selectedVideoCount = attachmentFiles.filter((file) => file.type.startsWith('video/')).length
 
   const [peopleAffected, setPeopleAffected] = useState(3)
 
@@ -270,10 +280,16 @@ export const CitizenDashboard = ({ auth, onLogout }) => {
       })
       .catch(() => {})
 
-    fetch(`${API_BASE_URL}/api/v1/road-hazards/?limit=100`)
-      .then((res) => res.ok && res.json())
-      .then((data) => data && setRoadHazards(data))
-      .catch(() => {})
+    const loadRoadHazards = async () => {
+      try {
+        const response = await fetch(`${API_BASE_URL}/api/v1/road-hazards/?limit=100`)
+        if (response.ok) setRoadHazards(await response.json())
+      } catch {}
+    }
+
+    loadRoadHazards()
+    const roadHazardRefresh = window.setInterval(loadRoadHazards, 60_000)
+    return () => window.clearInterval(roadHazardRefresh)
   }, [])
 
   const handleRouteToCenter = async (center) => {
@@ -334,12 +350,74 @@ export const CitizenDashboard = ({ auth, onLogout }) => {
     }
   }
 
+  const uploadAlertMedia = async (alertId, files, mediaUploadToken) => {
+    setIsUploadingMedia(true)
+    try {
+      for (const file of files) {
+        setAlertStatus(`Uploading ${file.name}...`)
+        const formData = new FormData()
+        formData.append('file', file)
+        const response = await fetch(`${API_BASE_URL}/api/v1/auth/alerts/${alertId}/media`, {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${mediaUploadToken || auth?.token}` },
+          body: formData
+        })
+        const data = await response.json().catch(() => ({}))
+        if (!response.ok) throw new Error(`${file.name}: ${data.detail || 'Media upload failed'}`)
+        setAttachmentFiles((currentFiles) => currentFiles.filter((currentFile) => currentFile !== file))
+      }
+      setPendingMediaAlertId(null)
+      setPendingMediaUploadToken(null)
+      setAlertStatus('SOS and all selected media sent to CDRRMO.')
+      return true
+    } catch (error) {
+      setPendingMediaAlertId(alertId)
+      setAlertStatus(`SOS ${alertId} was sent, but a media upload failed: ${error.message}. Retry the remaining uploads.`)
+      return false
+    } finally {
+      setIsUploadingMedia(false)
+    }
+  }
+
+  const handleMediaSelection = (event) => {
+    const selectedFiles = Array.from(event.target.files || [])
+    event.target.value = ''
+    if (selectedFiles.length === 0) return
+
+    let imageCount = attachmentFiles.filter((file) => file.type.startsWith('image/')).length
+    let videoCount = attachmentFiles.filter((file) => file.type.startsWith('video/')).length
+    const acceptedFiles = []
+    const rejectedFiles = []
+    for (const file of selectedFiles) {
+      if (!file.type.startsWith('image/') && !file.type.startsWith('video/')) {
+        rejectedFiles.push(`${file.name}: unsupported file type`)
+      } else if (file.size > 25 * 1024 * 1024) {
+        rejectedFiles.push(`${file.name}: maximum size is 25 MB`)
+      } else if (file.type.startsWith('image/') && imageCount >= 5) {
+        rejectedFiles.push(`${file.name}: up to 5 photos are allowed`)
+      } else if (file.type.startsWith('video/') && videoCount >= 1) {
+        rejectedFiles.push(`${file.name}: only 1 video is allowed`)
+      } else {
+        acceptedFiles.push(file)
+        if (file.type.startsWith('image/')) imageCount += 1
+        if (file.type.startsWith('video/')) videoCount += 1
+      }
+    }
+    if (acceptedFiles.length > 0) setAttachmentFiles((currentFiles) => [...currentFiles, ...acceptedFiles])
+    setAlertStatus(rejectedFiles[0] || `${imageCount} photo${imageCount === 1 ? '' : 's'} and ${videoCount} video${videoCount === 1 ? '' : 's'} selected.`)
+  }
+
   const handleSendEmergencyAlert = async () => {
+    if (pendingMediaAlertId && attachmentFiles.length > 0) {
+      await uploadAlertMedia(pendingMediaAlertId, attachmentFiles, pendingMediaUploadToken)
+      return
+    }
     const targetLocation = pinnedLocation || latestGps
     if (!targetLocation) {
       setAlertStatus('Please click on the map to pin your location or turn on GPS.')
       return
     }
+    setIsSubmittingAlert(true)
     setAlertStatus('Broadcasting SOS...')
     try {
       const res = await fetch(`${API_BASE_URL}/api/v1/auth/alerts`, {
@@ -357,11 +435,21 @@ export const CitizenDashboard = ({ auth, onLogout }) => {
         })
       })
       if (!res.ok) throw new Error('Failed to dispatch alert')
-      setAlertStatus('Emergency alert dispatched to CDRRMO!')
+      const sentAlert = await res.json()
       setAlertMessage('')
       setPinnedLocation(null)
+      if (attachmentFiles.length > 0) {
+        setPendingMediaAlertId(sentAlert.id)
+        setPendingMediaUploadToken(sentAlert.media_upload_token)
+        const uploaded = await uploadAlertMedia(sentAlert.id, attachmentFiles, sentAlert.media_upload_token)
+        if (!uploaded) return
+      } else {
+        setAlertStatus('Emergency alert dispatched to CDRRMO!')
+      }
     } catch (err) {
       setAlertStatus(err.message)
+    } finally {
+      setIsSubmittingAlert(false)
     }
   }
 
@@ -592,18 +680,66 @@ export const CitizenDashboard = ({ auth, onLogout }) => {
                 onChange={(e) => setAlertMessage(e.target.value)}
               />
 
-              <button type="button" className="report-attach-btn">
-                <Icons.Camera />
-                <span>Attach photo or video</span>
-              </button>
+              <input
+                ref={mediaInputRef}
+                className="report-media-input"
+                type="file"
+                accept="image/*,video/*"
+                multiple
+                onChange={handleMediaSelection}
+                aria-label="Choose photos and a video to attach"
+              />
+              <input
+                ref={cameraInputRef}
+                className="report-media-input"
+                type="file"
+                accept="image/*"
+                capture="environment"
+                onChange={handleMediaSelection}
+                aria-label="Take a photo to attach"
+              />
+              <div className="report-attachment-actions">
+                <button
+                  type="button"
+                  className="report-attach-btn"
+                  onClick={() => mediaInputRef.current?.click()}
+                  disabled={isSubmittingAlert || isUploadingMedia || Boolean(pendingMediaAlertId)}
+                >
+                  <UploadCloud size={18} />
+                  <span>Upload files</span>
+                </button>
+                <button
+                  type="button"
+                  className="report-attach-btn"
+                  onClick={() => cameraInputRef.current?.click()}
+                  disabled={isSubmittingAlert || isUploadingMedia || Boolean(pendingMediaAlertId) || selectedPhotoCount >= 5}
+                >
+                  <Icons.Camera />
+                  <span>Open camera</span>
+                </button>
+              </div>
+              {attachmentFiles.length > 0 && (
+                <div className="report-media-selection" aria-live="polite">
+                  <p>{selectedPhotoCount} / 5 photos · {selectedVideoCount} / 1 video</p>
+                  {attachmentFiles.map((file, index) => (
+                    <div className="report-media-file" key={`${file.name}-${file.lastModified}-${index}`}>
+                      <span>{file.name} ({(file.size / (1024 * 1024)).toFixed(1)} MB)</span>
+                      {!pendingMediaAlertId && (
+                        <button type="button" onClick={() => setAttachmentFiles((currentFiles) => currentFiles.filter((_, fileIndex) => fileIndex !== index))} aria-label={`Remove ${file.name}`}>Remove</button>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
 
               <button
                 type="button"
                 className="report-sos-submit"
                 onClick={handleSendEmergencyAlert}
+                disabled={isSubmittingAlert || isUploadingMedia}
               >
                 <Icons.Alert />
-                <span>Send emergency SOS</span>
+                <span>{isSubmittingAlert ? 'Sending SOS...' : isUploadingMedia ? 'Uploading media...' : pendingMediaAlertId ? 'Retry media upload' : 'Send emergency SOS'}</span>
               </button>
 
               <div className="report-offline-banner">
