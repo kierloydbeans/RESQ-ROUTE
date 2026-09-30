@@ -84,7 +84,7 @@ const Login = () => {
         user: data.user
       }))
 
-      navigate('/')
+      navigate(role === 'rescuer' ? '/rescuer' : '/')
     } catch (err) {
       setError(err.message)
     } finally {
