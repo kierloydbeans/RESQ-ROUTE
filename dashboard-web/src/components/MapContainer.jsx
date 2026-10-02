@@ -52,16 +52,44 @@ const normalizeCoordinates = (position) => {
   }
 
   const [first, second] = position
-
-  if (typeof first !== 'number' || typeof second !== 'number') {
+  const normalizedFirst = Number(first)
+  const normalizedSecond = Number(second)
+  if (!Number.isFinite(normalizedFirst) || !Number.isFinite(normalizedSecond)) {
     return DEFAULT_LOCATION
   }
 
-  if (Math.abs(first) > 90) {
-    return [first, second]
+  if (Math.abs(normalizedFirst) > 90) {
+    return [normalizedFirst, normalizedSecond]
   }
 
-  return [second, first]
+  return [normalizedSecond, normalizedFirst]
+}
+
+const normalizeRouteData = (route) => {
+  if (!route) return { type: 'FeatureCollection', features: [] }
+  if (route.type === 'Feature' || route.type === 'FeatureCollection') return route
+  if (route.type === 'LineString' || route.type === 'MultiLineString') {
+    return { type: 'Feature', properties: {}, geometry: route }
+  }
+  return { type: 'FeatureCollection', features: [] }
+}
+
+const getRouteCoordinates = (route) => {
+  if (!route) return []
+  if (route.type === 'Feature') return route.geometry?.coordinates || []
+  if (route.type === 'FeatureCollection') return route.features?.flatMap((feature) => feature.geometry?.coordinates || []) || []
+  return route.coordinates || []
+}
+
+const escapeHtml = (value) => String(value ?? '').replace(/[&<>'"]/g, (character) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' })[character])
+
+const formatPopupDetails = (marker) => {
+  const details = marker.details || {}
+  const rows = Object.entries(details)
+    .filter(([, value]) => value !== null && value !== undefined && value !== '')
+    .map(([label, value]) => `<div class="map-popup-row"><span>${escapeHtml(label.replace(/_/g, ' '))}</span><b>${escapeHtml(value)}</b></div>`)
+    .join('')
+  return `<div class="map-popup"><strong>${escapeHtml(marker.label || 'Map marker')}</strong>${rows}</div>`
 }
 
 const createMarkerElement = (color = '#dc2626', icon = null) => {
@@ -71,7 +99,7 @@ const createMarkerElement = (color = '#dc2626', icon = null) => {
   el.style.justifyContent = 'center'
   el.style.width = icon ? '28px' : '16px'
   el.style.height = icon ? '28px' : '16px'
-  el.style.borderRadius = icon ? '50%' : '50%'
+  el.style.borderRadius = '50%'
   el.style.background = icon ? '#fff7ed' : color
   el.style.border = icon ? `2px solid ${color}` : '2px solid white'
   el.style.boxShadow = '0 2px 6px rgba(0,0,0,0.3)'
@@ -82,25 +110,40 @@ const createMarkerElement = (color = '#dc2626', icon = null) => {
   return el
 }
 
-const MapContainer = ({ markers = [], route = null }) => {
+const MapContainer = ({ 
+  markers = [], 
+  route = null, 
+  pinnedLocation = null, 
+  onMapClick, 
+  trackDeviceLocation = true 
+}) => {
   const mapContainerRef = useRef(null)
   const mapRef = useRef(null)
   const markerInstancesRef = useRef([])
   const deviceMarkerRef = useRef(null)
+  const pinnedMarkerRef = useRef(null)
   const watchIdRef = useRef(null)
   const hasCenteredOnDeviceRef = useRef(false)
   const markersRef = useRef(markers)
   const routeRef = useRef(route)
+  const onMapClickRef = useRef(onMapClick)
+  const markersSignature = JSON.stringify(markers)
+
+  useEffect(() => {
+    onMapClickRef.current = onMapClick
+  }, [onMapClick])
 
   const renderMarkers = (map, nextMarkers) => {
     markerInstancesRef.current.forEach((marker) => marker.remove())
     markerInstancesRef.current = []
     nextMarkers.forEach((marker) => {
       const [lng, lat] = normalizeCoordinates(marker.position)
-      markerInstancesRef.current.push(new maplibregl.Marker({ element: createMarkerElement(marker.color, marker.icon) })
-        .setLngLat([lng, lat])
-        .setPopup(new maplibregl.Popup({ offset: 25 }).setHTML(`<strong>${marker.label}</strong>`))
-        .addTo(map))
+      markerInstancesRef.current.push(
+        new maplibregl.Marker({ element: createMarkerElement(marker.color, marker.icon) })
+          .setLngLat([lng, lat])
+          .setPopup(new maplibregl.Popup({ offset: 25, closeOnClick: false, closeOnMove: false, closeButton: true }).setHTML(formatPopupDetails(marker)))
+          .addTo(map)
+      )
     })
   }
 
@@ -108,12 +151,36 @@ const MapContainer = ({ markers = [], route = null }) => {
     routeRef.current = nextRoute
     const source = map.getSource('citizen-route')
     if (!source) return
-    source.setData(nextRoute || { type: 'FeatureCollection', features: [] })
-    if (!nextRoute?.coordinates?.length) return
-    const bounds = nextRoute.coordinates.reduce((currentBounds, coordinate) => currentBounds.extend(coordinate), new maplibregl.LngLatBounds(nextRoute.coordinates[0], nextRoute.coordinates[0]))
+    const routeData = normalizeRouteData(nextRoute)
+    source.setData(routeData)
+    const coordinates = getRouteCoordinates(nextRoute).map(([longitude, latitude]) => [Number(longitude), Number(latitude)])
+    if (!coordinates.length) return
+    const bounds = coordinates.reduce((currentBounds, coordinate) => currentBounds.extend(coordinate), new maplibregl.LngLatBounds(coordinates[0], coordinates[0]))
     map.fitBounds(bounds, { padding: 70, maxZoom: 15, duration: 700 })
   }
 
+  // Handle pinned location updates
+  useEffect(() => {
+    if (!mapRef.current) return
+
+    if (pinnedLocation?.latitude && pinnedLocation?.longitude) {
+      const coords = [pinnedLocation.longitude, pinnedLocation.latitude]
+
+      if (!pinnedMarkerRef.current) {
+        pinnedMarkerRef.current = new maplibregl.Marker({ color: '#ea580c' })
+          .setLngLat(coords)
+          .setPopup(new maplibregl.Popup({ offset: 25 }).setText('Pinned incident location'))
+          .addTo(mapRef.current)
+      } else {
+        pinnedMarkerRef.current.setLngLat(coords)
+      }
+    } else if (pinnedMarkerRef.current) {
+      pinnedMarkerRef.current.remove()
+      pinnedMarkerRef.current = null
+    }
+  }, [pinnedLocation])
+
+  // Initialize Map
   useEffect(() => {
     if (!mapContainerRef.current || mapRef.current) return
 
@@ -139,11 +206,11 @@ const MapContainer = ({ markers = [], route = null }) => {
           zoom: 13,
           transformRequest: (url, resourceType) => {
             const isVectorTile = resourceType === 'Tile' && url.includes('.pbf')
-            console.debug('[RESQ map] Requesting resource', { resourceType, url, isVectorTile })
             return { url }
           },
         })
         mapRef.current = map
+
         let rasterFallbackShown = false
         const enableRasterFallback = (reason) => {
           if (rasterFallbackShown || !map.getLayer('resq-raster-fallback')) return
@@ -151,49 +218,46 @@ const MapContainer = ({ markers = [], route = null }) => {
           map.setLayoutProperty('resq-raster-fallback', 'visibility', 'visible')
           console.warn('[RESQ map] Enabling PNG fallback', { reason })
         }
+
         map.resize()
-        console.info('[RESQ map] Map dimensions initialized', {
-          width: mapContainerRef.current.clientWidth,
-          height: mapContainerRef.current.clientHeight,
+
+        // Handle Map Clicks
+        map.on('click', (e) => {
+          const { lng, lat } = e.lngLat
+          if (onMapClickRef.current) {
+            onMapClickRef.current({
+              latitude: lat,
+              longitude: lng,
+            })
+          }
         })
 
         map.on('load', () => {
           if (fallbackTimer !== null) window.clearTimeout(fallbackTimer)
           map.resize()
-          console.info('[RESQ map] Map loaded successfully', { sources: Object.keys(map.getStyle().sources || {}) })
-          map.addSource('citizen-route', { type: 'geojson', data: routeRef.current || { type: 'FeatureCollection', features: [] } })
+          map.addSource('citizen-route', { type: 'geojson', data: normalizeRouteData(routeRef.current) })
           map.addLayer({ id: 'citizen-route-line', type: 'line', source: 'citizen-route', paint: { 'line-color': '#50a8ff', 'line-width': 5, 'line-opacity': 0.9 } })
           renderMarkers(map, markersRef.current)
           if (routeRef.current) updateRoute(map, routeRef.current)
         })
-        map.on('styledata', () => console.info('[RESQ map] Style data received'))
-        map.on('sourcedataloading', (event) => {
-          if (event.sourceId) console.debug('[RESQ map] Source data loading', { sourceId: event.sourceId })
-        })
-        map.on('sourcedata', (event) => {
-          if (event.sourceId) console.debug('[RESQ map] Source data received', {
-            sourceId: event.sourceId,
-            sourceDataType: event.sourceDataType,
-            isSourceLoaded: event.isSourceLoaded,
-          })
-        })
+
         map.on('idle', () => {
           const loadedSources = Object.keys(map.getStyle().sources || {}).filter((sourceId) => map.isSourceLoaded(sourceId))
-          console.info('[RESQ map] Map idle', { loadedSources })
           if (!loadedSources.includes('maptiler_planet')) enableRasterFallback('vector source is not loaded')
         })
+
         map.on('error', (event) => {
           const resourceUrl = event.error?.url || ''
-          console.error('[RESQ map] Resource failed', { error: event.error || event, resourceUrl })
           if (resourceUrl.includes('.pbf')) enableRasterFallback('PBF request failed')
         })
+
         map.on('webglcontextlost', (event) => console.error('[RESQ map] WebGL context lost', event))
-        map.addControl(new maplibregl.NavigationControl(), 'top-right')
+
         fallbackTimer = window.setTimeout(() => {
           if (!map.isSourceLoaded('maptiler_planet')) enableRasterFallback('vector source startup timeout')
         }, 5000)
 
-        if ('geolocation' in navigator) {
+        if (trackDeviceLocation && 'geolocation' in navigator) {
           watchIdRef.current = navigator.geolocation.watchPosition(
             (position) => {
               const lng = position.coords.longitude
@@ -233,12 +297,13 @@ const MapContainer = ({ markers = [], route = null }) => {
         navigator.geolocation.clearWatch(watchIdRef.current)
       }
       deviceMarkerRef.current?.remove()
+      pinnedMarkerRef.current?.remove()
       markerInstancesRef.current.forEach((marker) => marker.remove())
       markerInstancesRef.current = []
       mapRef.current?.remove()
       mapRef.current = null
     }
-  }, [])
+  }, [trackDeviceLocation])
 
   useEffect(() => {
     if (!mapContainerRef.current || typeof ResizeObserver === 'undefined') return undefined
@@ -246,10 +311,6 @@ const MapContainer = ({ markers = [], route = null }) => {
     const observer = new ResizeObserver(() => {
       if (mapRef.current) {
         mapRef.current.resize()
-        console.debug('[RESQ map] Map resized', {
-          width: mapContainerRef.current.clientWidth,
-          height: mapContainerRef.current.clientHeight,
-        })
       }
     })
     observer.observe(mapContainerRef.current)
@@ -259,7 +320,7 @@ const MapContainer = ({ markers = [], route = null }) => {
   useEffect(() => {
     markersRef.current = markers
     if (mapRef.current) renderMarkers(mapRef.current, markers)
-  }, [markers])
+  }, [markersSignature])
 
   useEffect(() => {
     if (mapRef.current?.isStyleLoaded() && mapRef.current.getSource('citizen-route')) {

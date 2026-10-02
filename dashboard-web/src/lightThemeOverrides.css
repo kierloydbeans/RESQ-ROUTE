@@ -1,0 +1,26 @@
+:root[data-theme='light'] .map-coordinate,
+:root[data-theme='light'] .map-legend,
+:root[data-theme='light'] .evac-label,
+:root[data-theme='light'] .map-scale,
+:root[data-theme='light'] .map-live,
+:root[data-theme='light'] .map-overlay-draggable.minimized {
+  background: var(--ops-surface-2);
+  color: var(--ops-text);
+  border-color: var(--ops-border);
+  box-shadow: 0 4px 12px rgba(23, 33, 43, .12);
+}
+
+:root[data-theme='light'] .map-legend {
+  color: var(--ops-muted);
+  border-color: var(--ops-red);
+}
+
+:root[data-theme='light'] .evac-label,
+:root[data-theme='light'] .map-live {
+  color: var(--ops-red);
+  border-color: var(--ops-red);
+}
+
+:root[data-theme='light'] .sos-icon {
+  background: var(--ops-surface-2);
+}

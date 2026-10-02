@@ -1,0 +1,76 @@
+.map-legend span {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin: 3px 0;
+  font-size: 0;
+  white-space: nowrap;
+}
+
+.map-legend span i.dot {
+  display: none;
+}
+
+.map-legend span::before {
+  display: inline-grid;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  flex: 0 0 16px;
+  border: 1px solid currentColor;
+  border-radius: 50%;
+  background: #fff7ed;
+  font: 700 11px/1 var(--ops-font);
+}
+
+.map-legend span::after {
+  font: 8px var(--ops-mono);
+}
+
+.map-legend span:nth-child(1) {
+  color: #50a8ff;
+}
+
+.map-legend span:nth-child(1)::before {
+  content: '●';
+}
+
+.map-legend span:nth-child(1)::after {
+  content: 'CITIZEN ROUTE / DESTINATION';
+}
+
+.map-legend span:nth-child(2) {
+  color: #00d6a0;
+}
+
+.map-legend span:nth-child(2)::before {
+  content: '⌂';
+}
+
+.map-legend span:nth-child(2)::after {
+  content: 'EVACUATION CENTER';
+}
+
+.map-legend span:nth-child(3) {
+  color: #ea580c;
+}
+
+.map-legend span:nth-child(3)::before {
+  content: '!';
+}
+
+.map-legend span:nth-child(3)::after {
+  content: 'ROAD HAZARD';
+}
+
+.map-legend span:nth-child(4) {
+  color: #00d6a0;
+}
+
+.map-legend span:nth-child(4)::before {
+  content: '♟';
+}
+
+.map-legend span:nth-child(4)::after {
+  content: 'RESPONSE UNIT / ALERT';
+}

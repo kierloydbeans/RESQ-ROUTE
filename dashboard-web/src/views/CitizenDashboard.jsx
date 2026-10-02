@@ -1,13 +1,13 @@
-import React, { useEffect, useState } from 'react'
+import React, { useEffect, useRef, useState } from 'react'
 import { useWebSocket } from '../hooks/useWebSocket'
 import MapContainer from '../components/MapContainer'
 import Logo from '../components/Logo'
+import { UploadCloud } from 'lucide-react'
 import 'maplibre-gl/dist/maplibre-gl.css'
 import '../theme.css'
 
-// 1. Uniform Clean Icons (SVGs)
 const Icons = {
-Sun: () => (
+  Sun: () => (
     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
       <circle cx="12" cy="12" r="5" />
       <line x1="12" y1="1" x2="12" y2="3" />
@@ -25,7 +25,6 @@ Sun: () => (
       <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" />
     </svg>
   ),
-
   Water: () => (
     <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
       <path d="M12 2.69l5.66 5.66a8 8 0 1 1-11.31 0z" />
@@ -90,7 +89,7 @@ Sun: () => (
     </svg>
   ),
   Save: ({ saved }) => (
-    <svg width="18" height="18" viewBox="0 0 24 24" fill={saved ? "currentColor" : "none"} stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <svg width="18" height="18" viewBox="0 0 24 24" fill={saved ? 'currentColor' : 'none'} stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
       <path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z" />
     </svg>
   ),
@@ -153,22 +152,22 @@ Sun: () => (
     </svg>
   ),
   Camera: () => (
-  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-    <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z" />
-    <circle cx="12" cy="13" r="4" />
-  </svg>
-),
-WifiOff: () => (
-  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-    <line x1="1" y1="1" x2="23" y2="23" />
-    <path d="M16.72 11.06A10.94 10.94 0 0 1 19 12.55" />
-    <path d="M5 12.55a10.94 10.94 0 0 1 5.17-2.39" />
-    <path d="M10.71 5.05A16 16 0 0 1 22.58 9" />
-    <path d="M1.42 9a15.91 15.91 0 0 1 4.7-2.88" />
-    <path d="M8.53 16.11a6 6 0 0 1 6.95 0" />
-    <line x1="12" y1="20" x2="12.01" y2="20" />
-  </svg>
-),
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z" />
+      <circle cx="12" cy="13" r="4" />
+    </svg>
+  ),
+  WifiOff: () => (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <line x1="1" y1="1" x2="23" y2="23" />
+      <path d="M16.72 11.06A10.94 10.94 0 0 1 19 12.55" />
+      <path d="M5 12.55a10.94 10.94 0 0 1 5.17-2.39" />
+      <path d="M10.71 5.05A16 16 0 0 1 22.58 9" />
+      <path d="M1.42 9a15.91 15.91 0 0 1 4.7-2.88" />
+      <path d="M8.53 16.11a6 6 0 0 1 6.95 0" />
+      <line x1="12" y1="20" x2="12.01" y2="20" />
+    </svg>
+  ),
   Fire: () => (
     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
       <path d="M8.5 14.5A2.5 2.5 0 0 0 11 12c0-1.38-.5-2-1-3-1.072-2.143-.224-4.054 2-6 .5 2.5 2 4.9 4 6.5 2 1.6 3 3.5 3 5.5a7 7 0 1 1-14 0c0-1.153.433-2.294 1-3a2.5 2.5 0 0 0 2.5 2.5z" />
@@ -212,10 +211,21 @@ export const CitizenDashboard = ({ auth, onLogout }) => {
   const [savedShelterIds, setSavedShelterIds] = useState([])
   const [copyFeedback, setCopyFeedback] = useState('')
 
+  const [pinnedLocation, setPinnedLocation] = useState(null)
+
   const [selectedIncident, setSelectedIncident] = useState('flood')
   const [selectedSeverity, setSelectedSeverity] = useState('high')
   const [alertMessage, setAlertMessage] = useState('')
   const [alertStatus, setAlertStatus] = useState('')
+  const [attachmentFiles, setAttachmentFiles] = useState([])
+  const [pendingMediaAlertId, setPendingMediaAlertId] = useState(null)
+  const [pendingMediaUploadToken, setPendingMediaUploadToken] = useState(null)
+  const [isSubmittingAlert, setIsSubmittingAlert] = useState(false)
+  const [isUploadingMedia, setIsUploadingMedia] = useState(false)
+  const mediaInputRef = useRef(null)
+  const cameraInputRef = useRef(null)
+  const selectedPhotoCount = attachmentFiles.filter((file) => file.type.startsWith('image/')).length
+  const selectedVideoCount = attachmentFiles.filter((file) => file.type.startsWith('video/')).length
 
   const [peopleAffected, setPeopleAffected] = useState(3)
 
@@ -224,13 +234,18 @@ export const CitizenDashboard = ({ auth, onLogout }) => {
   const { isConnected } = useWebSocket(`${WS_BASE_URL}/api/v1/ws`)
   const displayName = auth?.user?.full_name || auth?.user?.username || 'Resident'
   const [currentTime, setCurrentTime] = useState(() => new Date())
-  const [profileMenuOpen, setProfileMenuOpen] = useState(false)
 
-  // 1-second Philippine Standard Time (PHT) ticker
   useEffect(() => {
     const clockInterval = setInterval(() => setCurrentTime(new Date()), 1000)
     return () => clearInterval(clockInterval)
   }, [])
+
+  const handleMapClick = (coords) => {
+    setPinnedLocation(coords)
+    if (activeTab === 'alert') {
+      setAlertStatus(`Pinned location: ${coords.latitude.toFixed(4)}, ${coords.longitude.toFixed(4)}`)
+    }
+  }
 
   const formattedPhtTime = new Intl.DateTimeFormat('en-PH', {
     timeZone: 'Asia/Manila',
@@ -240,11 +255,8 @@ export const CitizenDashboard = ({ auth, onLogout }) => {
     hour12: false
   }).format(currentTime)
 
-// Calculate recommended alternative shelter
   const alternativeCenter = centers.find((c) => c.id !== selectedCenter?.id && c.is_active !== false) || null
 
-
-  // Fetch device GPS location
   useEffect(() => {
     if (!('geolocation' in navigator)) return
     const watchId = navigator.geolocation.watchPosition(
@@ -255,13 +267,11 @@ export const CitizenDashboard = ({ auth, onLogout }) => {
     return () => navigator.geolocation.clearWatch(watchId)
   }, [])
 
-  //dark theme toggle
   useEffect(() => {
     document.documentElement.dataset.theme = isDark ? 'dark' : 'light'
     localStorage.setItem('resq-theme', isDark ? 'dark' : 'light')
   }, [isDark])
 
-  // Load shelters and hazards
   useEffect(() => {
     fetch(`${API_BASE_URL}/api/v1/shelters/?limit=100`)
       .then((res) => res.ok && res.json())
@@ -270,16 +280,22 @@ export const CitizenDashboard = ({ auth, onLogout }) => {
       })
       .catch(() => {})
 
-    fetch(`${API_BASE_URL}/api/v1/road-hazards/?limit=100`)
-      .then((res) => res.ok && res.json())
-      .then((data) => data && setRoadHazards(data))
-      .catch(() => {})
+    const loadRoadHazards = async () => {
+      try {
+        const response = await fetch(`${API_BASE_URL}/api/v1/road-hazards/?limit=100`)
+        if (response.ok) setRoadHazards(await response.json())
+      } catch {}
+    }
+
+    loadRoadHazards()
+    const roadHazardRefresh = window.setInterval(loadRoadHazards, 60_000)
+    return () => window.clearInterval(roadHazardRefresh)
   }, [])
 
-  // Get walking directions
   const handleRouteToCenter = async (center) => {
-    if (!latestGps) {
-      setAlertStatus('Acquiring your location...')
+    const originLocation = pinnedLocation || latestGps
+    if (!originLocation) {
+      setAlertStatus('Location required. Please enable GPS or pin a location on the map.')
       return
     }
     setRouteLoading(true)
@@ -288,8 +304,8 @@ export const CitizenDashboard = ({ auth, onLogout }) => {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          origin_latitude: latestGps.latitude,
-          origin_longitude: latestGps.longitude,
+          origin_latitude: originLocation.latitude,
+          origin_longitude: originLocation.longitude,
           destination_latitude: Number(center.latitude),
           destination_longitude: Number(center.longitude)
         })
@@ -305,7 +321,7 @@ export const CitizenDashboard = ({ auth, onLogout }) => {
     } catch {
       setEvacuationRoute({
         type: 'LineString',
-        coordinates: [[latestGps.longitude, latestGps.latitude], [Number(center.longitude), Number(center.latitude)]]
+        coordinates: [[originLocation.longitude, originLocation.latitude], [Number(center.longitude), Number(center.latitude)]]
       })
       setRouteInfo({ distance: 'Direct path', duration: 'Estimate' })
     } finally {
@@ -334,11 +350,74 @@ export const CitizenDashboard = ({ auth, onLogout }) => {
     }
   }
 
+  const uploadAlertMedia = async (alertId, files, mediaUploadToken) => {
+    setIsUploadingMedia(true)
+    try {
+      for (const file of files) {
+        setAlertStatus(`Uploading ${file.name}...`)
+        const formData = new FormData()
+        formData.append('file', file)
+        const response = await fetch(`${API_BASE_URL}/api/v1/auth/alerts/${alertId}/media`, {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${mediaUploadToken || auth?.token}` },
+          body: formData
+        })
+        const data = await response.json().catch(() => ({}))
+        if (!response.ok) throw new Error(`${file.name}: ${data.detail || 'Media upload failed'}`)
+        setAttachmentFiles((currentFiles) => currentFiles.filter((currentFile) => currentFile !== file))
+      }
+      setPendingMediaAlertId(null)
+      setPendingMediaUploadToken(null)
+      setAlertStatus('SOS and all selected media sent to CDRRMO.')
+      return true
+    } catch (error) {
+      setPendingMediaAlertId(alertId)
+      setAlertStatus(`SOS ${alertId} was sent, but a media upload failed: ${error.message}. Retry the remaining uploads.`)
+      return false
+    } finally {
+      setIsUploadingMedia(false)
+    }
+  }
+
+  const handleMediaSelection = (event) => {
+    const selectedFiles = Array.from(event.target.files || [])
+    event.target.value = ''
+    if (selectedFiles.length === 0) return
+
+    let imageCount = attachmentFiles.filter((file) => file.type.startsWith('image/')).length
+    let videoCount = attachmentFiles.filter((file) => file.type.startsWith('video/')).length
+    const acceptedFiles = []
+    const rejectedFiles = []
+    for (const file of selectedFiles) {
+      if (!file.type.startsWith('image/') && !file.type.startsWith('video/')) {
+        rejectedFiles.push(`${file.name}: unsupported file type`)
+      } else if (file.size > 25 * 1024 * 1024) {
+        rejectedFiles.push(`${file.name}: maximum size is 25 MB`)
+      } else if (file.type.startsWith('image/') && imageCount >= 5) {
+        rejectedFiles.push(`${file.name}: up to 5 photos are allowed`)
+      } else if (file.type.startsWith('video/') && videoCount >= 1) {
+        rejectedFiles.push(`${file.name}: only 1 video is allowed`)
+      } else {
+        acceptedFiles.push(file)
+        if (file.type.startsWith('image/')) imageCount += 1
+        if (file.type.startsWith('video/')) videoCount += 1
+      }
+    }
+    if (acceptedFiles.length > 0) setAttachmentFiles((currentFiles) => [...currentFiles, ...acceptedFiles])
+    setAlertStatus(rejectedFiles[0] || `${imageCount} photo${imageCount === 1 ? '' : 's'} and ${videoCount} video${videoCount === 1 ? '' : 's'} selected.`)
+  }
+
   const handleSendEmergencyAlert = async () => {
-    if (!latestGps) {
-      setAlertStatus('Location required to submit alert.')
+    if (pendingMediaAlertId && attachmentFiles.length > 0) {
+      await uploadAlertMedia(pendingMediaAlertId, attachmentFiles, pendingMediaUploadToken)
       return
     }
+    const targetLocation = pinnedLocation || latestGps
+    if (!targetLocation) {
+      setAlertStatus('Please click on the map to pin your location or turn on GPS.')
+      return
+    }
+    setIsSubmittingAlert(true)
     setAlertStatus('Broadcasting SOS...')
     try {
       const res = await fetch(`${API_BASE_URL}/api/v1/auth/alerts`, {
@@ -348,18 +427,29 @@ export const CitizenDashboard = ({ auth, onLogout }) => {
           sender_id: auth?.user?.id || 99,
           sender_name: displayName,
           sender_role: 'citizen',
-          latitude: latestGps.latitude,
-          longitude: latestGps.longitude,
+          latitude: targetLocation.latitude,
+          longitude: targetLocation.longitude,
           disaster_type: selectedIncident,
           severity: selectedSeverity,
           message: alertMessage
         })
       })
       if (!res.ok) throw new Error('Failed to dispatch alert')
-      setAlertStatus('Emergency alert dispatched to CDRRMO!')
+      const sentAlert = await res.json()
       setAlertMessage('')
+      setPinnedLocation(null)
+      if (attachmentFiles.length > 0) {
+        setPendingMediaAlertId(sentAlert.id)
+        setPendingMediaUploadToken(sentAlert.media_upload_token)
+        const uploaded = await uploadAlertMedia(sentAlert.id, attachmentFiles, sentAlert.media_upload_token)
+        if (!uploaded) return
+      } else {
+        setAlertStatus('Emergency alert dispatched to CDRRMO!')
+      }
     } catch (err) {
       setAlertStatus(err.message)
+    } finally {
+      setIsSubmittingAlert(false)
     }
   }
 
@@ -377,11 +467,6 @@ export const CitizenDashboard = ({ auth, onLogout }) => {
     icon: '!'
   }))
 
-  const filteredCenters = centers.filter((c) =>
-    c.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    (c.address && c.address.toLowerCase().includes(searchQuery.toLowerCase()))
-  )
-
   const isSaved = selectedCenter && savedShelterIds.includes(selectedCenter.id)
   const capacity = selectedCenter?.capacity || 100
   const occupancy = selectedCenter?.current_occupancy || 0
@@ -395,56 +480,61 @@ export const CitizenDashboard = ({ auth, onLogout }) => {
     { key: 'trapped', label: 'Rescue', Icon: Icons.Rescue },
     { key: 'earthquake', label: 'Quake', Icon: Icons.Quake }
   ]
-  // Quick distance helper (Haversine formula in km)
-const calculateDistance = (lat1, lon1, lat2, lon2) => {
-  if (!lat1 || !lon1 || !lat2 || !lon2) return null
-  const R = 6371
-  const dLat = ((lat2 - lat1) * Math.PI) / 180
-  const dLon = ((lon2 - lon1) * Math.PI) / 180
-  const a =
-    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-    Math.cos((lat1 * Math.PI) / 180) *
-      Math.cos((lat2 * Math.PI) / 180) *
-      Math.sin(dLon / 2) *
-      Math.sin(dLon / 2)
-  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
-  return (R * c).toFixed(1)
-}
 
-const [filterType, setFilterType] = useState('nearest')
+  const calculateDistance = (lat1, lon1, lat2, lon2) => {
+    if (!lat1 || !lon1 || !lat2 || !lon2) return null
+    const R = 6371
+    const dLat = ((lat2 - lat1) * Math.PI) / 180
+    const dLon = ((lon2 - lon1) * Math.PI) / 180
+    const a =
+      Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+      Math.cos((lat1 * Math.PI) / 180) *
+        Math.cos((lat2 * Math.PI) / 180) *
+        Math.sin(dLon / 2) *
+        Math.sin(dLon / 2)
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
+    return (R * c).toFixed(1)
+  }
 
-// Apply search and filter tabs
-const processedCenters = centers
-  .filter((c) => {
-    const matchesQuery =
-      c.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      (c.address && c.address.toLowerCase().includes(searchQuery.toLowerCase()))
-    if (!matchesQuery) return false
-    if (filterType === 'accessible') return c.is_accessible || c.accessible
-    if (filterType === 'pet') return c.pet_friendly || c.pets_allowed
-    return true
-  })
-  .map((c) => {
-    const dist = latestGps
-      ? parseFloat(calculateDistance(latestGps.latitude, latestGps.longitude, Number(c.latitude), Number(c.longitude)))
-      : null
-    const cap = c.capacity || 100
-    const occ = c.current_occupancy || 0
-    const openSlots = Math.max(0, cap - occ)
-    const occPct = Math.min(100, Math.round((occ / cap) * 100))
-    return { ...c, distanceKm: dist, openSlots, occPct }
-  })
-  .sort((a, b) => {
-    if (filterType === 'nearest') return (a.distanceKm || 999) - (b.distanceKm || 999)
-    if (filterType === 'most_space') return b.openSlots - a.openSlots
-    return 0
-  })
+  const [filterType, setFilterType] = useState('nearest')
+
+  const processedCenters = centers
+    .filter((c) => {
+      const matchesQuery =
+        c.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        (c.address && c.address.toLowerCase().includes(searchQuery.toLowerCase()))
+      if (!matchesQuery) return false
+      if (filterType === 'accessible') return c.is_accessible || c.accessible
+      if (filterType === 'pet') return c.pet_friendly || c.pets_allowed
+      return true
+    })
+    .map((c) => {
+      const referenceLocation = pinnedLocation || latestGps
+      const dist = referenceLocation
+        ? parseFloat(calculateDistance(referenceLocation.latitude, referenceLocation.longitude, Number(c.latitude), Number(c.longitude)))
+        : null
+      const cap = c.capacity || 100
+      const occ = c.current_occupancy || 0
+      const openSlots = Math.max(0, cap - occ)
+      const occPct = Math.min(100, Math.round((occ / cap) * 100))
+      return { ...c, distanceKm: dist, openSlots, occPct }
+    })
+    .sort((a, b) => {
+      if (filterType === 'nearest') return (a.distanceKm || 999) - (b.distanceKm || 999)
+      if (filterType === 'most_space') return b.openSlots - a.openSlots
+      return 0
+    })
 
   return (
     <div className="citizen-map-layout">
       {/* 1. Background Map */}
       <div className="citizen-map-canvas">
-        <MapContainer markers={[...centerMarkers, ...hazardMarkers]} route={evacuationRoute} />
+        <MapContainer
+          markers={[...centerMarkers, ...hazardMarkers]}
+          route={evacuationRoute}
+          pinnedLocation={pinnedLocation}
+          onMapClick={handleMapClick}
+        />
       </div>
 
       {/* 2. Top Pill Filter Chips */}
@@ -472,22 +562,35 @@ const processedCenters = centers
         </div>
       </div>
 
-      <button
-        type="button"
-        className="theme-toggle-floating"
-        onClick={() => setIsDark((prev) => !prev)}
-        title="Toggle Dark/Light Mode"
+      {/* 3. Floating Controls (Theme Toggle & Circular Profile/Logout) */}
+      <div className="citizen-top-right-controls">
+        <button
+          type="button"
+          className="theme-toggle-btn"
+          onClick={() => setIsDark((prev) => !prev)}
+          title="Toggle Dark/Light Mode"
         >
-        {isDark ? <Icons.Sun /> : <Icons.Moon />}
+          {isDark ? <Icons.Sun /> : <Icons.Moon />}
         </button>
 
-      {/* 3. Left Panel */}
+        {onLogout && (
+          <button
+            type="button"
+            className="citizen-profile-avatar-btn"
+            onClick={onLogout}
+            title={`Logged in as ${displayName} — Click to Logout`}
+          >
+            {displayName.charAt(0).toUpperCase()}
+          </button>
+        )}
+      </div>
+
+      {/* 4. Left Panel */}
       <aside className="citizen-sidebar">
         <div className="mobile-pull-handle" />
         {activeTab === 'alert' ? (
           <div className="citizen-scroll-content report-panel-padding">
             <div className="report-incident-card">
-              {/* Header */}
               <div className="report-header-row">
                 <div>
                   <h2 className="report-header-title">Report incident</h2>
@@ -502,7 +605,19 @@ const processedCenters = centers
                 </button>
               </div>
 
-              {/* Incident Type Grid */}
+              {pinnedLocation && (
+                <div className="pinned-location-banner">
+                  <span>📍 Pin set: {pinnedLocation.latitude.toFixed(4)}, {pinnedLocation.longitude.toFixed(4)}</span>
+                  <button
+                    type="button"
+                    className="pinned-location-clear-btn"
+                    onClick={() => setPinnedLocation(null)}
+                  >
+                    Clear
+                  </button>
+                </div>
+              )}
+
               <label className="report-section-label">Incident type</label>
               <div className="report-type-grid">
                 {incidentOptions.map(({ key, label, Icon }) => (
@@ -518,7 +633,6 @@ const processedCenters = centers
                 ))}
               </div>
 
-              {/* Severity Level */}
               <label className="report-section-label">Severity level</label>
               <div className="report-severity-grid">
                 {[
@@ -538,7 +652,6 @@ const processedCenters = centers
                 ))}
               </div>
 
-              {/* People Affected Counter */}
               <label className="report-section-label">People affected</label>
               <div className="people-stepper-row">
                 <button
@@ -558,7 +671,6 @@ const processedCenters = centers
                 </button>
               </div>
 
-              {/* Details / Landmark */}
               <label className="report-section-label">Details / landmark</label>
               <textarea
                 className="report-textarea"
@@ -568,200 +680,232 @@ const processedCenters = centers
                 onChange={(e) => setAlertMessage(e.target.value)}
               />
 
-              {/* Attach Media */}
-              <button type="button" className="report-attach-btn">
-                <Icons.Camera />
-                <span>Attach photo or video</span>
-              </button>
+              <input
+                ref={mediaInputRef}
+                className="report-media-input"
+                type="file"
+                accept="image/*,video/*"
+                multiple
+                onChange={handleMediaSelection}
+                aria-label="Choose photos and a video to attach"
+              />
+              <input
+                ref={cameraInputRef}
+                className="report-media-input"
+                type="file"
+                accept="image/*"
+                capture="environment"
+                onChange={handleMediaSelection}
+                aria-label="Take a photo to attach"
+              />
+              <div className="report-attachment-actions">
+                <button
+                  type="button"
+                  className="report-attach-btn"
+                  onClick={() => mediaInputRef.current?.click()}
+                  disabled={isSubmittingAlert || isUploadingMedia || Boolean(pendingMediaAlertId)}
+                >
+                  <UploadCloud size={18} />
+                  <span>Upload files</span>
+                </button>
+                <button
+                  type="button"
+                  className="report-attach-btn"
+                  onClick={() => cameraInputRef.current?.click()}
+                  disabled={isSubmittingAlert || isUploadingMedia || Boolean(pendingMediaAlertId) || selectedPhotoCount >= 5}
+                >
+                  <Icons.Camera />
+                  <span>Open camera</span>
+                </button>
+              </div>
+              {attachmentFiles.length > 0 && (
+                <div className="report-media-selection" aria-live="polite">
+                  <p>{selectedPhotoCount} / 5 photos · {selectedVideoCount} / 1 video</p>
+                  {attachmentFiles.map((file, index) => (
+                    <div className="report-media-file" key={`${file.name}-${file.lastModified}-${index}`}>
+                      <span>{file.name} ({(file.size / (1024 * 1024)).toFixed(1)} MB)</span>
+                      {!pendingMediaAlertId && (
+                        <button type="button" onClick={() => setAttachmentFiles((currentFiles) => currentFiles.filter((_, fileIndex) => fileIndex !== index))} aria-label={`Remove ${file.name}`}>Remove</button>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
 
-              {/* SOS Button */}
               <button
                 type="button"
                 className="report-sos-submit"
                 onClick={handleSendEmergencyAlert}
+                disabled={isSubmittingAlert || isUploadingMedia}
               >
                 <Icons.Alert />
-                <span>Send emergency SOS</span>
+                <span>{isSubmittingAlert ? 'Sending SOS...' : isUploadingMedia ? 'Uploading media...' : pendingMediaAlertId ? 'Retry media upload' : 'Send emergency SOS'}</span>
               </button>
 
-              {/* Offline Queue Notice */}
               <div className="report-offline-banner">
                 <Icons.WifiOff />
                 <span>No signal? Report queues and sends automatically once connected.</span>
               </div>
 
-              {/* Status of Last Report */}
               <div className="report-status-section">
-                <span className="report-status-heading">Status of last report</span>
+                <span className="report-status-heading">Status & activity</span>
                 <div className="report-status-feed">
                   <span className="report-status-dot" />
-                  <span>Dispatcher received · team en route</span>
+                  <span>{alertStatus || 'Ready · Tap map to drop location pin'}</span>
                 </div>
               </div>
             </div>
           </div>
         ) : selectedCenter ? (
-            /* Place Details Card View */
-            <div className="shelter-detail-wrapper">
-              <div className="detail-nav-bar">
-                <button className="detail-nav-btn" onClick={handleCloseDetail} title="Back to list">
-                  <Icons.Back />
-                </button>
-                <span className="detail-nav-title">{selectedCenter.name}</span>
-                <button className="detail-nav-btn" onClick={handleCloseDetail} title="Close">
-                  <Icons.Close />
-                </button>
-              </div>
+          <div className="shelter-detail-wrapper">
+            <div className="detail-nav-bar">
+              <button className="detail-nav-btn" onClick={handleCloseDetail} title="Back to list">
+                <Icons.Back />
+              </button>
+              <span className="detail-nav-title">{selectedCenter.name}</span>
+              <button className="detail-nav-btn" onClick={handleCloseDetail} title="Close">
+                <Icons.Close />
+              </button>
+            </div>
 
-              <div className="citizen-scroll-content shelter-card-padding">
-                <div className="shelter-detail-card">
-                  {/* 1. Hero Gallery Header */}
-                  <div className="shelter-hero-banner">
-                    <div className="shelter-gallery-grid">
-                      <div className="shelter-gallery-item">
-                        {selectedCenter.image_url ? (
-                          <img src={selectedCenter.image_url} alt={selectedCenter.name} />
-                        ) : (
-                          <Icons.ImageIcon />
-                        )}
-                      </div>
-                      <div className="shelter-gallery-item">
-                        <Icons.ImageIcon />
-                      </div>
-                      <div className="shelter-gallery-item">
-                        <Icons.ImageIcon />
-                      </div>
-                    </div>
-                    <span className="shelter-hero-caption">Safe haven facility</span>
-                  </div>
-
-                  {/* 2. Title & Status */}
-                  <div className="shelter-header-group">
-                    <div className="shelter-title-row">
-                      <h2 className="shelter-name-heading">{selectedCenter.name}</h2>
-                      <span className={`shelter-status-pill ${selectedCenter.is_active !== false ? 'open' : 'closed'}`}>
-                        {selectedCenter.is_active !== false ? 'Open' : 'Closed'}
-                      </span>
-                    </div>
-                    <span className="shelter-updated-time">Updated 4 minutes ago</span>
-
-                    {/* Amenities Row */}
-                    <div className="shelter-amenities-row">
-                      <span className="amenity-pill"><Icons.Water /> Water</span>
-                      <span className="amenity-pill"><Icons.MedicalBag /> Medical</span>
-                      <span className="amenity-pill"><Icons.Power /> Power</span>
-                      <span className="amenity-pill"><Icons.Pet /> Pet ok</span>
-                      <span className="amenity-pill"><Icons.Accessible /> Accessible</span>
-                    </div>
-                  </div>
-
-                  {/* 3. Action Trio Buttons */}
-                  <div className="shelter-actions-trio">
-                    <button
-                      type="button"
-                      className="shelter-btn-pill"
-                      onClick={() => handleRouteToCenter(selectedCenter)}
-                      disabled={routeLoading}
-                    >
-                      <Icons.Directions />
-                      <span>{routeLoading ? 'Calculating...' : 'Directions'}</span>
-                    </button>
-
-                    <button
-                      type="button"
-                      className={`shelter-btn-pill ${isSaved ? 'saved' : ''}`}
-                      onClick={() => toggleSaveShelter(selectedCenter.id)}
-                    >
-                      <Icons.Save saved={isSaved} />
-                      <span>{isSaved ? 'Saved' : 'Save'}</span>
-                    </button>
-
-                    <button
-                      type="button"
-                      className="shelter-btn-pill"
-                      onClick={() => handleShare(selectedCenter)}
-                    >
-                      <Icons.Share />
-                      <span>{copyFeedback || 'Share'}</span>
-                    </button>
-                  </div>
-
-                  {/* 4. Occupancy Card */}
-                  <div className="occupancy-metric-box">
-                    <div className="occupancy-header-row">
-                      <span className="occupancy-label">Occupancy</span>
-                      <span className={`occupancy-status-alert ${occupancyRate >= 75 ? 'critical' : occupancyRate >= 50 ? 'warning' : 'good'}`}>
-                        <Icons.TrendUp />
-                        <span>{occupancyRate >= 75 ? 'Near capacity' : occupancyRate >= 50 ? 'Filling fast' : 'Slots available'}</span>
-                      </span>
-                    </div>
-
-                    <div className="occupancy-count-row">
-                      <strong>{occupancy} / {capacity}</strong>
-                      <span className="occupancy-percentage">({occupancyRate}%)</span>
-                    </div>
-
-                    <div className="occupancy-track">
-                      <div
-                        className="occupancy-bar-fill"
-                        style={{
-                          width: `${occupancyRate}%`,
-                          backgroundColor: occupancyRate >= 80 ? '#d93025' : occupancyRate >= 50 ? '#f9ab00' : '#1a73e8'
-                        }}
-                      />
-                    </div>
-                  </div>
-
-                  {/* 5. Address & Emergency Desk Rows */}
-                  <div className="shelter-details-grid">
-                    <div className="shelter-detail-row">
-                      <div className="detail-row-left">
-                        <Icons.Pin />
-                        <span>Address</span>
-                      </div>
-                      <span className="detail-row-value">{selectedCenter.address || 'Caloocan, Metro Manila'}</span>
-                    </div>
-
-                    <div className="shelter-detail-row">
-                      <div className="detail-row-left">
-                        <Icons.Phone />
-                        <span>Emergency desk</span>
-                      </div>
-                      <a href="tel:0282887777" className="detail-row-value link-value">(02) 8288-7777</a>
-                    </div>
-                  </div>
-
-                  {/* 6. Nearby Alternative Card */}
-                  {alternativeCenter && (
-                    <div className="shelter-alternative-section">
-                      <p className="shelter-alternative-heading">Near capacity — nearby alternative</p>
-                      <div
-                        className="alternative-shelter-card"
-                        role="button"
-                        tabIndex={0}
-                        onClick={() => {
-                          setSelectedCenter(alternativeCenter)
-                          handleRouteToCenter(alternativeCenter)
-                        }}
-                      >
-                        <div className="alt-shelter-info">
-                          <strong>{alternativeCenter.name}</strong>
-                          <span>
-                            {Math.max(0, (alternativeCenter.capacity || 100) - (alternativeCenter.current_occupancy || 0))} slots open · 1.2 km
-                          </span>
+            <div className="citizen-scroll-content shelter-card-padding">
+              <div className="shelter-detail-card">
+                <div className="shelter-hero-banner">
+                  <div className="shelter-gallery-grid">
+                    {[selectedCenter.image_url, selectedCenter.image_url_2, selectedCenter.image_url_3].map((imageUrl, index) => (
+                        <div className="shelter-gallery-item" key={`${selectedCenter.id}-image-${index}`}>
+                          {imageUrl ? <img src={imageUrl} alt={`${selectedCenter.name} view ${index + 1}`} /> : <Icons.ImageIcon />}
                         </div>
-                        <span className="alt-arrow">➔</span>
-                      </div>
+                      ))}
+                    {/* <div className="shelter-gallery-item">
+                      <Icons.ImageIcon />
                     </div>
-                  )}
+                    <div className="shelter-gallery-item">
+                      <Icons.ImageIcon />
+                    </div> */}
+                  </div>
+                  <span className="shelter-hero-caption">Safe haven facility</span>
                 </div>
+
+                <div className="shelter-header-group">
+                  <div className="shelter-title-row">
+                    <h2 className="shelter-name-heading">{selectedCenter.name}</h2>
+                    <span className={`shelter-status-pill ${selectedCenter.is_active !== false ? 'open' : 'closed'}`}>
+                      {selectedCenter.is_active !== false ? 'Open' : 'Closed'}
+                    </span>
+                  </div>
+                  <span className="shelter-updated-time">Updated 4 minutes ago</span>
+
+                  <div className="shelter-amenities-row">
+                    <span className="amenity-pill"><Icons.Water /> Water</span>
+                    <span className="amenity-pill"><Icons.MedicalBag /> Medical</span>
+                    <span className="amenity-pill"><Icons.Power /> Power</span>
+                    <span className="amenity-pill"><Icons.Pet /> Pet ok</span>
+                    <span className="amenity-pill"><Icons.Accessible /> Accessible</span>
+                  </div>
+                </div>
+
+                <div className="shelter-actions-trio">
+                  <button
+                    type="button"
+                    className="shelter-btn-pill"
+                    onClick={() => handleRouteToCenter(selectedCenter)}
+                    disabled={routeLoading}
+                  >
+                    <Icons.Directions />
+                    <span>{routeLoading ? 'Calculating...' : 'Directions'}</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    className={`shelter-btn-pill ${isSaved ? 'saved' : ''}`}
+                    onClick={() => toggleSaveShelter(selectedCenter.id)}
+                  >
+                    <Icons.Save saved={isSaved} />
+                    <span>{isSaved ? 'Saved' : 'Save'}</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    className="shelter-btn-pill"
+                    onClick={() => handleShare(selectedCenter)}
+                  >
+                    <Icons.Share />
+                    <span>{copyFeedback || 'Share'}</span>
+                  </button>
+                </div>
+
+                <div className="occupancy-metric-box">
+                  <div className="occupancy-header-row">
+                    <span className="occupancy-label">Occupancy</span>
+                    <span className={`occupancy-status-alert ${occupancyRate >= 75 ? 'critical' : occupancyRate >= 50 ? 'warning' : 'good'}`}>
+                      <Icons.TrendUp />
+                      <span>{occupancyRate >= 75 ? 'Near capacity' : occupancyRate >= 50 ? 'Filling fast' : 'Slots available'}</span>
+                    </span>
+                  </div>
+
+                  <div className="occupancy-count-row">
+                    <strong>{occupancy} / {capacity}</strong>
+                    <span className="occupancy-percentage">({occupancyRate}%)</span>
+                  </div>
+
+                  <div className="occupancy-track">
+                    <div
+                      className="occupancy-bar-fill"
+                      style={{
+                        width: `${occupancyRate}%`,
+                        backgroundColor: occupancyRate >= 80 ? '#d93025' : occupancyRate >= 50 ? '#f9ab00' : '#1a73e8'
+                      }}
+                    />
+                  </div>
+                </div>
+
+                <div className="shelter-details-grid">
+                  <div className="shelter-detail-row">
+                    <div className="detail-row-left">
+                      <Icons.Pin />
+                      <span>Address</span>
+                    </div>
+                    <span className="detail-row-value">{selectedCenter.address || 'Caloocan, Metro Manila'}</span>
+                  </div>
+
+                  <div className="shelter-detail-row">
+                    <div className="detail-row-left">
+                      <Icons.Phone />
+                      <span>Emergency desk</span>
+                    </div>
+                    <a href="tel:0282887777" className="detail-row-value link-value">(02) 8288-7777</a>
+                  </div>
+                </div>
+
+                {alternativeCenter && (
+                  <div className="shelter-alternative-section">
+                    <p className="shelter-alternative-heading">Near capacity — nearby alternative</p>
+                    <div
+                      className="alternative-shelter-card"
+                      role="button"
+                      tabIndex={0}
+                      onClick={() => {
+                        setSelectedCenter(alternativeCenter)
+                        handleRouteToCenter(alternativeCenter)
+                      }}
+                    >
+                      <div className="alt-shelter-info">
+                        <strong>{alternativeCenter.name}</strong>
+                        <span>
+                          {Math.max(0, (alternativeCenter.capacity || 100) - (alternativeCenter.current_occupancy || 0))} slots open · 1.2 km
+                        </span>
+                      </div>
+                      <span className="alt-arrow">➔</span>
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
-          ) : ( 
+          </div>
+        ) : (
           <>
-            {/* Search & List View */}
             <div className="shelter-search-section">
-              {/* Search Bar */}
               <div className="citizen-search-box">
                 <Icons.Search />
                 <input
@@ -778,7 +922,6 @@ const processedCenters = centers
                 )}
               </div>
 
-              {/* Quick Filters Row */}
               <div className="shelter-filter-row">
                 <button
                   type="button"

@@ -1,10 +1,16 @@
 from datetime import datetime, timedelta, timezone
-from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks
+import json
+import logging
+from urllib.parse import urlsplit, urlunsplit
+from uuid import uuid4
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status, BackgroundTasks
 from fastapi.security import OAuth2PasswordRequestForm
+from starlette.concurrency import run_in_threadpool
 from sqlmodel import select
 from pydantic import BaseModel, EmailStr, field_validator
 from sqlalchemy import func, cast, String
 from sqlalchemy.ext.asyncio import AsyncSession
+from supabase import create_client
 
 from app.core.security import (
     create_access_token, 
@@ -21,10 +27,31 @@ from app.models.otp import OTPVerification
 from app.models.rescuer import RescuerProfile, RescuerProfileRead, RescuerStatus
 from app.models.emergency_alert import EmergencyAlert, EmergencyAlertRead, AlertStatus
 from app.models.vehicle import Vehicle
+from app.core.config import settings
 from app.core.mail import send_reset_password_email, send_otp_email
 from app.api.websockets.telemetry import manager as telemetry_manager
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
+SOS_ALERT_MEDIA_BUCKET = "sos_alert_media"
+MAX_SOS_MEDIA_BYTES = 25 * 1024 * 1024
+SOS_MEDIA_EXTENSIONS = {
+    "image/jpeg": ".jpg",
+    "image/png": ".png",
+    "image/webp": ".webp",
+    "image/gif": ".gif",
+    "image/heic": ".heic",
+    "image/heif": ".heif",
+    "video/mp4": ".mp4",
+    "video/webm": ".webm",
+    "video/quicktime": ".mov",
+}
+SOS_IMAGE_EXTENSIONS = frozenset(
+    extension for content_type, extension in SOS_MEDIA_EXTENSIONS.items() if content_type.startswith("image/")
+)
+SOS_VIDEO_EXTENSIONS = frozenset(
+    extension for content_type, extension in SOS_MEDIA_EXTENSIONS.items() if content_type.startswith("video/")
+)
 
 
 class ForgotPasswordRequest(BaseModel):
@@ -61,6 +88,10 @@ class LoginRequest(BaseModel):
     username: str
     password: str
     role: str
+
+
+class EmergencyAlertCreated(EmergencyAlertRead):
+    media_upload_token: str
 
 
 @router.post("/login")
@@ -245,6 +276,7 @@ async def list_rescue_units(session: AsyncSession = Depends(get_session)):
                 "driver_name": vehicle.driver_name,
                 "capacity": vehicle.capacity,
                 "status": vehicle.status,
+                "rescuer_onboard": vehicle.rescuer_onboard,
                 "center_id": vehicle.center_id,
                 "current_location_lat": vehicle.current_location_lat,
                 "current_location_lng": vehicle.current_location_lng,
@@ -253,7 +285,7 @@ async def list_rescue_units(session: AsyncSession = Depends(get_session)):
         ],
     }
 
-@router.post("/alerts", response_model=EmergencyAlertRead, status_code=status.HTTP_201_CREATED)
+@router.post("/alerts", response_model=EmergencyAlertCreated, status_code=status.HTTP_201_CREATED)
 async def create_alert(
     payload: dict,
     session: AsyncSession = Depends(get_session)
@@ -275,7 +307,8 @@ async def create_alert(
         "message": payload.get("message", "Emergency alert"),
         "status": payload.get("status", AlertStatus.PENDING),
         "assigned_rescuer_id": payload.get("assigned_rescuer_id"),
-        "assigned_rescuer_name": payload.get("assigned_rescuer_name")
+        "assigned_rescuer_name": payload.get("assigned_rescuer_name"),
+        "assigned_vehicle_ids": payload.get("assigned_vehicle_ids")
     }
     alert = EmergencyAlert.model_validate(alert_data)
 
@@ -287,7 +320,91 @@ async def create_alert(
         "data": EmergencyAlertRead.model_validate(alert).model_dump(mode="json"),
         "timestamp": datetime.utcnow().timestamp(),
     })
-    return alert
+    alert_data = EmergencyAlertRead.model_validate(alert).model_dump()
+    return {
+        **alert_data,
+        "media_upload_token": create_access_token(
+            {
+                "sub": sender.username,
+                "token_use": "sos_alert_media",
+                "alert_id": alert.id,
+                "sender_id": alert.sender_id,
+            },
+            expires_delta=timedelta(hours=2),
+        ),
+    }
+
+
+@router.post("/alerts/{alert_id}/media", status_code=status.HTTP_201_CREATED)
+async def upload_alert_media(
+    alert_id: int,
+    file: UploadFile = File(...),
+    current_user: dict = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+):
+    content_type = (file.content_type or "").lower()
+    extension = SOS_MEDIA_EXTENSIONS.get(content_type)
+    if not extension:
+        raise HTTPException(status_code=415, detail="Upload a supported image or video file")
+
+    contents = await file.read(MAX_SOS_MEDIA_BYTES + 1)
+    if len(contents) > MAX_SOS_MEDIA_BYTES:
+        raise HTTPException(status_code=413, detail="Media files must be 25 MB or smaller")
+    if not contents:
+        raise HTTPException(status_code=400, detail="The selected media file is empty")
+
+    alert_result = await session.execute(select(EmergencyAlert).where(EmergencyAlert.id == alert_id))
+    alert = alert_result.scalar_one_or_none()
+    if not alert:
+        raise HTTPException(status_code=404, detail="SOS alert not found")
+    if current_user.get("token_use") == "sos_alert_media":
+        if current_user.get("alert_id") != alert_id or current_user.get("sender_id") != alert.sender_id:
+            raise HTTPException(status_code=403, detail="This upload token is not valid for this SOS alert")
+    else:
+        user_result = await session.execute(select(User).where(User.username == current_user.get("sub")))
+        user = user_result.scalar_one_or_none()
+        if not user:
+            raise HTTPException(status_code=401, detail="User account not found")
+        if alert.sender_id != user.id:
+            raise HTTPException(status_code=403, detail="You can only upload media to your own SOS alert")
+
+    storage_path = f"{alert_id}/{uuid4().hex}{extension}"
+    supabase_url_parts = urlsplit(settings.SUPABASE_URL)
+    supabase_url_path = supabase_url_parts.path.rstrip("/")
+    if supabase_url_path == "/rest/v1":
+        supabase_url_parts = supabase_url_parts._replace(path="")
+    client = create_client(urlunsplit(supabase_url_parts), settings.SUPABASE_KEY)
+    storage_stage = "listing existing media"
+    try:
+        storage = client.storage.from_(SOS_ALERT_MEDIA_BUCKET)
+        stored_objects = await run_in_threadpool(lambda: storage.list(str(alert_id)))
+        stored_names = [
+            str(item.get("name", "")) if isinstance(item, dict) else str(getattr(item, "name", ""))
+            for item in stored_objects
+        ]
+        stored_image_count = sum(any(name.lower().endswith(ext) for ext in SOS_IMAGE_EXTENSIONS) for name in stored_names)
+        stored_video_count = sum(any(name.lower().endswith(ext) for ext in SOS_VIDEO_EXTENSIONS) for name in stored_names)
+        if content_type.startswith("image/") and stored_image_count >= 5:
+            raise HTTPException(status_code=409, detail="An SOS alert can have at most 5 photos")
+        if content_type.startswith("video/") and stored_video_count >= 1:
+            raise HTTPException(status_code=409, detail="An SOS alert can have at most 1 video")
+        storage_stage = "uploading media"
+        await run_in_threadpool(
+            lambda: storage.upload(
+                storage_path,
+                contents,
+                file_options={"content-type": content_type, "upsert": "false"},
+            )
+        )
+    except HTTPException:
+        raise
+    except Exception as error:
+        logger.exception("Supabase Storage %s failed for SOS alert %s", storage_stage, alert_id)
+        raise HTTPException(status_code=502, detail="Unable to upload media to Supabase Storage") from error
+    finally:
+        await file.close()
+
+    return {"bucket": SOS_ALERT_MEDIA_BUCKET, "path": storage_path, "content_type": content_type}
 
 
 @router.get("/alerts", response_model=list[EmergencyAlertRead])
@@ -309,6 +426,7 @@ async def update_alert(
     if not alert:
         raise HTTPException(status_code=404, detail="Alert not found")
     assigned_user_id = payload.get("assigned_rescuer_id")
+    assigned_vehicle_ids = payload.get("assigned_vehicle_ids")
 
     if assigned_user_id:
         # Verify the user exists and has role rescuer
@@ -331,6 +449,7 @@ async def update_alert(
             session.add(rescuer_profile)
             await session.commit()
             await session.refresh(rescuer_profile)
+        rescuer_profile.status = RescuerStatus.ASSIGNED
 
         # The alert field references user.id, so acknowledgement can resolve the profile later.
         payload["assigned_rescuer_id"] = assigned_user_id
@@ -338,6 +457,16 @@ async def update_alert(
         payload.setdefault("assigned_rescuer_name", rescuer_user.full_name or rescuer_user.username)
         # default status to assigned if caller didn't set it
         payload.setdefault("status", AlertStatus.ASSIGNED)
+
+    try:
+        vehicle_ids = [int(vehicle_id) for vehicle_id in json.loads(assigned_vehicle_ids or "[]")]
+    except (TypeError, ValueError, json.JSONDecodeError):
+        vehicle_ids = []
+    if vehicle_ids:
+        vehicle_result = await session.execute(select(Vehicle).where(Vehicle.id.in_(vehicle_ids)))
+        for vehicle in vehicle_result.scalars().all():
+            vehicle.status = "assigned"
+            vehicle.rescuer_onboard = rescuer_user.full_name or rescuer_user.username
 
     for field, value in payload.items():
         if hasattr(alert, field):
@@ -376,6 +505,14 @@ async def acknowledge_alert(
         raise HTTPException(status_code=404, detail="Rescuer profile not found")
 
     profile.status = RescuerStatus.IN_TRANSIT
+    try:
+        vehicle_ids = [int(vehicle_id) for vehicle_id in json.loads(alert.assigned_vehicle_ids or "[]")]
+    except (TypeError, ValueError, json.JSONDecodeError):
+        vehicle_ids = []
+    if vehicle_ids:
+        vehicle_result = await session.execute(select(Vehicle).where(Vehicle.id.in_(vehicle_ids)))
+        for vehicle in vehicle_result.scalars().all():
+            vehicle.status = "in_transit"
     alert.status = AlertStatus.RESOLVING
     await session.commit()
     await session.refresh(alert)

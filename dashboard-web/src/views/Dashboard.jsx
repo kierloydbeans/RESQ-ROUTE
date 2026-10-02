@@ -1,8 +1,7 @@
 import React from 'react'
+import { Navigate } from 'react-router-dom'
 import CitizenDashboard from './CitizenDashboard'
 import DispatcherDashboard from './DispatcherDashboard'
-import RescuerDashboard from './RescuerDashboard'
-import Logo from '../components/Logo'
 
 const getStoredAuth = () => {
   try {
@@ -23,23 +22,22 @@ export const Dashboard = () => {
     window.location.href = '/login'
   }
 
-  if (role === 'citizen') {
+  if (['citizen', 'public'].includes(role)) {
     return <CitizenDashboard auth={auth} onLogout={handleLogout} />
   }
 
-  if (role === 'rescuer') {
-    return <RescuerDashboard auth={auth} onLogout={handleLogout} />
+  if (['dispatcher', 'coordinator', 'admin'].includes(role)) {
+    return <DispatcherDashboard auth={auth} onLogout={handleLogout} />
   }
 
-  if (role === 'dispatcher') {
-    return <DispatcherDashboard auth={auth} onLogout={handleLogout} />
+  if (role === 'rescuer') {
+    return <Navigate to="/rescuer" replace />
   }
 
   return (
     <main className="restricted-console">
-      <Logo size="small" />
-      <h1>Dispatcher access required</h1>
-      <p>This operations console is available only to dispatcher accounts.</p>
+      <h1>Access denied</h1>
+      <p>This dashboard is not available for the current role.</p>
       <button className="emergency-button" onClick={handleLogout}>RETURN TO LOGIN</button>
     </main>
   )

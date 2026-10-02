@@ -7,6 +7,7 @@ from sqlmodel import SQLModel, Field
 
 class RescuerStatus(str, Enum):
     AVAILABLE = "available"
+    ASSIGNED = "assigned"
     IN_TRANSIT = "in_transit"
     RECOVERING = "recovering"
 
