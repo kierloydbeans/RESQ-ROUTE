@@ -1,0 +1,36 @@
+@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Rajdhani:wght@400;500;600;700&display=swap');
+
+:root {
+  --ops-bg: #070a10;
+  --ops-surface: #0e1320;
+  --ops-surface-2: #111827;
+  --ops-border: #202a3d;
+  --ops-text: #e7edf5;
+  --ops-muted: #a9b5c7;
+  --ops-red: #f23e4f;
+  --ops-green: #00d6a0;
+  --ops-amber: #f4b21b;
+  --ops-blue: #50a8ff;
+  --auth-role-active-bg: rgba(242, 62, 79, .14);
+  --ops-font: 'Rajdhani', 'Arial Narrow', sans-serif;
+  --ops-mono: 'IBM Plex Mono', 'Consolas', monospace;
+}
+
+:root[data-theme='light'] {
+  --ops-bg: #e8edf1;
+  --ops-surface: #f8fafb;
+  --ops-surface-2: #ffffff;
+  --ops-border: #cbd5df;
+  --ops-text: #17212b;
+  --ops-muted: #607080;
+  --auth-role-active-bg: #fef2f2;
+}
+
+* { box-sizing: border-box; }
+html, body, #root { width: 100%; min-height: 100vh; margin: 0; padding: 0; overflow-x: hidden; }
+body { margin: 0; background: var(--ops-bg); color: var(--ops-text); font-family: var(--ops-font); }
+button, textarea, select { font: inherit; }
+.RaLayout-sidebar, .RaSidebar-root, .RaSidebar-fixed, .MuiDrawer-root, .RaAppBar-root { display: none !important; }
+.RaLayout-appFrame { margin-top: 0 !important; }
+.RaLayout-contentWithSidebar { margin-left: 0 !important; }
+.RaLayout-content { padding: 0 !important; }
