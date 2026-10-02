@@ -1,10 +1,19 @@
 import React, { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
+import '../styles/rescuer-console.css';
 import {
-  AlertTriangle,Map,ClipboardList,Bluetooth,UploadCloud,Menu,ChevronDown,User,MapPin,Users,Waves,Navigation,ExternalLink,Check,RotateCcw,MessageSquare,} from 'lucide-react';
+  AlertTriangle,Map,ClipboardList,Bluetooth,UploadCloud,Menu,ChevronDown,User,MapPin,Users,Waves,Navigation,ExternalLink,Check,RotateCcw,MessageSquare,LogOut,} from 'lucide-react';
 
 const RescuerDashboard = () => {
   const [activeView, setActiveView] = useState('alert');
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
+  const [isProfileMenuOpen, setIsProfileMenuOpen] = useState(false);
+  const navigate = useNavigate();
+
+  const handleLogout = () => {
+    localStorage.removeItem('auth');
+    navigate('/login/rescuer', { replace: true });
+  };
 
   const navItems = [
     { id: 'alert', label: 'Assignment Alert', icon: AlertTriangle },
@@ -126,8 +135,30 @@ const RescuerDashboard = () => {
               <span style={{ color: '#22d3ee' }}>Uplink Secure</span>
             </div>
             <div style={{ fontFamily: 'monospace', color: '#64748b' }}>14:32:00 PHT</div>
-            <div style={{ width: '28px', height: '28px', borderRadius: '9999px', backgroundColor: '#1e293b', border: '1px solid #334155', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '11px', fontWeight: 'bold', color: '#cbd5e1' }}>
-              A
+            <div style={{ position: 'relative' }}>
+              <button
+                type="button"
+                onClick={() => setIsProfileMenuOpen((isOpen) => !isOpen)}
+                aria-label="Open profile menu"
+                aria-haspopup="menu"
+                aria-expanded={isProfileMenuOpen}
+                style={{ width: '32px', height: '32px', borderRadius: '50%', backgroundColor: '#1e293b', border: '1px solid #334155', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '11px', fontWeight: 'bold', color: '#cbd5e1', cursor: 'pointer' }}
+              >
+                A
+              </button>
+              {isProfileMenuOpen && (
+                <div role="menu" style={{ position: 'absolute', top: '40px', right: 0, minWidth: '160px', padding: '6px', backgroundColor: '#0b1120', border: '1px solid #334155', borderRadius: '6px', boxShadow: '0 8px 24px rgba(0, 0, 0, 0.4)' }}>
+                  <button
+                    type="button"
+                    role="menuitem"
+                    onClick={handleLogout}
+                    style={{ width: '100%', display: 'flex', alignItems: 'center', gap: '9px', padding: '9px 10px', background: 'transparent', border: 'none', borderRadius: '4px', color: '#f1f5f9', fontSize: '12px', textAlign: 'left', cursor: 'pointer' }}
+                  >
+                    <LogOut size={15} />
+                    Log out
+                  </button>
+                </div>
+              )}
             </div>
           </div>
         </header>

@@ -6,6 +6,8 @@ import { useTheme } from '../ThemeContext'
 import HazardTicker from '../components/HazardTicker'
 import AssignmentModal from '../components/AssignmentModal'
 import DeployedVehicles from '../components/DeployedVehicles'
+import '../styles/ops-console.css'
+import { ChevronLeft, ChevronRight } from 'lucide-react'
 
 const getStoredAuth = () => {
   try {
@@ -17,7 +19,37 @@ const getStoredAuth = () => {
 
 const normalizeRole = (role) => String(role?.value || role || '').toLowerCase().split('.').pop()
 const statusLabel = (status) => String(status || 'unknown').replace(/_/g, ' ').toUpperCase()
-const formatTime = (value) => value ? new Date(value).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '14:32'
+const parseAlertDate = (value) => {
+  if (!value) return null
+  const normalizedValue = typeof value === 'string' && !/(Z|[+-]\d{2}:\d{2})$/i.test(value) ? `${value}Z` : value
+  const date = new Date(normalizedValue)
+  return Number.isFinite(date.getTime()) ? date : null
+}
+const alertDateFormatter = new Intl.DateTimeFormat('en-PH', {
+  timeZone: 'Asia/Manila',
+  day: '2-digit',
+  month: 'short',
+  year: 'numeric'
+})
+const alertTimeFormatter = new Intl.DateTimeFormat('en-PH', {
+  timeZone: 'Asia/Manila',
+  hour: '2-digit',
+  minute: '2-digit',
+  hour12: true
+})
+const formatTime = (value) => {
+  const date = parseAlertDate(value)
+  return date
+    ? `${alertDateFormatter.format(date)} | ${alertTimeFormatter.format(date)}`
+    : 'Time unavailable'
+}
+const ALERTS_PER_PAGE = 5
+const alertTimestamp = (value) => parseAlertDate(value)?.getTime() ?? Number.NaN
+const isUnattendedAlert = (alert, now) => {
+  const status = String(alert.status?.value || alert.status || '').toLowerCase().split('.').pop()
+  const createdAt = alertTimestamp(alert.created_at)
+  return status === 'pending' && Number.isFinite(createdAt) && now.getTime() - createdAt >= 2 * 60 * 60 * 1000
+}
 const alertMarkerColors = { flood: '#3298df', earthquake: '#d18c48', fire: '#f04444', medical: '#dd5ca8', trapped: '#a56ee7', other: '#dc2626' }
 const rescuerMarkerColors = { available: '#00d6a0', recovering: '#f59e0b', in_transit: '#2563eb' }
 const vehicleMarkerColors = { available: '#00d6a0', in_transit: '#2563eb', maintenance: '#dc2626' }
@@ -60,6 +92,36 @@ const distanceBetween = (firstLatitude, firstLongitude, secondLatitude, secondLo
   return earthRadiusKm * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
 }
 
+const SosFeedItem = ({ alert, now, onAssign }) => {
+  const disasterType = alert.disaster_type || 'other'
+  const severity = alert.severity || 'high'
+  const unattended = isUnattendedAlert(alert, now)
+  const sentAt = parseAlertDate(alert.created_at)
+
+  return (
+    <article className={unattended ? 'sos-item unattended-alert' : 'sos-item'}>
+      <div className="sos-meta">
+        <span className={`severity ${severity}`}>{severity.toUpperCase()}</span>
+        {unattended && <span className="unattended-badge">UNATTENDED 2H+</span>}
+        <time dateTime={sentAt?.toISOString()}>{formatTime(alert.created_at)}</time>
+      </div>
+      <div className="sos-person">
+        <span className={`sos-icon disaster-${disasterType}`}>{disasterIcons[disasterType] || disasterIcons.other}</span>
+        <div>
+          <b>{alert.sender_name}</b>
+          <small>{disasterLabels[disasterType] || 'Other'} · {statusLabel(alert.status)}{alert.message ? ` · ${alert.message}` : ''}</small>
+        </div>
+      </div>
+      <div className="coordinates">{alert.latitude?.toFixed?.(5) || 'Unknown'}° N, {alert.longitude?.toFixed?.(5) || 'Unknown'}° E</div>
+      <div className="sos-actions">
+        <button onClick={() => onAssign(alert.id)}>ASSIGN</button>
+        <button>VERIFY</button>
+        <button>MERGE</button>
+      </div>
+    </article>
+  )
+}
+
 export const Dashboard = () => {
   const auth = getStoredAuth()
   const role = normalizeRole(auth?.user?.role) || 'citizen'
@@ -68,7 +130,7 @@ export const Dashboard = () => {
   const [liveRescuerLocations, setLiveRescuerLocations] = useState({})
   const [alertMessage, setAlertMessage] = useState('')
   const [alertStatus, setAlertStatus] = useState('')
-  const [alerts, setAlerts] = useState([])
+  const [alertRecords, setAlertRecords] = useState([])
   const [centers, setCenters] = useState([])
   const [evacuationRecommendation, setEvacuationRecommendation] = useState(null)
   const [evacuationLoading, setEvacuationLoading] = useState(false)
@@ -87,7 +149,27 @@ export const Dashboard = () => {
   const [selectedMergeIds, setSelectedMergeIds] = useState([])
   const [verifiedAlertState, setVerifiedAlertState] = useState(null)
   const [assigningAlert, setAssigningAlert] = useState(null)
+  const [feedView, setFeedView] = useState('latest')
+  const [regularAlertPage, setRegularAlertPage] = useState(0)
+  const [pinnedAlertPage, setPinnedAlertPage] = useState(0)
   const [currentTime, setCurrentTime] = useState(() => new Date())
+  const alerts = alertRecords
+  const unattendedAlerts = alerts.filter((alert) => isUnattendedAlert(alert, currentTime))
+  const pinnedAlertPageCount = Math.max(1, Math.ceil(unattendedAlerts.length / ALERTS_PER_PAGE))
+  const currentPinnedAlertPage = Math.min(pinnedAlertPage, pinnedAlertPageCount - 1)
+  const visiblePinnedAlerts = unattendedAlerts.slice(
+    currentPinnedAlertPage * ALERTS_PER_PAGE,
+    (currentPinnedAlertPage + 1) * ALERTS_PER_PAGE
+  )
+  const regularAlertPageCount = Math.max(1, Math.ceil(alerts.length / ALERTS_PER_PAGE))
+  const currentRegularAlertPage = Math.min(regularAlertPage, regularAlertPageCount - 1)
+  const visibleRegularAlerts = alerts.slice(
+    currentRegularAlertPage * ALERTS_PER_PAGE,
+    (currentRegularAlertPage + 1) * ALERTS_PER_PAGE
+  )
+  const setAlerts = (nextAlerts) => setAlertRecords((currentAlerts) => (
+    typeof nextAlerts === 'function' ? nextAlerts(currentAlerts) : nextAlerts
+  ))
   const [mapHeight, setMapHeight] = useState(375)
   const verifiedAlert = verifiedAlertState
   const setVerifiedAlert = (alert) => setVerifiedAlertState((current) => current?.id === alert?.id ? null : alert)
@@ -272,6 +354,8 @@ export const Dashboard = () => {
     loadRescueUnits()
     loadCenters()
     loadRoadHazards()
+    const roadHazardRefresh = window.setInterval(loadRoadHazards, 60_000)
+    return () => window.clearInterval(roadHazardRefresh)
   }, [API_BASE_URL])
 
   const handleSendEmergencyAlert = async () => {
@@ -722,23 +806,395 @@ export const Dashboard = () => {
 
   return (
     <main className="ops-console">
-      <header className="ops-header">
-        <div className="brand-lockup"><Logo size="small" /><div><strong>RESQ-ROUTE</strong><span>CDRRMO LIVE OPERATIONS CENTER</span></div></div>
-        <div className="header-actions"><span className={`connection ${isConnected ? 'online' : 'offline'}`}><i /> WebSocket: {isConnected ? 'Connected' : 'Reconnecting'}</span><span className="header-time">{formattedCurrentTime} PHT</span>{accountMenu}</div>
-      </header>
-      <HazardTicker hazards={roadHazards} />
+  <header className="ops-header">
+    <div className="brand-lockup"><Logo size="small" /><div><strong>RESQ-ROUTE</strong><span>CDRRMO LIVE OPERATIONS CENTER</span></div></div>
+    <div className="header-actions"><span className={`connection ${isConnected ? 'online' : 'offline'}`}><i /> WebSocket: {isConnected ? 'Connected' : 'Reconnecting'}</span><span className="header-time">{formattedCurrentTime} PHT</span>{accountMenu}</div>
+  </header>
+  <HazardTicker hazards={roadHazards} />
 
-      <section className="ops-grid">
-        <aside className="feed-panel"><PanelTitle title="LIVE SOS FEED" badge="LIVE" onClick={() => openModal('alerts')} /><div className="feed-list">{alerts.slice(0, 5).map((alert) => { const disasterType = alert.disaster_type || 'other'; const severity = alert.severity || 'high'; return <article className="sos-item" key={alert.id}><div className="sos-meta"><span className={`severity ${severity}`}>{severity.toUpperCase()}</span><time>{formatTime(alert.created_at)} ago</time></div><div className="sos-person"><span className={`sos-icon disaster-${disasterType}`}>{disasterIcons[disasterType] || disasterIcons.other}</span><div><b>{alert.sender_name}</b><small>{disasterLabels[disasterType] || 'Other'} · {statusLabel(alert.status)}{alert.message ? ` · ${alert.message}` : ''}</small></div></div><div className="coordinates">{alert.latitude?.toFixed?.(5) || 'Unknown'}° N, {alert.longitude?.toFixed?.(5) || 'Unknown'}° E</div><div className="sos-actions"><button onClick={() => handleAssignAlert(alert.id)}>ASSIGN</button><button>VERIFY</button><button>MERGE</button></div></article>})}</div></aside>
-
-        <section className="map-panel"><PanelTitle title="CDRRMO TACTICAL MAP AREA" badge="TRACKING MAP" /><div className="map-stage" style={{ height: `${mapHeight}px` }}><DraggableMapOverlay className="map-coordinate" label="Map center coordinates" defaultPosition={{ left: 12, top: 12 }}>{primaryCenter ? <>CENTER: {Number(primaryCenter.latitude).toFixed(5)}° N<br />LONG: {Number(primaryCenter.longitude).toFixed(5)}° E</> : 'CENTER: NO ACTIVE CENTER'}</DraggableMapOverlay><DraggableMapOverlay className="map-legend" label="Map legend" defaultPosition={{ right: 12, top: 12 }}><span><i className="dot red" /> PENDING / CLOSED ALERT</span><span><i className="dot amber" /> ASSIGNED / RECOVERING</span><span><i className="dot green" /> AVAILABLE / CENTER</span><span><i className="dot blue" /> RESOLVING / IN TRANSIT</span></DraggableMapOverlay><MapContainer markers={[...mapMarkers, ...activeRouteMarkers]} route={activeEvacuationRoute?.geometry} trackDeviceLocation={false} />{activeEvacuationRoute && <DraggableMapOverlay className="evac-label evac-label-list" label="Active citizen evacuation route" defaultPosition={{ left: 280, top: 12 }}><b>ACTIVE EVACUATION ROUTE</b><span>{activeEvacuationRoute.citizenName} → {activeEvacuationRoute.centerName}</span></DraggableMapOverlay>}{centers.length > 0 && <DraggableMapOverlay className="evac-label evac-label-list" label="Evacuation center list" defaultPosition={{ left: 580, top: 164 }}><b>EVACUATION CENTERS</b>{centers.filter((center) => center.is_active !== false).map((center) => { const occupancy = center.capacity > 0 ? Math.round((center.current_occupancy / center.capacity) * 100) : 0; return <span key={center.id}>{center.name} ({occupancy}%)</span>})}</DraggableMapOverlay>}<DraggableMapOverlay className="map-scale" label="Map scale" defaultPosition={{ left: 12, top: 340 }}>SCALE: 1:25,000</DraggableMapOverlay><DraggableMapOverlay className="map-live" label="Live radar feed status" defaultPosition={{ left: 600, top: 340 }}>LIVE RADAR FEED [WSS_003]</DraggableMapOverlay><button className="map-resize-handle" onMouseDown={startMapResize} aria-label="Drag to resize map" title="Drag to resize map">↕</button></div></section>
-
-        <aside className="right-rail"><section className="metric-card response-card"><small>AVG RESPONSE</small><strong>8.2 min</strong><span>Below target (10m)</span></section><section className="rail-section"><div className="unit-panel-heading"><PanelTitle title="ACTIVE RESCUE UNITS" badge={`${rescueUnits.rescuers.length + rescueUnits.vehicles.length} FOUND`} onClick={() => openModal('units')} /><select value={unitSort} onChange={(event) => setUnitSort(event.target.value)} aria-label="Sort rescue units"><option value="status">Sort: Status</option><option value="name">Sort: Name</option><option value="type">Sort: Type</option></select></div><div className="unit-list-label">RESCUER PROFILES</div>{sortedRescuers.length === 0 ? <p className="unit-empty">No rescuer profiles</p> : sortedRescuers.map((rescuer) => <Unit key={`rescuer-${rescuer.id}`} name={rescuer.full_name || rescuer.username} detail={`${rescuer.station_name || 'No station'} · @${rescuer.username}`} status={rescuer.status} />)}<div className="unit-list-label">VEHICLES</div>{sortedVehicles.length === 0 ? <p className="unit-empty">No vehicles</p> : sortedVehicles.map((vehicle) => <Unit key={`vehicle-${vehicle.id}`} name={`${vehicle.vehicle_type} · ${vehicle.plate_number}`} detail={`${vehicle.driver_name} · capacity ${vehicle.capacity}`} status={vehicle.status} />)}</section><section className="rail-section operational"><PanelTitle title="OPERATIONAL METRICS" /><Metric label="ACTIVE SOS" value={alertCount} note="+4 in last 10m" color="red" /><Metric label="DISPATCHED" value={`${rescueUnits.dispatched_count || 0} / ${rescueUnits.rescuer_count || 0}`} note="Rescuer profiles in transit" color="red" /><Metric label="RESCUED TODAY" value={rescueUnits.closed_alert_count || 0} note="Closed emergency alerts" color="green" /></section></aside>
+  <section className="ops-grid">
+    {/* LEFT COLUMN: Operational Metrics (Top) + Live SOS Feed (Bottom) */}
+    <aside className="left-rail">
+      {/* 1. TOP: Operational Metrics */}
+      <section className="operational-panel">
+        <PanelTitle title="OPERATIONAL METRICS" />
+        <div className="operational-metrics-body">
+          <Metric label="ACTIVE SOS" value={alertCount} note="+4 in last 10m" color="red" />
+          <Metric
+            label="DISPATCHED"
+            value={`${rescueUnits.dispatched_count || 0} / ${rescueUnits.rescuer_count || 0}`}
+            note="Rescuer profiles in transit"
+            color="red"
+          />
+          <Metric
+            label="RESCUED TODAY"
+            value={rescueUnits.closed_alert_count || 0}
+            note="Closed emergency alerts"
+            color="green"
+          />
+        </div>
       </section>
-      <section className="alert-console"><PanelTitle title="ACTIVE ALERTS" badge={`${visibleAlerts.length} OPEN`} />{visibleAlerts.length === 0 ? <p>No active alerts.</p> : visibleAlerts.map((alert) => <div className="alert-row" key={alert.id}><b>{alert.sender_name}</b><span>{alert.message}</span><em>{alert.status}</em><><select value={selectedRescuerId} onChange={(event) => setSelectedRescuerId(event.target.value)}><option value="">Select rescuer</option>{rescuers.map((rescuer) => <option key={rescuer.id} value={rescuer.id}>{rescuer.display_name || rescuer.full_name || rescuer.username}</option>)}</select><button onClick={() => handleAssignAlert(alert.id)}>ASSIGN</button></></div>)}</section>
-      {activeModal && <div className="modal-backdrop" onClick={() => setActiveModal(null)}><section className="ops-modal" role="dialog" aria-modal="true" onClick={(event) => event.stopPropagation()}><div className="modal-header"><PanelTitle title={activeModal === 'alerts' ? 'ALL EMERGENCY ALERTS' : 'ACTIVE RESCUE UNITS'} badge="LIVE DATA" /><button className="modal-close" onClick={() => setActiveModal(null)} aria-label="Close modal">×</button></div>{modalLoading ? <p className="modal-empty">Loading live data...</p> : activeModal === 'alerts' ? <div className="modal-alert-list">{alerts.length === 0 ? <p className="modal-empty">No emergency alerts found.</p> : alerts.map((alert) => { const disasterType = alert.disaster_type || 'other'; return <div className="modal-alert" key={alert.id}><input type="checkbox" checked={selectedMergeIds.includes(alert.id)} onChange={() => toggleMergeAlert(alert.id)} aria-label={`Select alert ${alert.id} for merge`} /><span className={`sos-icon disaster-${disasterType}`}>{disasterIcons[disasterType] || disasterIcons.other}</span><div><b>{disasterLabels[disasterType] || 'Other'} · {(alert.severity || 'high').toUpperCase()}</b><small>{alert.sender_name} · {alert.message || 'No additional message'}</small></div><em>{alert.status}</em><div className="modal-alert-actions"><select value={selectedRescuerId} onChange={(event) => setSelectedRescuerId(event.target.value)} aria-label="Select rescuer"><option value="">Assign...</option>{rescuers.map((rescuer) => <option key={rescuer.id} value={rescuer.id}>{rescuer.display_name || rescuer.full_name || rescuer.username}</option>)}</select><button onClick={() => handleAssignAlert(alert.id)}>Assign</button><button onClick={() => setVerifiedAlert(alert)}>Verify</button></div>{verifiedAlert?.id === alert.id && <div className="verified-alert"><b>ALERT DETAILS</b><span>{alert.latitude}, {alert.longitude} · {formatTime(alert.created_at)}</span><small>{alert.message || 'No additional message provided.'}</small></div>}</div> })}<div className="merge-toolbar"><span>{selectedMergeIds.length} selected</span><button disabled={selectedMergeIds.length < 2} onClick={handleMergeAlerts}>Merge selected as duplicates</button></div></div> : <div className="modal-unit-grid"><div><h3>RESCUER PROFILES</h3>{rescueUnits.rescuers.length === 0 ? <p className="modal-empty">No rescuer profiles found.</p> : rescueUnits.rescuers.map((rescuer) => <div className="modal-unit" key={rescuer.id}><b>Profile #{rescuer.id}</b><span>{rescuer.status.replace('_', ' ')}</span><small>{rescuer.station_name || 'Unassigned station'}</small></div>)}</div><div><h3>VEHICLES</h3>{rescueUnits.vehicles.length === 0 ? <p className="modal-empty">No vehicles found.</p> : rescueUnits.vehicles.map((vehicle) => <div className="modal-unit" key={vehicle.id}><b>{vehicle.vehicle_type}</b><span>{vehicle.status}</span><small>{vehicle.plate_number} · {vehicle.driver_name}</small></div>)}</div></div>}</section></div>}
-      {assigningAlert && <AssignmentModal alert={assigningAlert} rescuers={rankedAssignmentRescuers} vehicles={rescueUnits.vehicles} getRescuerDistance={getRescuerDistance} onConfirm={async (rescuer, vehicleIds) => { await handleAssignAlert(assigningAlert.id, String(rescuer.user_id), vehicleIds); setAssigningAlert(null) }} onClose={() => setAssigningAlert(null)} />}
+
+      {/* 2. BOTTOM: Live SOS Feed */}
+      <section className="feed-panel">
+        <PanelTitle title="LIVE SOS FEED" badge="LIVE" onClick={() => openModal('alerts')} />
+        <div className="feed-list">
+          <div className="feed-view-switch" role="group" aria-label="Choose SOS alert view">
+            <button
+              type="button"
+              className={feedView === 'unattended' ? 'active' : ''}
+              aria-pressed={feedView === 'unattended'}
+              onClick={() => setFeedView('unattended')}
+            >
+              <span>UNATTENDED</span>
+              <span className="feed-view-count">{unattendedAlerts.length}</span>
+            </button>
+            <button
+              type="button"
+              className={feedView === 'latest' ? 'active' : ''}
+              aria-pressed={feedView === 'latest'}
+              onClick={() => setFeedView('latest')}
+            >
+              <span>LATEST</span>
+              <span className="feed-view-count">{alerts.length}</span>
+            </button>
+          </div>
+
+          {feedView === 'unattended' ? (
+            <div className="pinned-alerts" aria-label="Pinned unattended SOS alerts">
+              <h3>UNATTENDED · 2H+</h3>
+              <div className="feed-items-scroll">
+                {unattendedAlerts.length === 0 ? (
+                  <p className="feed-empty">No unattended SOS alerts.</p>
+                ) : (
+                  visiblePinnedAlerts.map((alert) => (
+                    <SosFeedItem
+                      key={`pinned-${alert.id}`}
+                      alert={alert}
+                      now={currentTime}
+                      onAssign={handleAssignAlert}
+                    />
+                  ))
+                )}
+              </div>
+
+              {unattendedAlerts.length > ALERTS_PER_PAGE && (
+                <nav className="feed-alert-pagination" aria-label="Pinned alert pages">
+                  <button
+                    type="button"
+                    aria-label="Previous pinned alerts"
+                    disabled={currentPinnedAlertPage === 0}
+                    onClick={() => setPinnedAlertPage((page) => Math.max(0, page - 1))}
+                  >
+                    <ChevronLeft size={14} />
+                  </button>
+                  <span>PAGE {currentPinnedAlertPage + 1} / {pinnedAlertPageCount}</span>
+                  <button
+                    type="button"
+                    aria-label="Next pinned alerts"
+                    disabled={currentPinnedAlertPage >= pinnedAlertPageCount - 1}
+                    onClick={() => setPinnedAlertPage((page) => Math.min(pinnedAlertPageCount - 1, page + 1))}
+                  >
+                    <ChevronRight size={14} />
+                  </button>
+                </nav>
+              )}
+            </div>
+          ) : (
+            <div className="feed-alert-section" aria-label="Latest SOS alerts">
+              <h3>LATEST SOS ALERTS</h3>
+              <div className="feed-items-scroll">
+                {alerts.length === 0 ? (
+                  <p className="feed-empty">No SOS alerts.</p>
+                ) : (
+                  visibleRegularAlerts.map((alert) => (
+                    <SosFeedItem
+                      key={alert.id}
+                      alert={alert}
+                      now={currentTime}
+                      onAssign={handleAssignAlert}
+                    />
+                  ))
+                )}
+              </div>
+
+              {alerts.length > ALERTS_PER_PAGE && (
+                <nav className="feed-alert-pagination" aria-label="Latest SOS alert pages">
+                  <button
+                    type="button"
+                    aria-label="Previous SOS alerts"
+                    disabled={currentRegularAlertPage === 0}
+                    onClick={() => setRegularAlertPage((page) => Math.max(0, page - 1))}
+                  >
+                    <ChevronLeft size={14} />
+                  </button>
+                  <span>PAGE {currentRegularAlertPage + 1} / {regularAlertPageCount}</span>
+                  <button
+                    type="button"
+                    aria-label="Next SOS alerts"
+                    disabled={currentRegularAlertPage >= regularAlertPageCount - 1}
+                    onClick={() => setRegularAlertPage((page) => Math.min(regularAlertPageCount - 1, page + 1))}
+                  >
+                    <ChevronRight size={14} />
+                  </button>
+                </nav>
+              )}
+            </div>
+          )}
+        </div>
+      </section>
+    </aside>
+
+    {/* CENTER COLUMN: MAP ONLY */}
+    <main className="center-column map-only-column">
+      <section className="map-panel">
+        <PanelTitle title="CDRRMO TACTICAL MAP AREA" badge="TRACKING MAP" />
+        <div className="map-stage" style={{ height: `${mapHeight}px` }}>
+          <DraggableMapOverlay className="map-coordinate" label="Map center coordinates" defaultPosition={{ left: 12, top: 12 }}>
+            {primaryCenter ? <>CENTER: {Number(primaryCenter.latitude).toFixed(5)}° N<br />LONG: {Number(primaryCenter.longitude).toFixed(5)}° E</> : 'CENTER: NO ACTIVE CENTER'}
+          </DraggableMapOverlay>
+          <DraggableMapOverlay className="map-legend" label="Map legend" defaultPosition={{ right: 12, top: 12 }}>
+            <span><i className="dot red" /> PENDING / CLOSED ALERT</span>
+            <span><i className="dot amber" /> ASSIGNED / RECOVERING</span>
+            <span><i className="dot green" /> AVAILABLE / CENTER</span>
+            <span><i className="dot blue" /> RESOLVING / IN TRANSIT</span>
+          </DraggableMapOverlay>
+          <MapContainer markers={[...mapMarkers, ...activeRouteMarkers]} route={activeEvacuationRoute?.geometry} trackDeviceLocation={false} />
+          {activeEvacuationRoute && (
+            <DraggableMapOverlay className="evac-label evac-label-list" label="Active citizen evacuation route" defaultPosition={{ left: 280, top: 12 }}>
+              <b>ACTIVE EVACUATION ROUTE</b>
+              <span>{activeEvacuationRoute.citizenName} → {activeEvacuationRoute.centerName}</span>
+            </DraggableMapOverlay>
+          )}
+          {centers.length > 0 && (
+            <DraggableMapOverlay className="evac-label evac-label-list" label="Evacuation center list" defaultPosition={{ left: 580, top: 164 }}>
+              <b>EVACUATION CENTERS</b>
+              {centers.filter((center) => center.is_active !== false).map((center) => {
+                const occupancy = center.capacity > 0 ? Math.round((center.current_occupancy / center.capacity) * 100) : 0;
+                return <span key={center.id}>{center.name} ({occupancy}%)</span>
+              })}
+            </DraggableMapOverlay>
+          )}
+          <button className="map-resize-handle" onMouseDown={startMapResize} aria-label="Drag to resize map" title="Drag to resize map">↕</button>
+        </div>
+      </section>
     </main>
+
+    {/* RIGHT RAIL: Average Response -> Vehicles -> Rescuer Profiles */}
+    <aside className="right-rail">
+      {/* 1. TOP: Average Response */}
+      <section className="metric-card response-card">
+        <small>AVERAGE RESPONSE</small>
+        <strong>8.2 min</strong>
+        <span>Below target (10m)</span>
+      </section>
+
+      {/* 2. MIDDLE: Vehicles */}
+      <section className="rail-box vehicle-box">
+        <div className="unit-panel-heading">
+          <PanelTitle
+            title="VEHICLES"
+            badge={`${rescueUnits.vehicles.length} UNITS`}
+            onClick={() => openModal('units')}
+          />
+          <select
+            value={unitSort}
+            onChange={(event) => setUnitSort(event.target.value)}
+            aria-label="Sort vehicles"
+          >
+            <option value="status">Sort: Status</option>
+            <option value="type">Sort: Type</option>
+          </select>
+        </div>
+
+        <div className="unit-items-scroll">
+          {sortedVehicles.length === 0 ? (
+            <p className="unit-empty">No vehicles</p>
+          ) : (
+            sortedVehicles.map((vehicle) => (
+              <Unit
+                key={`vehicle-${vehicle.id}`}
+                name={`${vehicle.vehicle_type} · ${vehicle.plate_number}`}
+                detail={`${vehicle.driver_name} · capacity ${vehicle.capacity}`}
+                status={vehicle.status}
+              />
+            ))
+          )}
+        </div>
+      </section>
+
+      {/* 3. BOTTOM: Rescuer Profiles */}
+      <section className="rail-box rescuer-box">
+        <div className="unit-panel-heading">
+          <PanelTitle
+            title="RESCUER PROFILES"
+            badge={`${rescueUnits.rescuers.length} ACTIVE`}
+            onClick={() => openModal('units')}
+          />
+          <select
+            value={unitSort}
+            onChange={(event) => setUnitSort(event.target.value)}
+            aria-label="Sort rescuers"
+          >
+            <option value="status">Sort: Status</option>
+            <option value="name">Sort: Name</option>
+          </select>
+        </div>
+
+        <div className="unit-items-scroll">
+          {sortedRescuers.length === 0 ? (
+            <p className="unit-empty">No rescuer profiles</p>
+          ) : (
+            sortedRescuers.map((rescuer) => (
+              <Unit
+                key={`rescuer-${rescuer.id}`}
+                name={rescuer.full_name || rescuer.username}
+                detail={`${rescuer.station_name || 'No station'} · @${rescuer.username}`}
+                status={rescuer.status}
+              />
+            ))
+          )}
+        </div>
+      </section>
+    </aside>
+  </section>
+
+  <section className="alert-console">
+    <PanelTitle title="ACTIVE ALERTS" badge={`${visibleAlerts.length} OPEN`} />
+    {visibleAlerts.length === 0 ? (
+      <p>No active alerts.</p>
+    ) : (
+      visibleAlerts.map((alert) => (
+        <div className="alert-row" key={alert.id}>
+          <b>{alert.sender_name}</b>
+          <span>{alert.message}</span>
+          <em>{alert.status}</em>
+          <>
+            <select value={selectedRescuerId} onChange={(event) => setSelectedRescuerId(event.target.value)}>
+              <option value="">Select rescuer</option>
+              {rescuers.map((rescuer) => (
+                <option key={rescuer.id} value={rescuer.id}>
+                  {rescuer.display_name || rescuer.full_name || rescuer.username}
+                </option>
+              ))}
+            </select>
+            <button onClick={() => handleAssignAlert(alert.id)}>ASSIGN</button>
+          </>
+        </div>
+      ))
+    )}
+  </section>
+
+  {activeModal && (
+    <div className="modal-backdrop" onClick={() => setActiveModal(null)}>
+      <section className="ops-modal" role="dialog" aria-modal="true" onClick={(event) => event.stopPropagation()}>
+        <div className="modal-header">
+          <PanelTitle title={activeModal === 'alerts' ? 'ALL EMERGENCY ALERTS' : 'ACTIVE RESCUE UNITS'} badge="LIVE DATA" />
+          <button className="modal-close" onClick={() => setActiveModal(null)} aria-label="Close modal">×</button>
+        </div>
+        {modalLoading ? (
+          <p className="modal-empty">Loading live data...</p>
+        ) : activeModal === 'alerts' ? (
+          <div className="modal-alert-list">
+            {alerts.length === 0 ? (
+              <p className="modal-empty">No emergency alerts found.</p>
+            ) : (
+              alerts.map((alert) => {
+                const disasterType = alert.disaster_type || 'other';
+                return (
+                  <div className="modal-alert" key={alert.id}>
+                    <input
+                      type="checkbox"
+                      checked={selectedMergeIds.includes(alert.id)}
+                      onChange={() => toggleMergeAlert(alert.id)}
+                      aria-label={`Select alert ${alert.id} for merge`}
+                    />
+                    <span className={`sos-icon disaster-${disasterType}`}>
+                      {disasterIcons[disasterType] || disasterIcons.other}
+                    </span>
+                    <div>
+                      <b>{disasterLabels[disasterType] || 'Other'} · {(alert.severity || 'high').toUpperCase()}</b>
+                      <small>{alert.sender_name} · {alert.message || 'No additional message'}</small>
+                    </div>
+                    <em>{alert.status}</em>
+                    <div className="modal-alert-actions">
+                      <select value={selectedRescuerId} onChange={(event) => setSelectedRescuerId(event.target.value)} aria-label="Select rescuer">
+                        <option value="">Assign...</option>
+                        {rescuers.map((rescuer) => (
+                          <option key={rescuer.id} value={rescuer.id}>
+                            {rescuer.display_name || rescuer.full_name || rescuer.username}
+                          </option>
+                        ))}
+                      </select>
+                      <button onClick={() => handleAssignAlert(alert.id)}>Assign</button>
+                      <button onClick={() => setVerifiedAlert(alert)}>Verify</button>
+                    </div>
+                    {verifiedAlert?.id === alert.id && (
+                      <div className="verified-alert">
+                        <b>ALERT DETAILS</b>
+                        <span>{alert.latitude}, {alert.longitude} · {formatTime(alert.created_at)}</span>
+                        <small>{alert.message || 'No additional message provided.'}</small>
+                      </div>
+                    )}
+                  </div>
+                )
+              })
+            )}
+            <div className="merge-toolbar">
+              <span>{selectedMergeIds.length} selected</span>
+              <button disabled={selectedMergeIds.length < 2} onClick={handleMergeAlerts}>Merge selected as duplicates</button>
+            </div>
+          </div>
+        ) : (
+          <div className="modal-unit-grid">
+            <div>
+              <h3>RESCUER PROFILES</h3>
+              {rescueUnits.rescuers.length === 0 ? (
+                <p className="modal-empty">No rescuer profiles found.</p>
+              ) : (
+                rescueUnits.rescuers.map((rescuer) => (
+                  <div className="modal-unit" key={rescuer.id}>
+                    <b>Profile #{rescuer.id}</b>
+                    <span>{rescuer.status.replace('_', ' ')}</span>
+                    <small>{rescuer.station_name || 'Unassigned station'}</small>
+                  </div>
+                ))
+              )}
+            </div>
+            <div>
+              <h3>VEHICLES</h3>
+              {rescueUnits.vehicles.length === 0 ? (
+                <p className="modal-empty">No vehicles found.</p>
+              ) : (
+                rescueUnits.vehicles.map((vehicle) => (
+                  <div className="modal-unit" key={vehicle.id}>
+                    <b>{vehicle.vehicle_type}</b>
+                    <span>{vehicle.status}</span>
+                    <small>{vehicle.plate_number} · {vehicle.driver_name}</small>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+        )}
+      </section>
+    </div>
+  )}
+
+  {assigningAlert && (
+    <AssignmentModal
+      alert={assigningAlert}
+      rescuers={rankedAssignmentRescuers}
+      vehicles={rescueUnits.vehicles}
+      getRescuerDistance={getRescuerDistance}
+      onConfirm={async (rescuer, vehicleIds) => {
+        await handleAssignAlert(assigningAlert.id, String(rescuer.user_id), vehicleIds);
+        setAssigningAlert(null);
+      }}
+      onClose={() => setAssigningAlert(null)}
+    />
+  )}
+</main>
   )
 }
 
