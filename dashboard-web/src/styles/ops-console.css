@@ -245,3 +245,180 @@
   background: rgba(255, 255, 255, 0.2);
   border-radius: 4px;
 }
+/* Modal Alert List Container */
+.modal-alert-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  max-height: 70vh;
+  overflow-y: auto;
+}
+
+/* Individual Alert Row */
+.modal-alert {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 14px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid #1e293b;
+  border-radius: 6px;
+  transition: background 0.15s ease;
+}
+
+.modal-alert:hover {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+/* Checkbox alignment */
+.modal-alert input[type="checkbox"] {
+  accent-color: #38bdf8;
+  cursor: pointer;
+  width: 16px;
+  height: 16px;
+}
+
+/* Text Container */
+.modal-alert > div:not(.modal-alert-actions):not(.verified-alert) {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+}
+
+/* Incident Title & Severity */
+.modal-alert b {
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: #f1f5f9; /* Bright readable white */
+  letter-spacing: 0.02em;
+}
+
+/* Sender & Description Message */
+.modal-alert small {
+  font-size: 0.75rem;
+  color: #94a3b8; /* Soft readable gray */
+  margin-top: 2px;
+}
+
+/* Status Pill */
+.modal-alert em {
+  font-style: normal;
+  font-size: 0.7rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  padding: 3px 8px;
+  border-radius: 4px;
+  letter-spacing: 0.04em;
+}
+
+.modal-alert em:has(:is([class*="pending"])),
+.modal-alert em {
+  color: #f59e0b;
+  background: rgba(245, 158, 11, 0.12);
+  border: 1px solid rgba(245, 158, 11, 0.3);
+}
+
+/* Action Group */
+.modal-alert-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* Dropdown styling */
+.modal-alert-actions select {
+  background: #0f172a;
+  color: #e2e8f0;
+  border: 1px solid #334155;
+  border-radius: 5px;
+  padding: 5px 10px;
+  font-size: 0.8rem;
+  cursor: pointer;
+  outline: none;
+}
+
+.modal-alert-actions select:focus {
+  border-color: #38bdf8;
+}
+
+/* Assign / Verify Buttons */
+.modal-alert-actions button {
+  background: #1e293b;
+  color: #f8fafc;
+  border: 1px solid #334155;
+  padding: 5px 12px;
+  border-radius: 5px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.modal-alert-actions button:hover {
+  background: #334155;
+  border-color: #64748b;
+}
+
+.modal-alert-actions button:first-of-type {
+  background: #0284c7;
+  border-color: #0369a1;
+}
+
+.modal-alert-actions button:first-of-type:hover {
+  background: #0369a1;
+}
+
+/* Expanded Verification Info */
+.verified-alert {
+  margin-top: 8px;
+  padding: 8px 12px;
+  background: rgba(56, 189, 248, 0.08);
+  border-left: 3px solid #38bdf8;
+  border-radius: 0 4px 4px 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.verified-alert b {
+  font-size: 0.75rem;
+  color: #38bdf8;
+}
+
+.verified-alert span,
+.verified-alert small {
+  color: #cbd5e1;
+  font-size: 0.75rem;
+}
+/* Sharp edges for modal action buttons, selects, and controls */
+.modal-alert-actions button,
+.modal-alert-actions select,
+.merge-toolbar button,
+.feed-view-switch button,
+.feed-alert-pagination button,
+.map-resize-handle,
+.modal-close,
+.emergency-button,
+.operator-trigger {
+  border-radius: 0 !important; /* Set to 0 for razor-sharp corners */
+}
+
+/* Sharp status badges/pills */
+.modal-alert em,
+.sos-meta .severity,
+.unattended-badge,
+.panel-title span {
+  border-radius: 0 !important;
+}
+
+/* Sharp container cards and alert rows */
+.modal-alert,
+.sos-item,
+.operational-panel,
+.feed-panel,
+.rail-box,
+.metric-card {
+  border-radius: 0 !important;
+}
