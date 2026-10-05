@@ -164,10 +164,16 @@ async def login_role(
 
 @router.get("/me")
 async def get_me(
-    credentials: str = Depends(get_current_user),
+    credentials: dict = Depends(get_current_user),
     session: AsyncSession = Depends(get_session)
 ):
-    return {"user": credentials}
+    result = await session.execute(
+        select(User).where(User.username == credentials.get("sub"))
+    )
+    user = result.scalar_one_or_none()
+    if not user:
+        raise HTTPException(status_code=404, detail="User account not found")
+    return {"user": UserRead.model_validate(user)}
 
 
 @router.post("/rescuers", response_model=RescuerProfileRead, status_code=status.HTTP_201_CREATED)
@@ -410,6 +416,33 @@ async def upload_alert_media(
 @router.get("/alerts", response_model=list[EmergencyAlertRead])
 async def list_alerts(session: AsyncSession = Depends(get_session)):
     statement = select(EmergencyAlert).order_by(EmergencyAlert.created_at.desc())
+    result = await session.execute(statement)
+    return result.scalars().all()
+
+
+@router.get("/alerts/assigned-to-me", response_model=list[EmergencyAlertRead])
+async def list_assigned_alerts(
+    current_user: dict = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+):
+    user_result = await session.execute(
+        select(User).where(User.username == current_user.get("sub"))
+    )
+    user = user_result.scalar_one_or_none()
+    if not user:
+        raise HTTPException(status_code=401, detail="User account not found")
+    if user.role != UserRole.RESCUER:
+        raise HTTPException(status_code=403, detail="Rescuer account required")
+
+    statement = (
+        select(EmergencyAlert)
+        .where(
+            EmergencyAlert.assigned_rescuer_id == user.id,
+            EmergencyAlert.status != AlertStatus.CLOSED,
+        )
+        .order_by(EmergencyAlert.created_at.asc(), EmergencyAlert.id.asc())
+        .limit(1)
+    )
     result = await session.execute(statement)
     return result.scalars().all()
 
