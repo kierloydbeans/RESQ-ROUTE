@@ -113,6 +113,7 @@ const createMarkerElement = (color = '#dc2626', icon = null) => {
 const MapContainer = ({ 
   markers = [], 
   route = null, 
+  center = null,
   pinnedLocation = null, 
   onMapClick, 
   trackDeviceLocation = true 
@@ -126,8 +127,10 @@ const MapContainer = ({
   const hasCenteredOnDeviceRef = useRef(false)
   const markersRef = useRef(markers)
   const routeRef = useRef(route)
+  const centerRef = useRef(center)
   const onMapClickRef = useRef(onMapClick)
   const markersSignature = JSON.stringify(markers)
+  const centerSignature = JSON.stringify(center)
 
   useEffect(() => {
     onMapClickRef.current = onMapClick
@@ -202,8 +205,8 @@ const MapContainer = ({
         const map = new maplibregl.Map({
           container: mapContainerRef.current,
           style,
-          center: DEFAULT_LOCATION,
-          zoom: 13,
+          center: normalizeCoordinates(centerRef.current),
+          zoom: centerRef.current ? 14 : 13,
           transformRequest: (url, resourceType) => {
             const isVectorTile = resourceType === 'Tile' && url.includes('.pbf')
             return { url }
@@ -321,6 +324,13 @@ const MapContainer = ({
     markersRef.current = markers
     if (mapRef.current) renderMarkers(mapRef.current, markers)
   }, [markersSignature])
+
+  useEffect(() => {
+    centerRef.current = center
+    if (centerRef.current && mapRef.current) {
+      mapRef.current.flyTo({ center: normalizeCoordinates(centerRef.current), zoom: 14, speed: 0.7 })
+    }
+  }, [centerSignature])
 
   useEffect(() => {
     if (mapRef.current?.isStyleLoaded() && mapRef.current.getSource('citizen-route')) {

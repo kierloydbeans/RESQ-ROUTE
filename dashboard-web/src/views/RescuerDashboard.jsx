@@ -1,6 +1,9 @@
 import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import '../styles/rescuer-console.css';
+import Logo from '../components/Logo';
+import MapContainer from '../components/MapContainer';
+import { useWebSocket } from '../hooks/useWebSocket';
+import { API_URL, WS_URL } from '../dataProvider';
 import {
   AlertTriangle,Map,ClipboardList,Bluetooth,UploadCloud,Menu,ChevronDown,User,MapPin,Users,Waves,Navigation,ExternalLink,Check,RotateCcw,MessageSquare,LogOut,} from 'lucide-react';
 
@@ -23,6 +26,9 @@ const RescuerDashboard = () => {
   const [isAlertsLoading, setIsAlertsLoading] = useState(true);
   const [alertsError, setAlertsError] = useState('');
   const [alertRefreshKey, setAlertRefreshKey] = useState(0);
+  const [walkingRoute, setWalkingRoute] = useState(null);
+  const [isRouteLoading, setIsRouteLoading] = useState(false);
+  const [routeError, setRouteError] = useState('');
   const navigate = useNavigate();
   const { isConnected, lastMessage } = useWebSocket(WS_URL);
   const authToken = auth?.token || auth?.access_token;
@@ -190,6 +196,8 @@ const RescuerDashboard = () => {
   useEffect(() => {
     setIsAcknowledged(false);
     setAcknowledgementSecondsLeft(60);
+    setWalkingRoute(null);
+    setRouteError('');
   }, [activeAlert?.id]);
 
   const formattedCurrentTime = currentTime.toLocaleTimeString('en-US', {
@@ -203,6 +211,69 @@ const RescuerDashboard = () => {
   const handleLogout = () => {
     localStorage.removeItem('auth');
     navigate('/login/rescuer', { replace: true });
+  };
+
+  const handleRouteToAlert = async () => {
+    if (!activeAlert) {
+      setRouteError('There is no assigned alert to route to.');
+      return;
+    }
+
+    setIsRouteLoading(true);
+    setRouteError('');
+    try {
+      let origin = rescuerLocation;
+      if (!hasRescuerLocation) {
+        if (!navigator.geolocation) throw new Error('Location access is unavailable in this browser.');
+        const position = await new Promise((resolve, reject) => {
+          navigator.geolocation.getCurrentPosition(resolve, reject, {
+            enableHighAccuracy: true,
+            maximumAge: 5000,
+            timeout: 15000,
+          });
+        }).catch((error) => {
+          if (error.code === 1) throw new Error('Allow location access to route to the alert.');
+          if (error.code === 3) throw new Error('Timed out getting your location. Try again.');
+          throw new Error('Unable to get your location. Check your device location settings and try again.');
+        });
+        origin = {
+          latitude: position.coords.latitude,
+          longitude: position.coords.longitude,
+          accuracy: position.coords.accuracy,
+          user_id: currentUser?.id,
+          role: 'rescuer',
+          display_name: displayName,
+        };
+        const gpsResponse = await fetch(`${API_URL}/gps`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(origin),
+        });
+        if (!gpsResponse.ok) throw new Error(`Unable to publish your GPS location (${gpsResponse.status}).`);
+        setRescuerLocation(origin);
+      }
+
+      const response = await fetch(`${API_URL}/routing/walk`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          origin_latitude: Number(origin.latitude),
+          origin_longitude: Number(origin.longitude),
+          destination_latitude: Number(activeAlert.latitude),
+          destination_longitude: Number(activeAlert.longitude),
+        }),
+      });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.detail || `Unable to calculate route (${response.status}).`);
+      if (!result.geometry?.coordinates?.length) throw new Error('The routing service returned no route geometry.');
+
+      setWalkingRoute(result);
+      setActiveView('nav');
+    } catch (error) {
+      setRouteError(error.message || 'Unable to calculate a route to the alert.');
+    } finally {
+      setIsRouteLoading(false);
+    }
   };
 
   const formattedAcknowledgementTime = `${String(Math.floor(acknowledgementSecondsLeft / 60)).padStart(2, '0')}:${String(acknowledgementSecondsLeft % 60).padStart(2, '0')}`;
@@ -451,11 +522,32 @@ const RescuerDashboard = () => {
                       </div>
                     </div>
                     <div style={{ gridColumn: 'span 3', display: 'flex', justifyContent: 'flex-end', marginTop: '-4px' }}>
-                      <a href={`https://www.google.com/maps?q=${activeAlert.latitude},${activeAlert.longitude}`} target="_blank" rel="noreferrer" style={{ color: '#22d3ee', fontSize: '12px', fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: '6px', border: '1px solid rgba(8, 145, 178, 0.5)', padding: '6px 12px', borderRadius: '6px', backgroundColor: 'transparent', cursor: 'pointer', textDecoration: 'none' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <button
+                          type="button"
+                          onClick={handleRouteToAlert}
+                          disabled={!hasRescuerLocation || isRouteLoading}
+                          style={{ color: hasRescuerLocation ? '#22d3ee' : '#64748b', fontSize: '12px', fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: '6px', border: '1px solid rgba(8, 145, 178, 0.5)', padding: '6px 12px', borderRadius: '6px', backgroundColor: 'transparent', cursor: hasRescuerLocation && !isRouteLoading ? 'pointer' : 'not-allowed' }}
+                        >
+                          <Navigation style={{ width: '14px', height: '14px' }} />
+                          {isRouteLoading ? 'Calculating route...' : 'Route to the alert'}
+                        </button>
+                        <a href={`https://www.google.com/maps?q=${activeAlert.latitude},${activeAlert.longitude}`} target="_blank" rel="noreferrer" style={{ color: '#22d3ee', fontSize: '12px', fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: '6px', border: '1px solid rgba(8, 145, 178, 0.5)', padding: '6px 12px', borderRadius: '6px', backgroundColor: 'transparent', cursor: 'pointer', textDecoration: 'none' }}>
                         <span>View Map</span>
                         <ExternalLink style={{ width: '14px', height: '14px' }} />
-                      </a>
+                        </a>
+                      </div>
                     </div>
+                    {routeError && (
+                      <p role="alert" style={{ gridColumn: 'span 3', color: '#fca5a5', textAlign: 'right', margin: '-8px 0 0' }}>
+                        {routeError}
+                      </p>
+                    )}
+                    {!hasRescuerLocation && (
+                      <p style={{ gridColumn: 'span 3', color: '#64748b', textAlign: 'right', margin: '-8px 0 0' }}>
+                        Waiting for your live location from telemetry.
+                      </p>
+                    )}
                   </div>
 
                   {/* Special Instructions */}
@@ -624,12 +716,34 @@ const RescuerDashboard = () => {
             ))}
 
           {activeView === 'nav' ? (
-            <div style={{ height: '70vh', minHeight: '320px', border: '1px solid #1e293b', borderRadius: '8px', overflow: 'hidden' }}>
+            <div style={{ height: '70vh', minHeight: '320px', border: '1px solid #1e293b', borderRadius: '8px', overflow: 'hidden', position: 'relative' }}>
               <MapContainer
                 markers={[...alertMapMarkers, ...rescuerMapMarkers]}
                 center={alertMapCenter}
+                route={walkingRoute?.geometry}
                 trackDeviceLocation={false}
               />
+              <div style={{ position: 'absolute', top: '12px', right: '12px', zIndex: 2, display: 'flex', alignItems: 'center', gap: '10px' }}>
+                <button
+                  type="button"
+                  onClick={handleRouteToAlert}
+                  disabled={!activeAlert || isRouteLoading}
+                  style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '10px 14px', border: '1px solid #0e7490', borderRadius: '6px', background: '#082f49', color: '#cffafe', fontWeight: 700, cursor: activeAlert && !isRouteLoading ? 'pointer' : 'not-allowed', opacity: activeAlert && !isRouteLoading ? 1 : 0.65 }}
+                >
+                  <Navigation size={16} />
+                  {isRouteLoading ? 'Calculating route...' : walkingRoute ? 'Refresh route to alert' : 'Route to the alert'}
+                </button>
+              </div>
+              {routeError && (
+                <div role="alert" style={{ position: 'absolute', top: '60px', right: '12px', zIndex: 2, maxWidth: 'min(360px, calc(100% - 24px))', padding: '10px 12px', border: '1px solid #7f1d1d', borderRadius: '6px', background: 'rgba(69, 10, 10, 0.95)', color: '#fecaca', fontSize: '12px' }}>
+                  {routeError}
+                </div>
+              )}
+              {walkingRoute && (
+                <div role="status" style={{ position: 'absolute', bottom: '12px', left: '12px', right: '12px', zIndex: 2, padding: '10px 14px', border: '1px solid #334155', borderRadius: '6px', background: 'rgba(7, 11, 20, 0.92)', color: '#cbd5e1', fontSize: '12px' }}>
+                  {walkingRoute.message}
+                </div>
+              )}
             </div>
           ) : activeView !== 'alert' && (
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '70vh', border: '1px solid #1e293b', backgroundColor: '#0b1120', borderRadius: '8px', padding: '40px' }}>
