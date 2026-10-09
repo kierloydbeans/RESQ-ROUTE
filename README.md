@@ -118,6 +118,8 @@ cp .env.example .env
 # Run database migrations
 psql -U postgres -d resq_route -f database/migrations/001_initial_schema.sql
 psql -U postgres -d resq_route -f database/migrations/002_add_users_table.sql
+# Apply the remaining migrations in numeric order before starting the server.
+# Rescuer duty/recovery also requires migrations 015 and 016 after migrations 003-014.
 
 # Load seed data (optional)
 psql -U postgres -d resq_route -f database/seed_data_caloocan.sql

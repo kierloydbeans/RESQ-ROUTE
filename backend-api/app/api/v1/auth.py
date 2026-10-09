@@ -1,13 +1,14 @@
 from datetime import datetime, timedelta, timezone
 import json
 import logging
+from typing import Literal
 from urllib.parse import urlsplit, urlunsplit
 from uuid import uuid4
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status, BackgroundTasks
 from fastapi.security import OAuth2PasswordRequestForm
 from starlette.concurrency import run_in_threadpool
 from sqlmodel import select
-from pydantic import BaseModel, EmailStr, field_validator
+from pydantic import BaseModel, EmailStr, Field as PydanticField, field_validator
 from sqlalchemy import func, cast, String
 from sqlalchemy.ext.asyncio import AsyncSession
 from supabase import create_client
@@ -26,6 +27,10 @@ from app.models.user import User, UserRead, UserRole
 from app.models.otp import OTPVerification
 from app.models.rescuer import RescuerProfile, RescuerProfileRead, RescuerStatus
 from app.models.emergency_alert import EmergencyAlert, EmergencyAlertRead, AlertStatus
+from app.models.emergency_alert_status_report import (
+    EmergencyAlertStatusReport,
+    EmergencyAlertStatusReportRead,
+)
 from app.models.vehicle import Vehicle
 from app.core.config import settings
 from app.core.mail import send_reset_password_email, send_otp_email
@@ -52,6 +57,16 @@ SOS_IMAGE_EXTENSIONS = frozenset(
 SOS_VIDEO_EXTENSIONS = frozenset(
     extension for content_type, extension in SOS_MEDIA_EXTENSIONS.items() if content_type.startswith("video/")
 )
+
+
+def _utc_isoformat(value: datetime | None) -> str | None:
+    if value is None:
+        return None
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=timezone.utc)
+    else:
+        value = value.astimezone(timezone.utc)
+    return value.isoformat()
 
 
 class ForgotPasswordRequest(BaseModel):
@@ -94,6 +109,94 @@ class EmergencyAlertCreated(EmergencyAlertRead):
     media_upload_token: str
 
 
+class EmergencyAlertStatusReportCreate(BaseModel):
+    report_type: Literal["resolving", "going_to_evacuation_center", "resolved", "need_backup", "other"]
+    message: str = PydanticField(default="", max_length=1000)
+    additional_notes: str | None = PydanticField(default=None, max_length=2000)
+
+
+class RescuerPostAlertStatusUpdate(BaseModel):
+    status: Literal["available", "recovering"]
+
+
+RESCUER_RECOVERY_DURATION = timedelta(minutes=30)
+RESCUER_PRESENCE_TIMEOUT = timedelta(minutes=2)
+
+
+async def _get_or_create_rescuer_profile(session: AsyncSession, user: User) -> RescuerProfile:
+    result = await session.execute(select(RescuerProfile).where(RescuerProfile.user_id == user.id))
+    profile = result.scalar_one_or_none()
+    if profile is None:
+        profile = RescuerProfile(user_id=user.id, status=RescuerStatus.OFF_DUTY)
+        session.add(profile)
+        await session.flush()
+    return profile
+
+
+async def _mark_rescuer_online(session: AsyncSession, user: User) -> RescuerProfile:
+    profile = await _get_or_create_rescuer_profile(session, user)
+    now = datetime.utcnow()
+    active_alert_result = await session.execute(
+        select(EmergencyAlert.status)
+        .where(
+            EmergencyAlert.assigned_rescuer_id == user.id,
+            EmergencyAlert.status != AlertStatus.CLOSED,
+        )
+        .order_by(EmergencyAlert.created_at.asc())
+        .limit(1)
+    )
+    active_alert_status = active_alert_result.scalar_one_or_none()
+    if active_alert_status is not None:
+        profile.status = (
+            RescuerStatus.IN_TRANSIT
+            if active_alert_status in {AlertStatus.RESOLVING, AlertStatus.EVACUATING}
+            else RescuerStatus.ASSIGNED
+        )
+    elif profile.recovering_until and profile.recovering_until > now:
+        profile.status = RescuerStatus.RECOVERING
+    else:
+        profile.status = RescuerStatus.AVAILABLE
+        profile.recovering_until = None
+    profile.last_seen_at = now
+    profile.updated_at = now
+    await session.commit()
+    await session.refresh(profile)
+    await telemetry_manager.broadcast({
+        "type": "rescuer_status_updated",
+        "data": {
+            "rescuer_id": user.id,
+            "status": profile.status.value,
+            "recovering_until": _utc_isoformat(profile.recovering_until),
+        },
+        "timestamp": now.timestamp(),
+    })
+    return profile
+
+
+async def _mark_stale_rescuers_off_duty(session: AsyncSession) -> None:
+    cutoff = datetime.utcnow() - RESCUER_PRESENCE_TIMEOUT
+    result = await session.execute(
+        select(RescuerProfile).where(
+            RescuerProfile.last_seen_at.is_not(None),
+            RescuerProfile.last_seen_at < cutoff,
+            RescuerProfile.status != RescuerStatus.OFF_DUTY,
+        )
+    )
+    stale_profiles = result.scalars().all()
+    if not stale_profiles:
+        return
+    for profile in stale_profiles:
+        profile.status = RescuerStatus.OFF_DUTY
+        profile.updated_at = datetime.utcnow()
+    await session.commit()
+    for profile in stale_profiles:
+        await telemetry_manager.broadcast({
+            "type": "rescuer_status_updated",
+            "data": {"rescuer_id": profile.user_id, "status": RescuerStatus.OFF_DUTY.value},
+            "timestamp": datetime.utcnow().timestamp(),
+        })
+
+
 @router.post("/login")
 async def login(
     form_data: OAuth2PasswordRequestForm = Depends(),
@@ -114,7 +217,10 @@ async def login(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="User account is inactive",
         )
-    
+
+    if user.role == UserRole.RESCUER:
+        await _mark_rescuer_online(session, user)
+
     access_token = create_access_token(data={"sub": user.username, "role": user.role})
     return {
         "access_token": access_token,
@@ -148,6 +254,9 @@ async def login_role(
     if user.role.value != requested_role:
         raise HTTPException(status_code=403, detail=f"This account is not registered as a {requested_role}")
 
+    if user.role == UserRole.RESCUER:
+        await _mark_rescuer_online(session, user)
+
     access_token = create_access_token(data={"sub": user.username, "role": user.role})
     return {
         "access_token": access_token,
@@ -160,6 +269,29 @@ async def login_role(
             "role": user.role.value if hasattr(user.role, "value") else str(user.role)
         }
     }
+
+
+@router.post("/logout")
+async def logout_rescuer(
+    current_user: dict = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+):
+    user_result = await session.execute(select(User).where(User.username == current_user.get("sub")))
+    user = user_result.scalar_one_or_none()
+    if not user:
+        raise HTTPException(status_code=401, detail="User account not found")
+    if user.role == UserRole.RESCUER:
+        profile = await _get_or_create_rescuer_profile(session, user)
+        profile.status = RescuerStatus.OFF_DUTY
+        profile.last_seen_at = datetime.utcnow()
+        profile.updated_at = datetime.utcnow()
+        await session.commit()
+        await telemetry_manager.broadcast({
+            "type": "rescuer_status_updated",
+            "data": {"rescuer_id": user.id, "status": RescuerStatus.OFF_DUTY.value},
+            "timestamp": datetime.utcnow().timestamp(),
+        })
+    return {"success": True}
 
 
 @router.get("/me")
@@ -197,7 +329,7 @@ async def create_rescuer_profile(
 
     rescuer_profile = RescuerProfile(
         user_id=payload.get("user_id"),
-        status=payload.get("status", RescuerStatus.AVAILABLE),
+        status=RescuerStatus.OFF_DUTY,
         station_name=payload.get("station_name"),
         phone=payload.get("phone"),
         current_latitude=payload.get("current_latitude"),
@@ -211,6 +343,7 @@ async def create_rescuer_profile(
 
 @router.get("/rescuers")
 async def list_rescuers(session: AsyncSession = Depends(get_session)):
+    await _mark_stale_rescuers_off_duty(session)
     statement = select(User, RescuerProfile).outerjoin(
         RescuerProfile, RescuerProfile.user_id == User.id
     ).where(
@@ -228,7 +361,7 @@ async def list_rescuers(session: AsyncSession = Depends(get_session)):
             "display_name": user.full_name or user.username,
             "email": user.email,
             "role": user.role.value if hasattr(user.role, 'value') else str(user.role),
-            "status": profile.status.value if profile and hasattr(profile.status, 'value') else (str(profile.status) if profile else RescuerStatus.AVAILABLE.value),
+            "status": profile.status.value if profile and hasattr(profile.status, 'value') else (str(profile.status) if profile else RescuerStatus.OFF_DUTY.value),
             "current_latitude": profile.current_latitude if profile else None,
             "current_longitude": profile.current_longitude if profile else None,
         }
@@ -236,8 +369,221 @@ async def list_rescuers(session: AsyncSession = Depends(get_session)):
     ]
 
 
+@router.get("/rescuers/me/status")
+async def get_my_rescuer_status(
+    current_user: dict = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+):
+    user_result = await session.execute(select(User).where(User.username == current_user.get("sub")))
+    user = user_result.scalar_one_or_none()
+    if not user or user.role != UserRole.RESCUER:
+        raise HTTPException(status_code=403, detail="Rescuer account required")
+
+    profile_result = await session.execute(select(RescuerProfile).where(RescuerProfile.user_id == user.id))
+    profile = profile_result.scalar_one_or_none()
+    if not profile:
+        raise HTTPException(status_code=404, detail="Rescuer profile not found")
+
+    now = datetime.utcnow()
+    if profile.status == RescuerStatus.RECOVERING and profile.recovering_until and profile.recovering_until <= now:
+        profile.status = RescuerStatus.AVAILABLE
+        profile.recovering_until = None
+        profile.updated_at = now
+        await session.commit()
+        await telemetry_manager.broadcast({
+            "type": "rescuer_status_updated",
+            "data": {
+                "rescuer_id": user.id,
+                "status": RescuerStatus.AVAILABLE.value,
+                "recovering_until": None,
+            },
+            "timestamp": now.timestamp(),
+        })
+
+    latest_closed_result = await session.execute(
+        select(EmergencyAlert)
+        .where(
+            EmergencyAlert.assigned_rescuer_id == user.id,
+            EmergencyAlert.status == AlertStatus.CLOSED,
+        )
+        .order_by(EmergencyAlert.updated_at.desc(), EmergencyAlert.id.desc())
+        .limit(1)
+    )
+    latest_closed_alert = latest_closed_result.scalar_one_or_none()
+    active_alert_result = await session.execute(
+        select(EmergencyAlert.status)
+        .where(
+            EmergencyAlert.assigned_rescuer_id == user.id,
+            EmergencyAlert.status != AlertStatus.CLOSED,
+        )
+        .limit(1)
+    )
+    has_active_alert = active_alert_result.scalar_one_or_none() is not None
+    pending_status_choice = (
+        latest_closed_alert
+        if latest_closed_alert
+        and not has_active_alert
+        and profile.status in {RescuerStatus.ASSIGNED, RescuerStatus.IN_TRANSIT}
+        else None
+    )
+    return {
+        "status": profile.status.value if hasattr(profile.status, "value") else str(profile.status),
+        "recovering_until": _utc_isoformat(profile.recovering_until),
+        "pending_alert": EmergencyAlertRead.model_validate(pending_status_choice).model_dump(mode="json")
+        if pending_status_choice
+        else None,
+    }
+
+
+@router.post("/rescuers/me/presence")
+async def update_my_rescuer_presence(
+    current_user: dict = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+):
+    user_result = await session.execute(select(User).where(User.username == current_user.get("sub")))
+    user = user_result.scalar_one_or_none()
+    if not user or user.role != UserRole.RESCUER:
+        raise HTTPException(status_code=403, detail="Rescuer account required")
+
+    profile = await _get_or_create_rescuer_profile(session, user)
+    now = datetime.utcnow()
+    status_changed = False
+    active_alert_result = await session.execute(
+        select(EmergencyAlert.status)
+        .where(
+            EmergencyAlert.assigned_rescuer_id == user.id,
+            EmergencyAlert.status != AlertStatus.CLOSED,
+        )
+        .order_by(EmergencyAlert.created_at.asc())
+        .limit(1)
+    )
+    active_alert_status = active_alert_result.scalar_one_or_none()
+    if active_alert_status is not None:
+        next_status = (
+            RescuerStatus.IN_TRANSIT
+            if active_alert_status in {AlertStatus.RESOLVING, AlertStatus.EVACUATING}
+            else RescuerStatus.ASSIGNED
+        )
+        status_changed = profile.status != next_status
+        profile.status = next_status
+    elif profile.recovering_until and profile.recovering_until <= now:
+        profile.recovering_until = None
+        if profile.status in {RescuerStatus.RECOVERING, RescuerStatus.OFF_DUTY}:
+            profile.status = RescuerStatus.AVAILABLE
+            status_changed = True
+    elif profile.status == RescuerStatus.OFF_DUTY:
+        profile.status = (
+            RescuerStatus.RECOVERING
+            if profile.recovering_until and profile.recovering_until > now
+            else RescuerStatus.AVAILABLE
+        )
+        if profile.status == RescuerStatus.AVAILABLE:
+            profile.recovering_until = None
+        status_changed = True
+    profile.last_seen_at = now
+    profile.updated_at = now
+    await session.commit()
+    if status_changed:
+        await telemetry_manager.broadcast({
+            "type": "rescuer_status_updated",
+            "data": {
+                "rescuer_id": user.id,
+                "status": profile.status.value,
+                "recovering_until": _utc_isoformat(profile.recovering_until),
+            },
+            "timestamp": now.timestamp(),
+        })
+    return {
+        "status": profile.status.value,
+        "recovering_until": _utc_isoformat(profile.recovering_until),
+    }
+
+
+@router.patch("/rescuers/me/status")
+async def update_my_rescuer_status(
+    payload: RescuerPostAlertStatusUpdate,
+    current_user: dict = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+):
+    user_result = await session.execute(select(User).where(User.username == current_user.get("sub")))
+    user = user_result.scalar_one_or_none()
+    if not user or user.role != UserRole.RESCUER:
+        raise HTTPException(status_code=403, detail="Rescuer account required")
+
+    profile_result = await session.execute(select(RescuerProfile).where(RescuerProfile.user_id == user.id))
+    profile = profile_result.scalar_one_or_none()
+    if not profile:
+        raise HTTPException(status_code=404, detail="Rescuer profile not found")
+
+    active_alert_result = await session.execute(
+        select(EmergencyAlert.id)
+        .where(
+            EmergencyAlert.assigned_rescuer_id == user.id,
+            EmergencyAlert.status != AlertStatus.CLOSED,
+        )
+        .limit(1)
+    )
+    if active_alert_result.scalar_one_or_none() is not None:
+        raise HTTPException(status_code=409, detail="Finish the active assignment before changing availability")
+    now = datetime.utcnow()
+    if payload.status == RescuerStatus.RECOVERING.value:
+        if profile.status not in {RescuerStatus.ASSIGNED, RescuerStatus.IN_TRANSIT}:
+            raise HTTPException(status_code=409, detail="There is no completed assignment awaiting an availability choice")
+        latest_closed_result = await session.execute(
+            select(EmergencyAlert.id)
+            .where(
+                EmergencyAlert.assigned_rescuer_id == user.id,
+                EmergencyAlert.status == AlertStatus.CLOSED,
+            )
+            .order_by(EmergencyAlert.updated_at.desc(), EmergencyAlert.id.desc())
+            .limit(1)
+        )
+        if latest_closed_result.scalar_one_or_none() is None:
+            raise HTTPException(status_code=409, detail="There is no completed assignment awaiting an availability choice")
+        profile.status = RescuerStatus.RECOVERING
+        profile.recovering_until = now + RESCUER_RECOVERY_DURATION
+    elif profile.status == RescuerStatus.RECOVERING:
+        profile.status = RescuerStatus.AVAILABLE
+        profile.recovering_until = None
+    elif profile.status in {RescuerStatus.ASSIGNED, RescuerStatus.IN_TRANSIT}:
+        latest_closed_result = await session.execute(
+            select(EmergencyAlert.id)
+            .where(
+                EmergencyAlert.assigned_rescuer_id == user.id,
+                EmergencyAlert.status == AlertStatus.CLOSED,
+            )
+            .order_by(EmergencyAlert.updated_at.desc(), EmergencyAlert.id.desc())
+            .limit(1)
+        )
+        if latest_closed_result.scalar_one_or_none() is None:
+            raise HTTPException(status_code=409, detail="There is no completed assignment awaiting an availability choice")
+        profile.status = RescuerStatus.AVAILABLE
+        profile.recovering_until = None
+    else:
+        raise HTTPException(status_code=409, detail="Rescuer availability cannot be changed at this time")
+    profile.last_seen_at = now
+    profile.updated_at = now
+    await session.commit()
+    await session.refresh(profile)
+
+    await telemetry_manager.broadcast({
+        "type": "rescuer_status_updated",
+        "data": {
+            "rescuer_id": user.id,
+            "status": profile.status.value,
+            "recovering_until": _utc_isoformat(profile.recovering_until),
+        },
+        "timestamp": datetime.utcnow().timestamp(),
+    })
+    return {
+        "status": profile.status.value,
+        "recovering_until": _utc_isoformat(profile.recovering_until),
+    }
+
+
 @router.get("/rescue-units")
 async def list_rescue_units(session: AsyncSession = Depends(get_session)):
+    await _mark_stale_rescuers_off_duty(session)
     profile_result = await session.execute(
         select(RescuerProfile, User)
         .join(User, RescuerProfile.user_id == User.id)
@@ -440,8 +786,11 @@ async def list_assigned_alerts(
             EmergencyAlert.assigned_rescuer_id == user.id,
             EmergencyAlert.status != AlertStatus.CLOSED,
         )
-        .order_by(EmergencyAlert.created_at.asc(), EmergencyAlert.id.asc())
-        .limit(1)
+        .order_by(
+            (EmergencyAlert.severity == "critical").desc(),
+            EmergencyAlert.created_at.asc(),
+            EmergencyAlert.id.asc(),
+        )
     )
     result = await session.execute(statement)
     return result.scalars().all()
@@ -460,6 +809,7 @@ async def update_alert(
         raise HTTPException(status_code=404, detail="Alert not found")
     assigned_user_id = payload.get("assigned_rescuer_id")
     assigned_vehicle_ids = payload.get("assigned_vehicle_ids")
+    rescuer_user = None
 
     if assigned_user_id:
         # Verify the user exists and has role rescuer
@@ -468,6 +818,8 @@ async def update_alert(
         rescuer_user = user_res.scalar_one_or_none()
         if not rescuer_user:
             raise HTTPException(status_code=404, detail="Rescuer user not found")
+        if rescuer_user.role != UserRole.RESCUER:
+            raise HTTPException(status_code=400, detail="Assignments must target a rescuer")
 
         # Ensure a RescuerProfile exists for this user (create if missing).
         profile_stmt = select(RescuerProfile).where(RescuerProfile.user_id == assigned_user_id)
@@ -482,7 +834,13 @@ async def update_alert(
             session.add(rescuer_profile)
             await session.commit()
             await session.refresh(rescuer_profile)
+        effective_severity = str(payload.get("severity", alert.severity) or "").lower()
+        if rescuer_profile.status == RescuerStatus.RECOVERING and effective_severity != "critical":
+            raise HTTPException(status_code=409, detail="This rescuer is recovering; only a critical alert can override this status")
+        if rescuer_profile.status == RescuerStatus.OFF_DUTY:
+            raise HTTPException(status_code=409, detail="This rescuer is off duty")
         rescuer_profile.status = RescuerStatus.ASSIGNED
+        rescuer_profile.recovering_until = None
 
         # The alert field references user.id, so acknowledgement can resolve the profile later.
         payload["assigned_rescuer_id"] = assigned_user_id
@@ -499,11 +857,17 @@ async def update_alert(
         vehicle_result = await session.execute(select(Vehicle).where(Vehicle.id.in_(vehicle_ids)))
         for vehicle in vehicle_result.scalars().all():
             vehicle.status = "assigned"
-            vehicle.rescuer_onboard = rescuer_user.full_name or rescuer_user.username
+            vehicle.rescuer_onboard = rescuer_user.full_name or rescuer_user.username if rescuer_user else None
 
     for field, value in payload.items():
         if hasattr(alert, field):
             setattr(alert, field, value)
+
+    requested_status = payload.get("status")
+    if requested_status is not None:
+        normalized_status = requested_status.value if isinstance(requested_status, AlertStatus) else str(requested_status)
+        if normalized_status.lower() == AlertStatus.CLOSED.value:
+            alert.updated_at = datetime.utcnow()
 
     await session.commit()
     await session.refresh(alert)
@@ -513,6 +877,158 @@ async def update_alert(
         "timestamp": datetime.utcnow().timestamp(),
     })
     return alert
+
+
+@router.post(
+    "/alerts/{alert_id}/status-reports",
+    response_model=EmergencyAlertStatusReportRead,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_alert_status_report(
+    alert_id: int,
+    payload: EmergencyAlertStatusReportCreate,
+    current_user: dict = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+):
+    user_result = await session.execute(select(User).where(User.username == current_user.get("sub")))
+    user = user_result.scalar_one_or_none()
+    if not user or user.role != UserRole.RESCUER:
+        raise HTTPException(status_code=403, detail="Rescuer account required")
+
+    alert_result = await session.execute(select(EmergencyAlert).where(EmergencyAlert.id == alert_id))
+    alert = alert_result.scalar_one_or_none()
+    if not alert:
+        raise HTTPException(status_code=404, detail="Alert not found")
+    if alert.assigned_rescuer_id != user.id:
+        raise HTTPException(status_code=403, detail="This alert is not assigned to you")
+    if alert.status == AlertStatus.CLOSED:
+        raise HTTPException(status_code=409, detail="This alert is already closed")
+
+    report_type = payload.report_type.strip().lower()
+    message = payload.message.strip()
+    if report_type == "resolving":
+        message = message or "Rescuer marked the alert as resolving."
+        alert.status = AlertStatus.RESOLVING
+        alert.updated_at = datetime.utcnow()
+    elif report_type == "going_to_evacuation_center":
+        if alert.status != AlertStatus.RESOLVING:
+            raise HTTPException(status_code=409, detail="Mark the alert as resolving before going to an evacuation center")
+        message = message or "Rescuer is going to the evacuation center."
+        alert.status = AlertStatus.EVACUATING
+        alert.updated_at = datetime.utcnow()
+    elif report_type == "resolved":
+        if alert.status != AlertStatus.EVACUATING:
+            raise HTTPException(status_code=409, detail="Mark the alert as going to an evacuation center before resolving it")
+        message = message or "Rescuer marked the alert as resolved."
+        alert.status = AlertStatus.CLOSED
+        alert.updated_at = datetime.utcnow()
+    elif report_type == "need_backup":
+        message = message or "Rescuer requested backup."
+    elif not message:
+        raise HTTPException(status_code=422, detail="A description is required for an other report")
+
+    report = EmergencyAlertStatusReport(
+        alert_id=alert.id,
+        reporter_id=user.id,
+        reporter_name=user.full_name or user.username,
+        report_type=report_type,
+        message=message,
+        additional_notes=payload.additional_notes.strip() if payload.additional_notes else None,
+    )
+    session.add(report)
+    await session.commit()
+    await session.refresh(report)
+
+    await telemetry_manager.broadcast({
+        "type": "alert_status_report_updated",
+        "data": {"report_id": report.id},
+        "timestamp": datetime.utcnow().timestamp(),
+    })
+
+    if report_type in {"resolving", "going_to_evacuation_center", "resolved"}:
+        await session.refresh(alert)
+        await telemetry_manager.broadcast({
+            "type": "alert_updated",
+            "data": EmergencyAlertRead.model_validate(alert).model_dump(mode="json"),
+            "timestamp": datetime.utcnow().timestamp(),
+        })
+    return report
+
+
+@router.get(
+    "/alerts/status-reports/recent",
+    response_model=list[EmergencyAlertStatusReportRead],
+)
+async def get_recent_alert_status_reports(
+    current_user: dict = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+):
+    user_result = await session.execute(select(User).where(User.username == current_user.get("sub")))
+    user = user_result.scalar_one_or_none()
+    if not user or user.role not in {UserRole.DISPATCHER, UserRole.ADMIN}:
+        raise HTTPException(status_code=403, detail="Dispatcher account required")
+
+    result = await session.execute(
+        select(EmergencyAlertStatusReport)
+        .order_by(EmergencyAlertStatusReport.created_at.desc())
+        .limit(50)
+    )
+    return result.scalars().all()
+
+
+@router.get(
+    "/alerts/status-reports/{report_id}",
+    response_model=EmergencyAlertStatusReportRead,
+)
+async def get_alert_status_report(
+    report_id: int,
+    current_user: dict = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+):
+    user_result = await session.execute(select(User).where(User.username == current_user.get("sub")))
+    user = user_result.scalar_one_or_none()
+    if not user or user.role not in {UserRole.DISPATCHER, UserRole.ADMIN}:
+        raise HTTPException(status_code=403, detail="Dispatcher account required")
+
+    report_result = await session.execute(
+        select(EmergencyAlertStatusReport).where(EmergencyAlertStatusReport.id == report_id)
+    )
+    report = report_result.scalar_one_or_none()
+    if not report:
+        raise HTTPException(status_code=404, detail="Status report not found")
+    return report
+
+
+@router.get(
+    "/alerts/{alert_id}/status-reports",
+    response_model=list[EmergencyAlertStatusReportRead],
+)
+async def list_alert_status_reports(
+    alert_id: int,
+    current_user: dict = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+):
+    user_result = await session.execute(select(User).where(User.username == current_user.get("sub")))
+    user = user_result.scalar_one_or_none()
+    if not user:
+        raise HTTPException(status_code=401, detail="User account not found")
+
+    alert_result = await session.execute(select(EmergencyAlert).where(EmergencyAlert.id == alert_id))
+    alert = alert_result.scalar_one_or_none()
+    if not alert:
+        raise HTTPException(status_code=404, detail="Alert not found")
+    is_dispatcher = user.role in {UserRole.DISPATCHER, UserRole.ADMIN}
+    is_assigned_rescuer = user.role == UserRole.RESCUER and alert.assigned_rescuer_id == user.id
+    if not is_dispatcher and not is_assigned_rescuer:
+        raise HTTPException(status_code=403, detail="You cannot view reports for this alert")
+
+    result = await session.execute(
+        select(EmergencyAlertStatusReport)
+        .where(EmergencyAlertStatusReport.alert_id == alert_id)
+        .order_by(EmergencyAlertStatusReport.created_at.desc())
+        .limit(50)
+    )
+    return result.scalars().all()
 
 
 @router.post("/alerts/{alert_id}/acknowledge")

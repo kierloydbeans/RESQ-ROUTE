@@ -296,7 +296,7 @@ const Login = () => {
                   borderRadius: '12px',
                   border: '1px solid #e5e7eb',
                   backgroundColor: '#f9fafb',
-                  fontFamily: "'Rajdhani', 'Arial Narrow', sans-serif",
+                  fontFamily: 'var(--ops-font)',
                   fontSize: '0.95rem',
                   outline: 'none',
                   boxSizing: 'border-box'
@@ -318,7 +318,7 @@ const Login = () => {
                   borderRadius: '9999px',
                   border: '1px solid #e5e7eb',
                   backgroundColor: '#f9fafb',
-                  fontFamily: "'Rajdhani', 'Arial Narrow', sans-serif",
+                  fontFamily: 'var(--ops-font)',
                   fontSize: '0.95rem',
                   outline: 'none',
                   boxSizing: 'border-box'
@@ -439,7 +439,7 @@ const Login = () => {
                     borderRadius: '9999px',
                     border: '1px solid #e5e7eb',
                     backgroundColor: '#f9fafb',
-                    fontFamily: "'Rajdhani', 'Arial Narrow', sans-serif",
+                    fontFamily: 'var(--ops-font)',
                     fontSize: '0.95rem',
                     boxSizing: 'border-box'
                   }}

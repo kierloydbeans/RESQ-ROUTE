@@ -4,7 +4,7 @@ from .api.v1 import auth, shelters, inventory, hazards, road_hazards, routing
 from .api.websockets import telemetry
 from .core.config import settings
 from .db.base import init_db
-from .models import center, evacuee, vehicle, report, user, rescuer, emergency_alert, road_hazard
+from .models import center, evacuee, vehicle, report, user, rescuer, emergency_alert, emergency_alert_status_report, road_hazard
 
 app = FastAPI(title="RESQ-Route API", version="1.0.0")
 

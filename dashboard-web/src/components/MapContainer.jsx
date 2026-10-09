@@ -94,6 +94,7 @@ const formatPopupDetails = (marker) => {
 
 const createMarkerElement = (color = '#dc2626', icon = null) => {
   const el = document.createElement('div')
+  el.className = 'resq-map-marker'
   el.style.display = 'flex'
   el.style.alignItems = 'center'
   el.style.justifyContent = 'center'
@@ -114,6 +115,8 @@ const MapContainer = ({
   markers = [], 
   route = null, 
   center = null,
+  focusMarkerId = null,
+  centerRequestKey = 0,
   pinnedLocation = null, 
   onMapClick, 
   trackDeviceLocation = true 
@@ -128,6 +131,7 @@ const MapContainer = ({
   const markersRef = useRef(markers)
   const routeRef = useRef(route)
   const centerRef = useRef(center)
+  const focusMarkerIdRef = useRef(focusMarkerId)
   const onMapClickRef = useRef(onMapClick)
   const markersSignature = JSON.stringify(markers)
   const centerSignature = JSON.stringify(center)
@@ -141,12 +145,20 @@ const MapContainer = ({
     markerInstancesRef.current = []
     nextMarkers.forEach((marker) => {
       const [lng, lat] = normalizeCoordinates(marker.position)
-      markerInstancesRef.current.push(
-        new maplibregl.Marker({ element: createMarkerElement(marker.color, marker.icon) })
-          .setLngLat([lng, lat])
-          .setPopup(new maplibregl.Popup({ offset: 25, closeOnClick: false, closeOnMove: false, closeButton: true }).setHTML(formatPopupDetails(marker)))
-          .addTo(map)
-      )
+      const isFocused = marker.id != null && String(marker.id) === String(focusMarkerIdRef.current)
+      const hasFocusedMarker = focusMarkerIdRef.current != null
+      const element = createMarkerElement(marker.color, marker.icon)
+      const isAlertMarker = marker.kind === 'alert' && marker.id != null
+      if (isAlertMarker) element.dataset.alertId = String(marker.id)
+      element.classList.toggle('is-alert-marker', isAlertMarker)
+      element.classList.toggle('is-focused', isFocused)
+      element.classList.toggle('is-dimmed', isAlertMarker && hasFocusedMarker && !isFocused)
+      element.style.zIndex = isFocused ? '1000' : ''
+      const markerInstance = new maplibregl.Marker({ element, anchor: 'center' })
+        .setLngLat([lng, lat])
+        .setPopup(new maplibregl.Popup({ offset: 25, closeOnClick: false, closeOnMove: false, closeButton: true }).setHTML(formatPopupDetails(marker)))
+        .addTo(map)
+      markerInstancesRef.current.push(markerInstance)
     })
   }
 
@@ -326,11 +338,23 @@ const MapContainer = ({
   }, [markersSignature])
 
   useEffect(() => {
+    focusMarkerIdRef.current = focusMarkerId
+    markerInstancesRef.current.forEach((marker) => {
+      const isFocused = marker.getElement().dataset.alertId === String(focusMarkerId)
+      const element = marker.getElement()
+      const isAlertMarker = element.classList.contains('is-alert-marker')
+      element.classList.toggle('is-focused', isFocused)
+      element.classList.toggle('is-dimmed', isAlertMarker && focusMarkerId != null && !isFocused)
+      element.style.zIndex = isFocused ? '1000' : ''
+    })
+  }, [focusMarkerId])
+
+  useEffect(() => {
     centerRef.current = center
     if (centerRef.current && mapRef.current) {
-      mapRef.current.flyTo({ center: normalizeCoordinates(centerRef.current), zoom: 14, speed: 0.7 })
+      mapRef.current.flyTo({ center: normalizeCoordinates(centerRef.current), zoom: focusMarkerId == null ? 14 : 16, speed: 0.7 })
     }
-  }, [centerSignature])
+  }, [centerSignature, centerRequestKey, focusMarkerId])
 
   useEffect(() => {
     if (mapRef.current?.isStyleLoaded() && mapRef.current.getSource('citizen-route')) {
