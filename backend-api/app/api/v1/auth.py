@@ -1,11 +1,16 @@
 from datetime import datetime, timedelta, timezone
 import json
-from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks
+import logging
+from urllib.parse import urlsplit, urlunsplit
+from uuid import uuid4
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status, BackgroundTasks
 from fastapi.security import OAuth2PasswordRequestForm
+from starlette.concurrency import run_in_threadpool
 from sqlmodel import select
 from pydantic import BaseModel, EmailStr, field_validator
 from sqlalchemy import func, cast, String
 from sqlalchemy.ext.asyncio import AsyncSession
+from supabase import create_client
 
 from app.core.security import (
     create_access_token, 
@@ -22,10 +27,31 @@ from app.models.otp import OTPVerification
 from app.models.rescuer import RescuerProfile, RescuerProfileRead, RescuerStatus
 from app.models.emergency_alert import EmergencyAlert, EmergencyAlertRead, AlertStatus
 from app.models.vehicle import Vehicle
+from app.core.config import settings
 from app.core.mail import send_reset_password_email, send_otp_email
 from app.api.websockets.telemetry import manager as telemetry_manager
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
+SOS_ALERT_MEDIA_BUCKET = "sos_alert_media"
+MAX_SOS_MEDIA_BYTES = 25 * 1024 * 1024
+SOS_MEDIA_EXTENSIONS = {
+    "image/jpeg": ".jpg",
+    "image/png": ".png",
+    "image/webp": ".webp",
+    "image/gif": ".gif",
+    "image/heic": ".heic",
+    "image/heif": ".heif",
+    "video/mp4": ".mp4",
+    "video/webm": ".webm",
+    "video/quicktime": ".mov",
+}
+SOS_IMAGE_EXTENSIONS = frozenset(
+    extension for content_type, extension in SOS_MEDIA_EXTENSIONS.items() if content_type.startswith("image/")
+)
+SOS_VIDEO_EXTENSIONS = frozenset(
+    extension for content_type, extension in SOS_MEDIA_EXTENSIONS.items() if content_type.startswith("video/")
+)
 
 
 class ForgotPasswordRequest(BaseModel):
@@ -62,6 +88,10 @@ class LoginRequest(BaseModel):
     username: str
     password: str
     role: str
+
+
+class EmergencyAlertCreated(EmergencyAlertRead):
+    media_upload_token: str
 
 
 @router.post("/login")
@@ -134,10 +164,16 @@ async def login_role(
 
 @router.get("/me")
 async def get_me(
-    credentials: str = Depends(get_current_user),
+    credentials: dict = Depends(get_current_user),
     session: AsyncSession = Depends(get_session)
 ):
-    return {"user": credentials}
+    result = await session.execute(
+        select(User).where(User.username == credentials.get("sub"))
+    )
+    user = result.scalar_one_or_none()
+    if not user:
+        raise HTTPException(status_code=404, detail="User account not found")
+    return {"user": UserRead.model_validate(user)}
 
 
 @router.post("/rescuers", response_model=RescuerProfileRead, status_code=status.HTTP_201_CREATED)
@@ -255,7 +291,7 @@ async def list_rescue_units(session: AsyncSession = Depends(get_session)):
         ],
     }
 
-@router.post("/alerts", response_model=EmergencyAlertRead, status_code=status.HTTP_201_CREATED)
+@router.post("/alerts", response_model=EmergencyAlertCreated, status_code=status.HTTP_201_CREATED)
 async def create_alert(
     payload: dict,
     session: AsyncSession = Depends(get_session)
@@ -290,12 +326,123 @@ async def create_alert(
         "data": EmergencyAlertRead.model_validate(alert).model_dump(mode="json"),
         "timestamp": datetime.utcnow().timestamp(),
     })
-    return alert
+    alert_data = EmergencyAlertRead.model_validate(alert).model_dump()
+    return {
+        **alert_data,
+        "media_upload_token": create_access_token(
+            {
+                "sub": sender.username,
+                "token_use": "sos_alert_media",
+                "alert_id": alert.id,
+                "sender_id": alert.sender_id,
+            },
+            expires_delta=timedelta(hours=2),
+        ),
+    }
+
+
+@router.post("/alerts/{alert_id}/media", status_code=status.HTTP_201_CREATED)
+async def upload_alert_media(
+    alert_id: int,
+    file: UploadFile = File(...),
+    current_user: dict = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+):
+    content_type = (file.content_type or "").lower()
+    extension = SOS_MEDIA_EXTENSIONS.get(content_type)
+    if not extension:
+        raise HTTPException(status_code=415, detail="Upload a supported image or video file")
+
+    contents = await file.read(MAX_SOS_MEDIA_BYTES + 1)
+    if len(contents) > MAX_SOS_MEDIA_BYTES:
+        raise HTTPException(status_code=413, detail="Media files must be 25 MB or smaller")
+    if not contents:
+        raise HTTPException(status_code=400, detail="The selected media file is empty")
+
+    alert_result = await session.execute(select(EmergencyAlert).where(EmergencyAlert.id == alert_id))
+    alert = alert_result.scalar_one_or_none()
+    if not alert:
+        raise HTTPException(status_code=404, detail="SOS alert not found")
+    if current_user.get("token_use") == "sos_alert_media":
+        if current_user.get("alert_id") != alert_id or current_user.get("sender_id") != alert.sender_id:
+            raise HTTPException(status_code=403, detail="This upload token is not valid for this SOS alert")
+    else:
+        user_result = await session.execute(select(User).where(User.username == current_user.get("sub")))
+        user = user_result.scalar_one_or_none()
+        if not user:
+            raise HTTPException(status_code=401, detail="User account not found")
+        if alert.sender_id != user.id:
+            raise HTTPException(status_code=403, detail="You can only upload media to your own SOS alert")
+
+    storage_path = f"{alert_id}/{uuid4().hex}{extension}"
+    supabase_url_parts = urlsplit(settings.SUPABASE_URL)
+    supabase_url_path = supabase_url_parts.path.rstrip("/")
+    if supabase_url_path == "/rest/v1":
+        supabase_url_parts = supabase_url_parts._replace(path="")
+    client = create_client(urlunsplit(supabase_url_parts), settings.SUPABASE_KEY)
+    storage_stage = "listing existing media"
+    try:
+        storage = client.storage.from_(SOS_ALERT_MEDIA_BUCKET)
+        stored_objects = await run_in_threadpool(lambda: storage.list(str(alert_id)))
+        stored_names = [
+            str(item.get("name", "")) if isinstance(item, dict) else str(getattr(item, "name", ""))
+            for item in stored_objects
+        ]
+        stored_image_count = sum(any(name.lower().endswith(ext) for ext in SOS_IMAGE_EXTENSIONS) for name in stored_names)
+        stored_video_count = sum(any(name.lower().endswith(ext) for ext in SOS_VIDEO_EXTENSIONS) for name in stored_names)
+        if content_type.startswith("image/") and stored_image_count >= 5:
+            raise HTTPException(status_code=409, detail="An SOS alert can have at most 5 photos")
+        if content_type.startswith("video/") and stored_video_count >= 1:
+            raise HTTPException(status_code=409, detail="An SOS alert can have at most 1 video")
+        storage_stage = "uploading media"
+        await run_in_threadpool(
+            lambda: storage.upload(
+                storage_path,
+                contents,
+                file_options={"content-type": content_type, "upsert": "false"},
+            )
+        )
+    except HTTPException:
+        raise
+    except Exception as error:
+        logger.exception("Supabase Storage %s failed for SOS alert %s", storage_stage, alert_id)
+        raise HTTPException(status_code=502, detail="Unable to upload media to Supabase Storage") from error
+    finally:
+        await file.close()
+
+    return {"bucket": SOS_ALERT_MEDIA_BUCKET, "path": storage_path, "content_type": content_type}
 
 
 @router.get("/alerts", response_model=list[EmergencyAlertRead])
 async def list_alerts(session: AsyncSession = Depends(get_session)):
     statement = select(EmergencyAlert).order_by(EmergencyAlert.created_at.desc())
+    result = await session.execute(statement)
+    return result.scalars().all()
+
+
+@router.get("/alerts/assigned-to-me", response_model=list[EmergencyAlertRead])
+async def list_assigned_alerts(
+    current_user: dict = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+):
+    user_result = await session.execute(
+        select(User).where(User.username == current_user.get("sub"))
+    )
+    user = user_result.scalar_one_or_none()
+    if not user:
+        raise HTTPException(status_code=401, detail="User account not found")
+    if user.role != UserRole.RESCUER:
+        raise HTTPException(status_code=403, detail="Rescuer account required")
+
+    statement = (
+        select(EmergencyAlert)
+        .where(
+            EmergencyAlert.assigned_rescuer_id == user.id,
+            EmergencyAlert.status != AlertStatus.CLOSED,
+        )
+        .order_by(EmergencyAlert.created_at.asc(), EmergencyAlert.id.asc())
+        .limit(1)
+    )
     result = await session.execute(statement)
     return result.scalars().all()
 

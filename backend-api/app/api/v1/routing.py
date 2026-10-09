@@ -5,6 +5,7 @@ from sqlmodel import Session, SQLModel, select
 
 from app.db.session import get_session
 from app.models.road_hazard import RoadHazardReport
+from app.services.road_hazard_expiration import expire_stale_road_hazards
 from app.services.graphhopper_routing import route_citizen
 
 router = APIRouter()
@@ -22,6 +23,7 @@ async def create_walking_route(
     request: WalkingRouteRequest,
     session: Session = Depends(get_session),
 ) -> Dict[str, Any]:
+    await expire_stale_road_hazards(session)
     result = await session.execute(
         select(RoadHazardReport).where(
             RoadHazardReport.is_active == True,  # noqa: E712

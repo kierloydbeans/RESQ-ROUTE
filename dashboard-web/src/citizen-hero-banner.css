@@ -1,0 +1,95 @@
+.shelter-hero-banner {
+  position: relative;
+  width: 100%;
+  height: 220px;
+  background-color: var(--bg-hero-placeholder, #1f2937);
+  overflow: hidden;
+  border-top-left-radius: 12px;
+  border-top-right-radius: 12px;
+}
+
+.shelter-hero-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+  transition: all 0.3s ease;
+}
+
+.shelter-hero-placeholder {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #9ca3af;
+}
+
+.hero-nav-btn {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background-color: rgba(0, 0, 0, 0.5);
+  color: #ffffff;
+  border: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  font-size: 16px;
+  z-index: 2;
+  transition: background-color 0.2s ease, transform 0.15s ease;
+}
+
+.hero-nav-btn:hover {
+  background-color: rgba(0, 0, 0, 0.75);
+}
+
+.hero-nav-btn.prev {
+  left: 10px;
+}
+
+.hero-nav-btn.next {
+  right: 10px;
+}
+
+.hero-counter-badge {
+  position: absolute;
+  bottom: 10px;
+  right: 12px;
+  background-color: rgba(0, 0, 0, 0.65);
+  padding: 2px 8px;
+  border-radius: 12px;
+  color: #ffffff;
+  font-size: 11px;
+  font-weight: 600;
+  z-index: 2;
+  user-select: none;
+}
+
+.hero-dots-container {
+  position: absolute;
+  bottom: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  gap: 6px;
+  z-index: 2;
+}
+
+.hero-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 3px;
+  background-color: rgba(255, 255, 255, 0.5);
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.hero-dot.active {
+  width: 18px;
+  background-color: #ffffff;
+}

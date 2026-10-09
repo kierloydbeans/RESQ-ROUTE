@@ -34,6 +34,7 @@ class RoadHazardReport(RoadHazardReportBase, table=True):
 
     id: Optional[int] = Field(default=None, primary_key=True)
     reported_at: datetime = Field(default_factory=datetime.utcnow)
+    expires_at: datetime
     resolved_at: Optional[datetime] = None
     created_at: datetime = Field(default_factory=datetime.utcnow)
     updated_at: datetime = Field(default_factory=datetime.utcnow)
@@ -46,6 +47,7 @@ class RoadHazardReportCreate(RoadHazardReportBase):
 class RoadHazardReportRead(RoadHazardReportBase):
     id: int
     reported_at: datetime
+    expires_at: datetime
     resolved_at: Optional[datetime]
     created_at: datetime
     updated_at: datetime

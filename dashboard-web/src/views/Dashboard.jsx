@@ -1,4 +1,5 @@
 import React from 'react'
+import { Navigate } from 'react-router-dom'
 import CitizenDashboard from './CitizenDashboard'
 import DispatcherDashboard from './DispatcherDashboard'
 
@@ -27,6 +28,10 @@ export const Dashboard = () => {
 
   if (['dispatcher', 'coordinator', 'admin'].includes(role)) {
     return <DispatcherDashboard auth={auth} onLogout={handleLogout} />
+  }
+
+  if (role === 'rescuer') {
+    return <Navigate to="/rescuer" replace />
   }
 
   return (

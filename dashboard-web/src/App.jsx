@@ -38,6 +38,21 @@ const AppLayout = (props) => (
   <Layout {...props} sidebar={() => null} appBar={() => null} />
 )
 
+const ProtectedRescuer = () => {
+  let auth = null
+  try {
+    auth = JSON.parse(localStorage.getItem('auth'))
+  } catch {
+    localStorage.removeItem('auth')
+  }
+
+  const role = String(auth?.user?.role?.value || auth?.user?.role || '').toLowerCase().split('.').pop()
+  if (!auth?.token) return <Navigate to="/login/rescuer" replace />
+  if (role !== 'rescuer') return <Navigate to="/" replace />
+
+  return <RescuerDashboard />
+}
+
 const ProtectedAdmin = () => {
   let auth = null
   try {
@@ -77,7 +92,7 @@ function App() {
           <Route path="/login/:role?" element={<Login />} />
           <Route path="/register" element={<Register />} />
           <Route path="/reset-password" element={<ResetPassword />} />
-          <Route path="/rescuer" element={<RescuerDashboard />} />
+          <Route path="/rescuer" element={<ProtectedRescuer />} />
           <Route path="/*" element={<ProtectedAdmin />} />
         </Routes>
       </Router>

@@ -11,6 +11,74 @@
 .assignment-back:hover { color: var(--ops-red); }
 .assignment-selected-rescuer { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 14px; padding-bottom: 10px; border-bottom: 1px solid var(--ops-border); color: var(--ops-text); }
 .assignment-selected-rescuer span { color: var(--ops-green); font: 9px var(--ops-mono); text-transform: uppercase; }
+.assignment-modal {
+  display: flex;
+  flex-direction: column;
+  max-height: min(76vh, 760px);
+}
+.assignment-body {
+  display: grid;
+  gap: 12px;
+  max-height: min(68vh, 620px);
+  overflow-y: auto;
+  padding: 18px 18px 20px;
+  color: var(--ops-text);
+}
+.assignment-body > p {
+  margin: 0;
+  color: var(--ops-text);
+  font: 500 14px/1.4 var(--ops-font);
+}
+.assignment-body b { color: var(--ops-red); }
+.assignment-body .modal-empty {
+  margin: 0;
+  padding: 8px 0;
+}
+.rescuer-choice {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  padding: 12px 14px;
+  border: 1px solid var(--ops-border);
+  border-radius: 8px;
+  background: var(--ops-surface-2);
+  color: var(--ops-text);
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 0.2s ease, background 0.2s ease, transform 0.2s ease;
+}
+.rescuer-choice:hover {
+  border-color: rgba(242, 62, 79, 0.8);
+  background: rgba(242, 62, 79, 0.06);
+  transform: translateY(-1px);
+}
+.rescuer-choice > span {
+  flex: 1;
+  min-width: 0;
+}
+.rescuer-choice b,
+.rescuer-choice small {
+  display: block;
+}
+.rescuer-choice b {
+  font-size: 13px;
+  line-height: 1.3;
+}
+.rescuer-choice small {
+  margin-top: 4px;
+  color: var(--ops-muted);
+  font: 9px var(--ops-mono);
+}
+.rescuer-choice em {
+  flex-shrink: 0;
+  color: var(--ops-muted);
+  font: 9px var(--ops-mono);
+  font-style: normal;
+  text-transform: lowercase;
+  text-align: right;
+}
 .vehicle-deployment-list { display: grid; gap: 6px; margin: 10px 0 16px; }
 .vehicle-deployment-choice { display: flex; align-items: center; gap: 10px; padding: 10px; border: 1px solid var(--ops-border); background: var(--ops-surface-2); color: var(--ops-text); cursor: pointer; }
 .vehicle-deployment-choice.selected { border-color: var(--ops-green); background: color-mix(in srgb, var(--ops-green) 10%, var(--ops-surface-2)); }
