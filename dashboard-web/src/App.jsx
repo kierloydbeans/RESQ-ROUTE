@@ -6,6 +6,7 @@ import { authProvider } from './authProvider'
 import { Dashboard } from './views/Dashboard'
 import { InventoryHub } from './views/InventoryHub'
 import { IncidentTriage } from './views/IncidentTriage'
+import { CoordinatorDashboard } from './views/CoordinatorDashboard'
 import Login from './views/Login'
 import Register from './views/Register'
 import RescuerDashboard from './views/RescuerDashboard'
@@ -99,5 +100,18 @@ function App() {
     </ThemeProvider>
   )
 }
+
+// function App() {
+//   const mockAuth = {
+//     user: {
+//       id: 1,
+//       full_name: 'Cmdr. Reyes, J.',
+//       username: 'reyes_j',
+//       role: 'COMMAND DIRECTOR'
+//     }
+//   }
+
+//   return <CoordinatorDashboard auth={mockAuth} onLogout={() => alert('Logged out')} />
+// }
 
 export default App
