@@ -4,7 +4,7 @@ import MapContainer from '../components/MapContainer'
 import Logo from '../components/Logo'
 import { UploadCloud } from 'lucide-react'
 import 'maplibre-gl/dist/maplibre-gl.css'
-import '../theme.css'
+import "../styles/citizen-console.css";
 
 const Icons = {
   Sun: () => (

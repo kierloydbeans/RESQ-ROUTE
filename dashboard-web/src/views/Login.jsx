@@ -55,6 +55,11 @@ const Login = () => {
     return () => clearTimeout(timer)
   }, [])
 
+  useEffect(() => {
+    const timer = setTimeout(() => setIsPageLoading(false), 1200)
+    return () => clearTimeout(timer)
+  }, [])
+
   const handleChange = (event) => {
     const { name, value } = event.target
     setFormData((current) => ({ ...current, [name]: value }))
@@ -64,7 +69,6 @@ const Login = () => {
     event.preventDefault()
     setError('')
     setLoading(true)
-
     try {
       const response = await fetch(`${API_URL}/auth/login-role`, {
         method: 'POST',
@@ -96,14 +100,12 @@ const Login = () => {
     event.preventDefault()
     setResetMessage({ type: '', text: '' })
     setResetLoading(true)
-
     try {
       const response = await fetch(`${API_URL}/auth/forgot-password`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email: resetEmail })
       })
-
       const data = await response.json()
       if (!response.ok) throw new Error(data.detail || 'Failed to send reset email')
 
@@ -239,7 +241,7 @@ const Login = () => {
             <h1 style={{ fontSize: '2.5rem', fontWeight: '800', lineHeight: 1.2, marginBottom: '1rem', color: '#ffffff' }}>
               Welcome back!
             </h1>
-            <p style={{ fontSize: '1rem', opacity: 0.9, lineHeight: 1.6, maxWidth: '320px', color: '#fef2f2' }}>
+            <p style={{ fontSize: '1rem', opacity: 0.95, lineHeight: 1.6, maxWidth: '320px', color: '#fef2f2', textShadow: '0 1px 2px rgba(0,0,0,0.2)' }}>
               Sign in to access your dashboard and manage disaster response operations seamlessly.
             </p>
           </div>
@@ -291,7 +293,7 @@ const Login = () => {
                 style={{
                   width: '100%',
                   padding: '0.875rem 1.25rem',
-                  borderRadius: '9999px',
+                  borderRadius: '12px',
                   border: '1px solid #e5e7eb',
                   backgroundColor: '#f9fafb',
                   fontFamily: "'Rajdhani', 'Arial Narrow', sans-serif",
@@ -369,7 +371,7 @@ const Login = () => {
               style={{
                 width: '100%',
                 padding: '0.875rem',
-                borderRadius: '9999px',
+                borderRadius: '12px',
                 border: 'none',
                 background: 'linear-gradient(135deg, #c52222 0%, #a36b16 100%)',
                 color: '#ffffff',
@@ -464,13 +466,9 @@ const Login = () => {
                   type="submit"
                   disabled={resetLoading}
                   style={{
-                    padding: '0.625rem 1.25rem',
-                    borderRadius: '9999px',
-                    border: 'none',
-                    background: 'linear-gradient(135deg, #c52222 0%, #a36b16 100%)',
-                    color: '#ffffff',
-                    fontWeight: '600',
-                    cursor: resetLoading ? 'not-allowed' : 'pointer'
+                    padding: '0.625rem 1.25rem', borderRadius: '9999px', border: 'none',
+                    background: 'linear-gradient(135deg, #c52222 0%, #a36b16 100%)', color: '#ffffff',
+                    fontWeight: '600', cursor: resetLoading ? 'not-allowed' : 'pointer'
                   }}
                 >
                   {resetLoading ? 'Sending...' : 'Send Reset Link'}
