@@ -934,6 +934,7 @@ async def create_alert_status_report(
         report_type=report_type,
         message=message,
         additional_notes=payload.additional_notes.strip() if payload.additional_notes else None,
+        created_at=datetime.utcnow(),
     )
     session.add(report)
     await session.commit()
