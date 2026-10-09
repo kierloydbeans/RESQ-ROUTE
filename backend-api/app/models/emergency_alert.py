@@ -9,6 +9,7 @@ class AlertStatus(str, Enum):
     PENDING = "pending"
     ASSIGNED = "assigned"
     RESOLVING = "resolving"
+    EVACUATING = "evacuating"
     CLOSED = "closed"
 
 

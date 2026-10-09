@@ -11,7 +11,7 @@ class VehicleBase(SQLModel):
     rescuer_onboard: Optional[str] = None
     current_location_lat: Optional[float] = None
     current_location_lng: Optional[float] = None
-    status: str = "available"  # available, in_transit, maintenance
+    status: str = Field(default="available", nullable=False)  # available, assigned, in_transit, maintenance
 
 class Vehicle(VehicleBase, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)

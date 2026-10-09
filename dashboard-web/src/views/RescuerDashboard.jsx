@@ -29,11 +29,33 @@ const RescuerDashboard = () => {
   const [walkingRoute, setWalkingRoute] = useState(null);
   const [isRouteLoading, setIsRouteLoading] = useState(false);
   const [routeError, setRouteError] = useState('');
+  const [statusReports, setStatusReports] = useState([]);
+  const [selectedReportAction, setSelectedReportAction] = useState('');
+  const [otherReportMessage, setOtherReportMessage] = useState('');
+  const [additionalReportNotes, setAdditionalReportNotes] = useState('');
+  const [isStatusReportSubmitting, setIsStatusReportSubmitting] = useState(false);
+  const [statusReportError, setStatusReportError] = useState('');
+  const [statusReportSuccess, setStatusReportSuccess] = useState('');
+  const [rescuerStatusInfo, setRescuerStatusInfo] = useState(null);
+  const [isUpdatingRescuerStatus, setIsUpdatingRescuerStatus] = useState(false);
+  const [rescuerStatusError, setRescuerStatusError] = useState('');
   const navigate = useNavigate();
   const { isConnected, lastMessage } = useWebSocket(WS_URL);
   const authToken = auth?.token || auth?.access_token;
   const displayName = currentUser?.full_name || currentUser?.username || 'Rescuer';
-  const activeAlert = assignedAlerts.find((alert) => alert.id === selectedAlertId) || assignedAlerts[0] || null;
+  const recoveryDeadline = Date.parse(rescuerStatusInfo?.recovering_until || '');
+  const recoveryRemainingMs = Number.isFinite(recoveryDeadline)
+    ? Math.max(0, recoveryDeadline - currentTime.getTime())
+    : 0;
+  const recoveryRemainingLabel = `${Math.floor(recoveryRemainingMs / 60_000)}:${String(Math.floor((recoveryRemainingMs % 60_000) / 1000)).padStart(2, '0')}`;
+  const criticalAssignment = assignedAlerts.find((alert) => (
+    String(alert.severity).toLowerCase() === 'critical'
+    && String(alert.status).toLowerCase() === 'assigned'
+  ));
+  const activeAlert = criticalAssignment
+    || assignedAlerts.find((alert) => alert.id === selectedAlertId)
+    || assignedAlerts[0]
+    || null;
   const alertType = String(activeAlert?.disaster_type || 'other').toLowerCase();
   const hasRescuerLocation = rescuerLocation?.latitude != null
     && rescuerLocation?.longitude != null
@@ -173,6 +195,62 @@ const RescuerDashboard = () => {
   }, [authToken, alertRefreshKey]);
 
   useEffect(() => {
+    if (!authToken) return undefined;
+    const controller = new AbortController();
+    fetch(`${API_URL}/auth/rescuers/me/status`, {
+      headers: { Authorization: `Bearer ${authToken}` },
+      signal: controller.signal,
+    })
+      .then(async (response) => {
+        if (!response.ok) throw new Error(`Unable to load rescuer availability (${response.status}).`);
+        setRescuerStatusInfo(await response.json());
+        setRescuerStatusError('');
+      })
+      .catch((error) => {
+        if (error.name !== 'AbortError') {
+          setRescuerStatusError(error.message || 'Unable to load rescuer availability.');
+        }
+      });
+    return () => controller.abort();
+  }, [authToken, alertRefreshKey]);
+
+  useEffect(() => {
+    if (!authToken) return undefined;
+    let disposed = false;
+    const sendPresence = async () => {
+      try {
+        const response = await fetch(`${API_URL}/auth/rescuers/me/presence`, {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${authToken}` },
+        });
+        if (!response.ok) throw new Error(`Unable to update rescuer presence (${response.status}).`);
+        const result = await response.json();
+        if (!disposed) {
+          setRescuerStatusInfo((current) => ({ ...current, ...result }));
+          setRescuerStatusError('');
+        }
+      } catch (error) {
+        if (!disposed) {
+          setRescuerStatusError(error.message || 'Unable to update rescuer presence.');
+          console.error('Unable to update rescuer presence.', error);
+        }
+      }
+    };
+
+    sendPresence();
+    const presenceInterval = window.setInterval(sendPresence, 30_000);
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') sendPresence();
+    };
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => {
+      disposed = true;
+      window.clearInterval(presenceInterval);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
+  }, [authToken]);
+
+  useEffect(() => {
     const clock = window.setInterval(() => setCurrentTime(new Date()), 1000);
     return () => window.clearInterval(clock);
   }, []);
@@ -198,7 +276,36 @@ const RescuerDashboard = () => {
     setAcknowledgementSecondsLeft(60);
     setWalkingRoute(null);
     setRouteError('');
+    setStatusReports([]);
+    setSelectedReportAction('');
+    setOtherReportMessage('');
+    setAdditionalReportNotes('');
+    setStatusReportError('');
+    setStatusReportSuccess('');
   }, [activeAlert?.id]);
+
+  useEffect(() => {
+    if (!activeAlert?.id || !authToken) return undefined;
+    const controller = new AbortController();
+    fetch(`${API_URL}/auth/alerts/${activeAlert.id}/status-reports`, {
+      headers: { Authorization: `Bearer ${authToken}` },
+      signal: controller.signal,
+    })
+      .then(async (response) => {
+        if (!response.ok) throw new Error(`Unable to load status reports (${response.status}).`);
+        const reports = await response.json();
+        setStatusReports((currentReports) => {
+          const reportsById = new globalThis.Map([...currentReports, ...reports].map((report) => [report.id, report]));
+          return [...reportsById.values()]
+            .sort((first, second) => new Date(second.created_at) - new Date(first.created_at))
+            .slice(0, 50);
+        });
+      })
+      .catch((error) => {
+        if (error.name !== 'AbortError') console.error('Unable to load alert status reports.', error);
+      });
+    return () => controller.abort();
+  }, [activeAlert?.id, authToken]);
 
   const formattedCurrentTime = currentTime.toLocaleTimeString('en-US', {
     hour: '2-digit',
@@ -208,7 +315,19 @@ const RescuerDashboard = () => {
     timeZone: 'Asia/Manila'
   }) + ' PHT';
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
+    if (authToken) {
+      try {
+        const response = await fetch(`${API_URL}/auth/logout`, {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${authToken}` },
+          keepalive: true,
+        });
+        if (!response.ok) throw new Error(`Logout presence update failed (${response.status}).`);
+      } catch (error) {
+        console.error('Unable to mark rescuer off duty during logout.', error);
+      }
+    }
     localStorage.removeItem('auth');
     navigate('/login/rescuer', { replace: true });
   };
@@ -276,6 +395,93 @@ const RescuerDashboard = () => {
     }
   };
 
+  const submitStatusReport = async (reportType) => {
+    if (!activeAlert || isStatusReportSubmitting) return;
+    const message = reportType === 'other' ? otherReportMessage.trim() : '';
+    if (reportType === 'other' && !message) {
+      setStatusReportError('Describe the situation before sending an other report.');
+      return;
+    }
+
+    setIsStatusReportSubmitting(true);
+    setStatusReportError('');
+    setStatusReportSuccess('');
+    try {
+      const response = await fetch(`${API_URL}/auth/alerts/${activeAlert.id}/status-reports`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${authToken}`,
+        },
+        body: JSON.stringify({
+          report_type: reportType,
+          message,
+          additional_notes: additionalReportNotes.trim() || null,
+        }),
+      });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.detail || `Unable to send status report (${response.status}).`);
+
+      setStatusReports((reports) => [result, ...reports.filter((report) => report.id !== result.id)]);
+      if (['resolving', 'going_to_evacuation_center', 'resolved'].includes(reportType)) {
+        const nextStatus = {
+          resolving: 'resolving',
+          going_to_evacuation_center: 'evacuating',
+          resolved: 'closed',
+        }[reportType];
+        setAssignedAlerts((alerts) => alerts.map((alert) => (
+          alert.id === activeAlert.id ? { ...alert, status: nextStatus } : alert
+        )));
+        setStatusReportSuccess(
+          reportType === 'resolved'
+            ? 'Alert marked as resolved and dispatcher notified.'
+            : reportType === 'going_to_evacuation_center'
+              ? 'Evacuation-center transit reported to the dispatcher.'
+              : 'Alert marked as resolving and dispatcher notified.'
+        );
+      } else if (reportType === 'need_backup') {
+        setStatusReportSuccess('Backup request sent to the dispatcher.');
+      } else {
+        setStatusReportSuccess('Status report sent to the dispatcher.');
+        setOtherReportMessage('');
+        setSelectedReportAction('');
+      }
+      setAdditionalReportNotes('');
+    } catch (error) {
+      setStatusReportError(error.message || 'Unable to send status report.');
+    } finally {
+      setIsStatusReportSubmitting(false);
+    }
+  };
+
+  const choosePostAlertStatus = async (nextStatus) => {
+    if (!['available', 'recovering'].includes(nextStatus) || isUpdatingRescuerStatus) return;
+    setIsUpdatingRescuerStatus(true);
+    setRescuerStatusError('');
+    try {
+      const response = await fetch(`${API_URL}/auth/rescuers/me/status`, {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${authToken}`,
+        },
+        body: JSON.stringify({ status: nextStatus }),
+      });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.detail || `Unable to update availability (${response.status}).`);
+      setRescuerStatusInfo((current) => ({
+        ...current,
+        status: result.status,
+        recovering_until: result.recovering_until,
+        pending_alert: null,
+      }));
+    } catch (error) {
+      setRescuerStatusError(error.message || 'Unable to update availability.');
+    } finally {
+      setIsUpdatingRescuerStatus(false);
+    }
+  };
+
   const formattedAcknowledgementTime = `${String(Math.floor(acknowledgementSecondsLeft / 60)).padStart(2, '0')}:${String(acknowledgementSecondsLeft % 60).padStart(2, '0')}`;
 
   const navItems = [
@@ -293,7 +499,7 @@ const RescuerDashboard = () => {
   ];
 
   return (
-    <div style={{ backgroundColor: '#070b14', color: '#cbd5e1', height: '100vh', width: '100%', display: 'flex', overflow: 'hidden', fontFamily: 'sans-serif', fontSize: '14px' }}>
+    <div style={{ backgroundColor: '#070b14', color: '#cbd5e1', height: '100vh', width: '100%', display: 'flex', overflow: 'hidden', fontFamily: 'var(--ops-font)', fontSize: '14px' }}>
 
       {/* SIDEBAR NAVIGATION */}
       <aside
@@ -376,7 +582,7 @@ const RescuerDashboard = () => {
             </div>
             <div style={{ marginTop: '12px', display: 'flex', flexDirection: 'column', gap: '4px', fontSize: '11px', fontWeight: 500, color: '#64748b' }}>
               <p style={{ margin: 0 }}>{currentUser?.username ? `@${currentUser.username}` : 'Rescuer account'}</p>
-              <p style={{ fontFamily: 'monospace', color: '#475569', margin: 0 }}>{formattedCurrentTime}</p>
+              <p style={{ fontFamily: 'var(--ops-font)', color: '#475569', margin: 0 }}>{formattedCurrentTime}</p>
             </div>
           </div>
         )}
@@ -393,7 +599,7 @@ const RescuerDashboard = () => {
               <span style={{ width: '8px', height: '8px', borderRadius: '9999px', backgroundColor: isConnected ? '#22c55e' : '#ef4444', boxShadow: isConnected ? '0 0 8px rgba(34, 197, 94, 0.8)' : '0 0 8px rgba(239, 68, 68, 0.8)' }} />
               <span style={{ color: isConnected ? '#64f573' : '#fca5a5' }}>{isConnected ? 'Websocket: Connected' : 'Reconnecting'}</span>
             </div>
-            <div style={{ fontFamily: 'monospace', color: '#64748b' }}>{formattedCurrentTime}</div>
+            <div style={{ fontFamily: 'var(--ops-font)', color: '#64748b' }}>{formattedCurrentTime}</div>
             <div style={{ position: 'relative' }}>
               <button
                 type="button"
@@ -424,6 +630,33 @@ const RescuerDashboard = () => {
 
         {/* Scrollable Viewport */}
         <div style={{ flex: 1, minWidth: 0, overflowY: 'auto', padding: '20px' }}>
+          {(rescuerStatusInfo?.pending_alert || rescuerStatusInfo?.status === 'recovering') && (
+            <section role="status" aria-live="polite" style={{ maxWidth: '860px', margin: '0 auto 16px', padding: '16px', border: '1px solid #f59e0b', borderRadius: '8px', background: 'rgba(245, 158, 11, 0.1)', color: '#fef3c7' }}>
+              <strong>
+                {rescuerStatusInfo.status === 'recovering'
+                  ? 'Recovery period'
+                  : `Alert #${rescuerStatusInfo.pending_alert.id} closed — choose your availability`}
+              </strong>
+              <p style={{ margin: '6px 0 12px', color: '#cbd5e1', fontSize: '13px' }}>
+                {rescuerStatusInfo.status === 'recovering'
+                  ? `Rest timer: ${recoveryRemainingLabel} remaining. You can return to duty whenever you feel ready.`
+                  : 'Choose whether you are ready for another assignment or need time to recover.'}
+              </p>
+              <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                {rescuerStatusInfo.status !== 'recovering' && (
+                  <>
+                    <button type="button" disabled={isUpdatingRescuerStatus || assignedAlerts.length > 0} onClick={() => choosePostAlertStatus('available')} style={{ padding: '9px 14px', border: '1px solid #059669', borderRadius: '6px', background: '#064e3b', color: '#d1fae5', fontWeight: 700, cursor: 'pointer', opacity: isUpdatingRescuerStatus || assignedAlerts.length > 0 ? 0.55 : 1 }}>Available</button>
+                    <button type="button" disabled={isUpdatingRescuerStatus || assignedAlerts.length > 0} onClick={() => choosePostAlertStatus('recovering')} style={{ padding: '9px 14px', border: '1px solid #d97706', borderRadius: '6px', background: '#78350f', color: '#fef3c7', fontWeight: 700, cursor: 'pointer', opacity: isUpdatingRescuerStatus || assignedAlerts.length > 0 ? 0.55 : 1 }}>Recovering (30 min)</button>
+                  </>
+                )}
+                {rescuerStatusInfo.status === 'recovering' && (
+                  <button type="button" disabled={isUpdatingRescuerStatus || assignedAlerts.length > 0} onClick={() => choosePostAlertStatus('available')} style={{ padding: '9px 14px', border: '1px solid #059669', borderRadius: '6px', background: '#064e3b', color: '#d1fae5', fontWeight: 700, cursor: 'pointer', opacity: isUpdatingRescuerStatus || assignedAlerts.length > 0 ? 0.55 : 1 }}>Available now</button>
+                )}
+              </div>
+              {assignedAlerts.length > 0 && <small style={{ display: 'block', marginTop: '8px', color: '#fbbf24' }}>Finish your current assignment before changing availability.</small>}
+              {rescuerStatusError && <p role="alert" style={{ margin: '8px 0 0', color: '#fca5a5' }}>{rescuerStatusError}</p>}
+            </section>
+          )}
           {activeView === 'alert' && (
             isAlertsLoading ? (
               <div style={{ padding: '24px', color: '#94a3b8' }}>Loading assigned alerts...</div>
@@ -450,10 +683,10 @@ const RescuerDashboard = () => {
 
                 {/* New Assignment Banner */}
                 <div style={{
-                  border: '1px solid rgba(245, 158, 11, 0.5)',
+                  border: `1px solid ${criticalAssignment?.id === activeAlert.id ? 'rgba(239, 68, 68, 0.8)' : 'rgba(245, 158, 11, 0.5)'}`,
                   borderRadius: '8px',
                   padding: '12px 16px',
-                  backgroundColor: 'rgba(245, 158, 11, 0.05)',
+                  backgroundColor: criticalAssignment?.id === activeAlert.id ? 'rgba(127, 29, 29, 0.28)' : 'rgba(245, 158, 11, 0.05)',
                   display: 'flex',
                   justifyContent: 'space-between',
                   alignItems: 'center'
@@ -461,7 +694,7 @@ const RescuerDashboard = () => {
                   <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
                     <AlertTriangle style={{ width: '24px', height: '24px', color: '#f59e0b', flexShrink: 0 }} />
                     <div>
-                      <h3 style={{ fontSize: '16px', fontWeight: '800', color: '#fbbf24', letterSpacing: '0.025em', textTransform: 'uppercase', margin: 0 }}>{isAcknowledged ? 'Assignment Acknowledged' : 'New Assignment'}</h3>
+                      <h3 style={{ fontSize: '16px', fontWeight: '800', color: criticalAssignment?.id === activeAlert.id ? '#fca5a5' : '#fbbf24', letterSpacing: '0.025em', textTransform: 'uppercase', margin: 0 }}>{criticalAssignment?.id === activeAlert.id ? 'CRITICAL DISPATCH — PROCEED TO ALERT' : isAcknowledged ? 'Assignment Acknowledged' : 'New Assignment'}</h3>
                       <p style={{ fontSize: '12px', color: 'rgba(252, 211, 77, 0.7)', fontWeight: 600, marginTop: '2px', margin: 0 }}>
                         {activeAlert.message || 'No additional details provided.'}
                       </p>
@@ -642,7 +875,7 @@ const RescuerDashboard = () => {
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
                       <h4 style={{ fontSize: '11px', fontWeight: 'bold', color: '#f1f5f9', textTransform: 'uppercase', letterSpacing: '0.05em', margin: 0 }}>Assigned Team</h4>
                     </div>
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', fontFamily: 'monospace', fontSize: '11px', fontWeight: 500 }}>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', fontFamily: 'var(--ops-font)', fontSize: '11px', fontWeight: 500 }}>
                       <div style={{ backgroundColor: '#070b14', border: '1px solid #1e293b', padding: '10px', borderRadius: '6px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                         <p style={{ margin: 0 }}>
                           <span style={{ color: '#64748b', marginRight: '6px' }}>Lead:</span>
@@ -661,7 +894,7 @@ const RescuerDashboard = () => {
                   {/* HQ Dispatch Log */}
                   <div style={{ paddingTop: '16px', borderTop: '1px solid #1e293b' }}>
                     <h4 style={{ fontSize: '11px', fontWeight: 'bold', color: '#f1f5f9', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '12px', margin: '0 0 12px 0' }}>HQ Dispatch Log</h4>
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', fontFamily: 'monospace', fontSize: '11px', fontWeight: 500, color: 'rgba(245, 158, 11, 0.9)', lineHeight: 1.5 }}>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', fontFamily: 'var(--ops-font)', fontSize: '11px', fontWeight: 500, color: 'rgba(245, 158, 11, 0.9)', lineHeight: 1.5 }}>
                       <p style={{ margin: 0 }}>
                         <span style={{ color: '#64748b', marginRight: '6px' }}>14:30 PHT</span>
                         Sector 4 flood gates reported operational surge.
@@ -715,7 +948,136 @@ const RescuerDashboard = () => {
             </div>
             ))}
 
-          {activeView === 'nav' ? (
+          {activeView === 'status' ? (
+            <section style={{ maxWidth: '860px', margin: '0 auto', padding: '22px', border: '1px solid #1e293b', borderRadius: '10px', background: '#0b1120', display: 'flex', flexDirection: 'column', gap: '20px' }}>
+              <div>
+                <h3 style={{ margin: 0, color: '#f1f5f9', fontSize: '18px', textTransform: 'uppercase', letterSpacing: '0.06em' }}>Alert status report</h3>
+                <p style={{ margin: '6px 0 0', color: '#94a3b8', fontSize: '13px' }}>Update the dispatcher on your progress or request additional support.</p>
+              </div>
+              {!activeAlert ? (
+                <p style={{ margin: 0, padding: '14px', borderRadius: '6px', background: '#070b14', color: '#94a3b8' }}>There is no active alert assigned to your account.</p>
+              ) : (
+                <>
+                  <div style={{ padding: '14px', border: '1px solid #1e293b', borderRadius: '6px', background: '#070b14', display: 'flex', justifyContent: 'space-between', gap: '12px', flexWrap: 'wrap' }}>
+                    <div>
+                      <strong style={{ color: '#e2e8f0' }}>Alert #{activeAlert.id}</strong>
+                      <span style={{ marginLeft: '10px', color: '#94a3b8' }}>{activeAlert.sender_name} · {activeAlert.disaster_type}</span>
+                    </div>
+                    <span style={{ color: ['resolving', 'evacuating'].includes(activeAlert.status) ? '#fbbf24' : '#67e8f9', fontWeight: 700, textTransform: 'uppercase' }}>
+                      Current status: {activeAlert.status === 'evacuating' ? 'Going to evacuation center' : activeAlert.status}
+                    </span>
+                  </div>
+
+                  <div>
+                    <h4 style={{ margin: '0 0 10px', color: '#cbd5e1', fontSize: '13px' }}>Send an update</h4>
+                    <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const nextAction = {
+                            assigned: 'resolving',
+                            pending: 'resolving',
+                            resolving: 'going_to_evacuation_center',
+                            evacuating: 'resolved',
+                          }[activeAlert.status];
+                          if (nextAction) submitStatusReport(nextAction);
+                        }}
+                        disabled={isStatusReportSubmitting || activeAlert.status === 'closed'}
+                        style={{ padding: '10px 14px', border: '1px solid #047857', borderRadius: '6px', background: '#064e3b', color: '#d1fae5', fontWeight: 700, cursor: 'pointer', opacity: isStatusReportSubmitting || activeAlert.status === 'closed' ? 0.55 : 1 }}
+                      >
+                        {activeAlert.status === 'closed'
+                          ? 'Resolved'
+                          : ({
+                            assigned: 'Mark as resolving',
+                            pending: 'Mark as resolving',
+                            resolving: 'Going to evacuation center',
+                            evacuating: 'Mark as resolved',
+                          })[activeAlert.status] || 'Update alert status'}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => submitStatusReport('need_backup')}
+                        disabled={isStatusReportSubmitting}
+                        style={{ padding: '10px 14px', border: '1px solid #b45309', borderRadius: '6px', background: '#78350f', color: '#fef3c7', fontWeight: 700, cursor: 'pointer', opacity: isStatusReportSubmitting ? 0.55 : 1 }}
+                      >
+                        Request backup
+                      </button>
+                      <button
+                        type="button"
+                        aria-pressed={selectedReportAction === 'other'}
+                        onClick={() => { setSelectedReportAction('other'); setStatusReportError(''); setStatusReportSuccess(''); }}
+                        style={{ padding: '10px 14px', border: `1px solid ${selectedReportAction === 'other' ? '#0891b2' : '#334155'}`, borderRadius: '6px', background: selectedReportAction === 'other' ? '#164e63' : '#1f2937', color: '#e2e8f0', fontWeight: 700, cursor: 'pointer' }}
+                      >
+                        Others
+                      </button>
+                    </div>
+                  </div>
+
+                  <label style={{ display: 'flex', flexDirection: 'column', gap: '7px', color: '#cbd5e1', fontSize: '12px', fontWeight: 600 }}>
+                    Additional details (optional)
+                    <textarea
+                      value={additionalReportNotes}
+                      onChange={(event) => setAdditionalReportNotes(event.target.value)}
+                      maxLength={2000}
+                      rows={3}
+                      placeholder="Add useful context, patient count, hazards, or resources needed."
+                      style={{ width: '100%', resize: 'vertical', padding: '10px 12px', border: '1px solid #334155', borderRadius: '6px', background: '#070b14', color: '#e2e8f0', font: 'inherit' }}
+                    />
+                  </label>
+
+                  {selectedReportAction === 'other' && (
+                    <form
+                      onSubmit={(event) => { event.preventDefault(); submitStatusReport('other'); }}
+                      style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}
+                    >
+                      <label style={{ display: 'flex', flexDirection: 'column', gap: '7px', color: '#cbd5e1', fontSize: '12px', fontWeight: 600 }}>
+                        What is happening? <span style={{ color: '#f87171' }}>Required</span>
+                        <textarea
+                          value={otherReportMessage}
+                          onChange={(event) => setOtherReportMessage(event.target.value)}
+                          required
+                          maxLength={1000}
+                          rows={3}
+                          placeholder="Describe the situation for the dispatcher."
+                          style={{ width: '100%', resize: 'vertical', padding: '10px 12px', border: '1px solid #334155', borderRadius: '6px', background: '#070b14', color: '#e2e8f0', font: 'inherit' }}
+                        />
+                      </label>
+                      <button
+                        type="submit"
+                        disabled={isStatusReportSubmitting}
+                        style={{ alignSelf: 'flex-start', padding: '10px 16px', border: '1px solid #0e7490', borderRadius: '6px', background: '#082f49', color: '#cffafe', fontWeight: 700, cursor: 'pointer' }}
+                      >
+                        {isStatusReportSubmitting ? 'Sending report...' : 'Send other report'}
+                      </button>
+                    </form>
+                  )}
+
+                  {statusReportError && <p role="alert" style={{ margin: 0, color: '#fca5a5' }}>{statusReportError}</p>}
+                  {statusReportSuccess && <p role="status" style={{ margin: 0, color: '#86efac' }}>{statusReportSuccess}</p>}
+
+                  <div style={{ borderTop: '1px solid #1e293b', paddingTop: '16px' }}>
+                    <h4 style={{ margin: '0 0 10px', color: '#cbd5e1', fontSize: '13px' }}>Recent reports</h4>
+                    {statusReports.length === 0 ? (
+                      <p style={{ margin: 0, color: '#64748b', fontSize: '12px' }}>No status reports have been sent for this alert.</p>
+                    ) : (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                        {statusReports.map((report) => (
+                          <article key={report.id} style={{ padding: '11px 12px', border: '1px solid #1e293b', borderRadius: '6px', background: '#070b14' }}>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', gap: '10px', flexWrap: 'wrap' }}>
+                              <strong style={{ color: report.report_type === 'need_backup' ? '#fbbf24' : '#67e8f9', fontSize: '12px', textTransform: 'uppercase' }}>{report.report_type.replace('_', ' ')}</strong>
+                              <time style={{ color: '#64748b', fontSize: '11px' }}>{new Date(report.created_at).toLocaleString()}</time>
+                            </div>
+                            <p style={{ margin: '6px 0 0', color: '#cbd5e1', fontSize: '13px' }}>{report.message}</p>
+                            {report.additional_notes && <p style={{ margin: '5px 0 0', color: '#94a3b8', fontSize: '12px' }}>{report.additional_notes}</p>}
+                          </article>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </>
+              )}
+            </section>
+          ) : activeView === 'nav' ? (
             <div style={{ height: '70vh', minHeight: '320px', border: '1px solid #1e293b', borderRadius: '8px', overflow: 'hidden', position: 'relative' }}>
               <MapContainer
                 markers={[...alertMapMarkers, ...rescuerMapMarkers]}
@@ -745,17 +1107,7 @@ const RescuerDashboard = () => {
                 </div>
               )}
             </div>
-          ) : activeView !== 'alert' && (
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '70vh', border: '1px solid #1e293b', backgroundColor: '#0b1120', borderRadius: '8px', padding: '40px' }}>
-              <p style={{ color: '#64748b', fontSize: '16px', fontWeight: 500, margin: 0 }}>
-                Content for{' '}
-                <span style={{ color: '#f59e0b', fontWeight: 'bold', textTransform: 'uppercase' }}>
-                  {navItems.find((n) => n.id === activeView)?.label}
-                </span>{' '}
-                view placeholder.
-              </p>
-            </div>
-          )}
+          ) : null}
         </div>
       </main>
     </div>

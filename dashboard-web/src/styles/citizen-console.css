@@ -116,7 +116,7 @@
 .citizen-map-layout { position: fixed; inset: 0; width: 100vw; height: 100vh; overflow: hidden !important; }
 .citizen-map-canvas .maplibregl-canvas { filter: contrast(102%) brightness(105%) saturate(115%) sepia(8%) hue-rotate(-8deg); }
 [data-theme='dark'] .citizen-map-canvas .maplibregl-canvas { filter: invert(92%) sepia(25%) saturate(220%) hue-rotate(185deg) brightness(88%) contrast(90%); }
-.shelter-detail-card { display: flex; flex-direction: column; color: #e8eaed; background-color: #121316; font-family: 'Google Sans', Roboto, -apple-system, BlinkMacSystemFont, sans-serif; padding: 12px; gap: 12px; }
+.shelter-detail-card { display: flex; flex-direction: column; color: #e8eaed; background-color: #121316; font-family: var(--ops-font); padding: 12px; gap: 12px; }
 [data-theme='light'] .shelter-detail-card { background-color: #ffffff; color: #202124; }
 .shelter-hero-banner { background: #1a73e8; border-radius: 12px; padding: 12px; display: flex; flex-direction: column; gap: 12px; }
 .shelter-gallery-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
