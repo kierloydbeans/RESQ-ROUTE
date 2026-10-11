@@ -5,6 +5,7 @@ import MapContainer from '../components/MapContainer';
 import { useWebSocket } from '../hooks/useWebSocket';
 import useVoiceCommunication from '../hooks/useVoiceCommunication.jsx';
 import { API_URL, WS_URL } from '../dataProvider';
+import '../styles/rescuer-console.css';
 import {
   AlertTriangle,Map,ClipboardList,Bluetooth,UploadCloud,Menu,ChevronDown,User,MapPin,Users,Waves,Navigation,ExternalLink,Check,RotateCcw,MessageSquare,LogOut,} from 'lucide-react';
 
@@ -507,10 +508,11 @@ const RescuerDashboard = () => {
   ];
 
   return (
-    <div style={{ backgroundColor: '#070b14', color: '#cbd5e1', height: '100vh', width: '100%', display: 'flex', overflow: 'hidden', fontFamily: 'var(--ops-font)', fontSize: '14px' }}>
+    <div className="rescuer-app-shell" style={{ backgroundColor: '#070b14', color: '#cbd5e1', height: '100vh', width: '100%', display: 'flex', overflow: 'hidden', fontFamily: 'var(--ops-font)', fontSize: '14px' }}>
 
       {/* SIDEBAR NAVIGATION */}
       <aside
+        className="rescuer-sidebar"
         style={{
           backgroundColor: '#070b14',
           borderRight: '1px solid #1e293b',
@@ -522,7 +524,7 @@ const RescuerDashboard = () => {
           width: isSidebarOpen ? '240px' : '64px'
         }}
       >
-        <div style={{ height: '64px', padding: '0 16px', borderBottom: '1px solid #1e293b', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+        <div className="rescuer-sidebar-brand" style={{ height: '64px', padding: '0 16px', borderBottom: '1px solid #1e293b', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '10px', overflow: 'hidden', opacity: isSidebarOpen ? 1 : 0, width: isSidebarOpen ? 'auto' : 0, transition: 'opacity 300ms' }}>
             <Logo size="small" />
             <div style={{ whiteSpace: 'nowrap', lineHeight: 1.2 }}>
@@ -539,13 +541,14 @@ const RescuerDashboard = () => {
           </button>
         </div>
 
-        <nav style={{ flex: 1, padding: '16px 12px', display: 'flex', flexDirection: 'column', gap: '6px', overflowY: 'auto', overflowX: 'hidden' }}>
+        <nav className="rescuer-sidebar-nav" style={{ flex: 1, padding: '16px 12px', display: 'flex', flexDirection: 'column', gap: '6px', overflowY: 'auto', overflowX: 'hidden' }}>
           {navItems.map((item) => {
             const Icon = item.icon;
             const isActive = activeView === item.id;
             return (
               <button
                 key={item.id}
+                aria-label={item.label}
                 onClick={() => setActiveView(item.id)}
                 title={!isSidebarOpen ? item.label : ''}
                 style={{
@@ -574,7 +577,7 @@ const RescuerDashboard = () => {
 
         {/* ACTIVE UNIT FOOTER */}
         {isSidebarOpen && (
-          <div style={{ padding: '16px', borderTop: '1px solid #1e293b', backgroundColor: 'rgba(15, 23, 42, 0.4)' }}>
+          <div className="rescuer-sidebar-footer" style={{ padding: '16px', borderTop: '1px solid #1e293b', backgroundColor: 'rgba(15, 23, 42, 0.4)' }}>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
                 <User style={{ width: '16px', height: '16px', color: '#22d3ee' }} />
@@ -590,43 +593,6 @@ const RescuerDashboard = () => {
             </div>
             <div style={{ marginTop: '12px', display: 'flex', flexDirection: 'column', gap: '4px', fontSize: '11px', fontWeight: 500, color: '#64748b' }}>
               <p style={{ margin: 0 }}>{currentUser?.username ? `@${currentUser.username}` : 'Rescuer account'}</p>
-              {incomingCall && callStatusState === 'idle' && (
-                <div style={{
-                  background: 'rgba(239, 68, 68, 0.2)',
-                  border: '1px solid rgba(239, 68, 68, 0.5)',
-                  borderRadius: '8px',
-                  padding: '10px',
-                  color: '#fecaca',
-                  fontSize: '12px',
-                  fontWeight: '500',
-                }}>
-                  <div style={{ fontWeight: '700', marginBottom: '4px', color: '#fca5a5' }}>Incoming call from {incomingCall.dispatcher_name}</div>
-                  <div style={{ display: 'flex', gap: '6px' }}>
-                    <button
-                      onClick={() => {
-                        acceptCall(incomingCall).catch((error) => {
-                          console.error('Unable to accept incoming call.', error)
-                        })
-                      }}
-                      style={{
-                        background: '#22c55e', color: '#fff', border: 'none', borderRadius: '4px',
-                        padding: '3px 8px', fontWeight: '600', cursor: 'pointer', fontSize: '11px',
-                      }}
-                    >
-                      Accept
-                    </button>
-                    <button
-                      onClick={() => declineCall(incomingCall)}
-                      style={{
-                        background: '#475569', color: '#cbd5e1', border: 'none', borderRadius: '4px',
-                        padding: '3px 8px', fontWeight: '600', cursor: 'pointer', fontSize: '11px',
-                      }}
-                    >
-                      Decline
-                    </button>
-                  </div>
-                </div>
-              )}
               {callStatusState === 'connecting' && (
                 <p style={{ color: '#f59e0b', margin: 0 }}>Ringing…</p>
               )}
@@ -642,11 +608,36 @@ const RescuerDashboard = () => {
         )}
       </aside>
 
+      {incomingCall && callStatusState === 'idle' && (
+        <section className="rescuer-incoming-call" role="alert" aria-live="assertive" aria-label="Incoming dispatcher call">
+          <div className="rescuer-incoming-call-copy">
+            <strong>Incoming call</strong>
+            <span>{incomingCall.dispatcher_name}</span>
+          </div>
+          <div className="rescuer-incoming-call-actions">
+            <button
+              type="button"
+              onClick={() => {
+                acceptCall(incomingCall).catch((error) => {
+                  console.error('Unable to accept incoming call.', error)
+                })
+              }}
+            >
+              Accept
+            </button>
+            <button type="button" onClick={() => declineCall(incomingCall)}>
+              Decline
+            </button>
+          </div>
+        </section>
+      )}
+
       {/* MAIN CONTENT AREA */}
-      <main style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', position: 'relative', overflow: 'hidden', backgroundColor: '#070b14' }}>
+      <main className="rescuer-main" style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', position: 'relative', overflow: 'hidden', backgroundColor: '#070b14' }}>
 
         {/* Top Header */}
-        <header style={{ height: '64px', borderBottom: '1px solid #1e293b', display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 24px', zIndex: 10, flexShrink: 0 }}>
+        <header className="rescuer-main-header" style={{ height: '64px', borderBottom: '1px solid #1e293b', display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 24px', zIndex: 10, flexShrink: 0 }}>
+          <span className="rescuer-mobile-logo"><Logo size="small" /></span>
           <h2 style={{ fontSize: '18px', fontWeight: 'bold', color: '#f1f5f9', textTransform: 'uppercase', letterSpacing: '0.1em', margin: 0 }}>Assignment Alert</h2>
           <div style={{ display: 'flex', alignItems: 'center', gap: '20px', fontSize: '12px', fontWeight: 600 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
@@ -684,7 +675,7 @@ const RescuerDashboard = () => {
         <audio ref={audioRef} style={{ display: 'none' }} aria-label="Dispatcher call audio" />
 
         {/* Scrollable Viewport */}
-        <div style={{ flex: 1, minWidth: 0, overflowY: 'auto', padding: '20px' }}>
+        <div className="rescuer-viewport" style={{ flex: 1, minWidth: 0, overflowY: 'auto', padding: '20px' }}>
           {(rescuerStatusInfo?.pending_alert || rescuerStatusInfo?.status === 'recovering') && (
             <section role="status" aria-live="polite" style={{ maxWidth: '860px', margin: '0 auto 16px', padding: '16px', border: '1px solid #f59e0b', borderRadius: '8px', background: 'rgba(245, 158, 11, 0.1)', color: '#fef3c7' }}>
               <strong>
@@ -731,7 +722,7 @@ const RescuerDashboard = () => {
                 No emergency alerts are assigned to your account.
               </div>
             ) : (
-            <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: '16px', alignItems: 'start', width: '100%' }}>
+            <div className="rescuer-assignment-layout" style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: '16px', alignItems: 'start', width: '100%' }}>
 
               {/* LEFT COLUMN */}
               <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', minWidth: 0 }}>
@@ -778,10 +769,10 @@ const RescuerDashboard = () => {
                 )}
 
                 {/* MAIN INCIDENT CARD */}
-                <div style={{ backgroundColor: '#0b1120', borderRadius: '8px', padding: '16px', border: '1px solid #1e293b', display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                <div className="rescuer-incident-card" style={{ backgroundColor: '#0b1120', borderRadius: '8px', padding: '16px', border: '1px solid #1e293b', display: 'flex', flexDirection: 'column', gap: '16px' }}>
 
                   {/* Incident Header */}
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingBottom: '12px', borderBottom: '1px solid #1e293b' }}>
+                  <div className="rescuer-alert-heading" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingBottom: '12px', borderBottom: '1px solid #1e293b' }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: '#22d3ee' }}>
                       <ClipboardList style={{ width: '20px', height: '20px' }} />
                       <span style={{ fontSize: '18px', fontWeight: '900', letterSpacing: '0.05em' }}>Alert #{activeAlert.id}</span>
@@ -792,7 +783,7 @@ const RescuerDashboard = () => {
                   </div>
 
                   {/* Location & Victim Count */}
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
+                  <div className="rescuer-alert-location-grid" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
                     <div>
                       <h4 style={{ fontSize: '11px', fontWeight: 'bold', color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '6px', margin: '0 0 6px 0' }}>Coordinates</h4>
                       <p style={{ fontSize: '14px', fontWeight: 600, color: '#ffffff', margin: 0 }}>{activeAlert.latitude}, {activeAlert.longitude}</p>
@@ -804,7 +795,7 @@ const RescuerDashboard = () => {
                   </div>
 
                   {/* Info Grid */}
-                  <div style={{ border: '1px solid #1e293b', borderRadius: '8px', padding: '14px', backgroundColor: '#070b14', display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: '16px', alignItems: 'center', fontSize: '12px' }}>
+                  <div className="rescuer-alert-info-grid" style={{ border: '1px solid #1e293b', borderRadius: '8px', padding: '14px', backgroundColor: '#070b14', display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: '16px', alignItems: 'center', fontSize: '12px' }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
                       <Waves style={{ width: '20px', height: '20px', color: '#f59e0b', flexShrink: 0 }} />
                       <div>
@@ -827,7 +818,7 @@ const RescuerDashboard = () => {
                       </div>
                     </div>
                     <div style={{ gridColumn: 'span 3', display: 'flex', justifyContent: 'flex-end', marginTop: '-4px' }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <div className="rescuer-route-actions" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                         <button
                           type="button"
                           onClick={handleRouteToAlert}
@@ -866,7 +857,7 @@ const RescuerDashboard = () => {
 
                   {/* Trend Chart */}
                   <div style={{ paddingTop: '16px', borderTop: '1px solid #1e293b' }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+                    <div className="rescuer-trend-heading" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
                       <h4 style={{ fontSize: '11px', fontWeight: 'bold', color: '#f1f5f9', textTransform: 'uppercase', letterSpacing: '0.05em', margin: 0 }}>
                         Live Elevation &amp; Water Level Trend
                       </h4>
@@ -898,7 +889,7 @@ const RescuerDashboard = () => {
                   </div>
 
                   {/* Action Buttons */}
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', paddingTop: '4px' }}>
+                  <div className="rescuer-assignment-actions" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', paddingTop: '4px' }}>
                     <button
                       onClick={() => setIsAcknowledged(true)}
                       disabled={isAcknowledged || acknowledgementSecondsLeft === 0}
