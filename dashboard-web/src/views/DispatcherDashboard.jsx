@@ -1,5 +1,6 @@
 import React, { useEffect, useState, useRef } from 'react'
 import { useWebSocket } from '../hooks/useWebSocket'
+import { useVoiceConference } from '../hooks/useVoiceConference'
 import MapContainer from '../components/MapContainer'
 import Logo from '../components/Logo'
 import { useTheme } from '../ThemeContext'
@@ -7,8 +8,9 @@ import HazardTicker from '../components/HazardTicker'
 import AssignmentModal from '../components/AssignmentModal'
 import DeployedVehicles from '../components/DeployedVehicles'
 import '../styles/ops-console.css'
-import { ChevronLeft, ChevronRight } from 'lucide-react'
+import { ChevronLeft, ChevronRight, SlidersHorizontal, X } from 'lucide-react'
 
+const WS_URL = import.meta.env.VITE_WS_URL || 'ws://localhost:8000/ws';
 const getStoredAuth = () => {
   try {
     return JSON.parse(localStorage.getItem('auth'))
@@ -166,7 +168,6 @@ const SosFeedItem = ({ alert, now, onAssign, onView, isClosed = false }) => {
 export const Dashboard = () => {
   const auth = getStoredAuth()
   const role = normalizeRole(auth?.user?.role) || 'citizen'
-  const rescuerId = auth?.user?.id
   const [latestGps, setLatestGps] = useState(null)
   const [liveRescuerLocations, setLiveRescuerLocations] = useState({})
   const [alertMessage, setAlertMessage] = useState('')
@@ -189,6 +190,12 @@ export const Dashboard = () => {
   const [selectedIncident, setSelectedIncident] = useState('')
   const [selectedSeverity, setSelectedSeverity] = useState('high')
   const [activeModal, setActiveModal] = useState(null)
+  // ── Voice call state ──────────────────────────────────────────────────
+  const { callId, callError, isSocketReady: isVoiceReady, participants: callParticipants, remoteStreams, startCall, endCall } =
+    useVoiceConference({
+      wsUrl: WS_URL,
+      authToken: auth?.token || auth?.access_token,
+    })
   const [rescueUnits, setRescueUnits] = useState({ rescuers: [], vehicles: [] })
   const [unitSort, setUnitSort] = useState('status')
   const [modalLoading, setModalLoading] = useState(false)
@@ -208,6 +215,33 @@ export const Dashboard = () => {
   const [reportStartDate, setReportStartDate] = useState(() => shiftDateKey(manilaDateKey(new Date()), -29))
   const [isExportingReport, setIsExportingReport] = useState(false)
   const [reportExportError, setReportExportError] = useState('')
+  const [isPanelDrawerOpen, setIsPanelDrawerOpen] = useState(false)
+  const [visiblePanels, setVisiblePanels] = useState({
+    operationsReport: true,
+    operationalMetrics: true,
+    sosFeed: true,
+    tacticalMap: true,
+    averageResponse: true,
+    vehicles: true,
+    rescuers: true,
+  })
+  const togglePanel = (panel) => {
+    setVisiblePanels((current) => ({ ...current, [panel]: !current[panel] }))
+  }
+  const allPanelsVisible = Object.values(visiblePanels).every(Boolean)
+  const toggleAllPanels = () => {
+    setVisiblePanels((current) => Object.fromEntries(
+      Object.keys(current).map((panel) => [panel, !Object.values(current).every(Boolean)])
+    ))
+  }
+  const hasLeftRail = visiblePanels.operationalMetrics || visiblePanels.sosFeed
+  const hasRightRail = visiblePanels.averageResponse || visiblePanels.vehicles || visiblePanels.rescuers
+  const gridColumns = [
+    ...(hasLeftRail ? ['200px'] : []),
+    ...(visiblePanels.tacticalMap ? ['minmax(0, 1fr)'] : []),
+    ...(hasRightRail ? ['213px'] : []),
+  ]
+  if (!visiblePanels.tacticalMap && gridColumns.length > 0) gridColumns.fill('minmax(0, 1fr)')
 
   const closedAlerts = alertRecords.filter(isClosedAlert)
   const closedAlertResponseTimes = closedAlerts
@@ -1371,11 +1405,67 @@ export const Dashboard = () => {
         <div className="header-actions">
           <span className={`connection ${isConnected ? 'online' : 'offline'}`}><i /> WebSocket: {isConnected ? 'Connected' : 'Reconnecting'}</span>
           <span className="header-time">{formattedCurrentTime} PHT</span>
+          <button
+            type="button"
+            className="panel-drawer-toggle"
+            aria-label={isPanelDrawerOpen ? 'Close dashboard panel settings' : 'Open dashboard panel settings'}
+            aria-expanded={isPanelDrawerOpen}
+            aria-controls="dashboard-panel-drawer"
+            onClick={() => setIsPanelDrawerOpen((open) => !open)}
+          >
+            <SlidersHorizontal size={15} />
+            <span>Panels</span>
+          </button>
           {accountMenu}
         </div>
       </header>
 
-      <HazardTicker hazards={roadHazards} />
+      {visiblePanels.operationsReport && <HazardTicker hazards={roadHazards} />}
+
+      {isPanelDrawerOpen && (
+        <>
+          <button
+            type="button"
+            className="panel-drawer-backdrop"
+            aria-label="Close dashboard panel settings"
+            onClick={() => setIsPanelDrawerOpen(false)}
+          />
+          <aside id="dashboard-panel-drawer" className="panel-drawer" aria-label="Dashboard panel visibility">
+            <div className="panel-drawer-heading">
+              <div>
+                <strong>Dashboard panels</strong>
+                <span>Choose which cards are visible</span>
+              </div>
+              <button type="button" className="panel-drawer-close" onClick={() => setIsPanelDrawerOpen(false)} aria-label="Close panel settings">
+                <X size={16} />
+              </button>
+            </div>
+            <button type="button" className="panel-drawer-show-all" onClick={toggleAllPanels}>
+              {allPanelsVisible ? 'Hide all panels' : 'Show all panels'}
+            </button>
+            <div className="panel-drawer-options">
+              {[
+                ['operationsReport', 'Operations report and hazard ticker'],
+                ['operationalMetrics', 'Operational metrics'],
+                ['sosFeed', 'Live SOS feed'],
+                ['tacticalMap', 'Tactical map'],
+                ['averageResponse', 'Average response'],
+                ['vehicles', 'Vehicles'],
+                ['rescuers', 'Rescuer profiles'],
+              ].map(([panel, label]) => (
+                <label key={panel} className="panel-drawer-option">
+                  <input
+                    type="checkbox"
+                    checked={visiblePanels[panel]}
+                    onChange={() => togglePanel(panel)}
+                  />
+                  <span>{label}</span>
+                </label>
+              ))}
+            </div>
+          </aside>
+        </>
+      )}
 
       {latestStatusReport && (
         <section
@@ -1404,7 +1494,7 @@ export const Dashboard = () => {
         </section>
       )}
 
-      <section className="report-toolbar" aria-labelledby="report-toolbar-title">
+      {visiblePanels.operationsReport && <section className="report-toolbar" aria-labelledby="report-toolbar-title">
         <div className="report-toolbar-heading">
           <strong id="report-toolbar-title">OPERATIONS REPORT</strong>
           <span>
@@ -1443,13 +1533,16 @@ export const Dashboard = () => {
           <span className="report-range-error" role="alert">The start date must be on or before the end date.</span>
         )}
         {reportExportError && <span className="report-range-error" role="alert">{reportExportError}</span>}
-      </section>
+      </section>}
 
-      <section className="ops-grid">
+      <section
+        className={`ops-grid${gridColumns.length === 0 ? ' is-empty' : ''}`}
+        style={gridColumns.length > 0 ? { gridTemplateColumns: gridColumns.join(' ') } : undefined}
+      >
         {/* LEFT COLUMN: Operational Metrics (Top) + Live SOS Feed (Bottom) */}
-        <aside className="left-rail">
+        {hasLeftRail && <aside className="left-rail">
           {/* TOP: Operational Metrics */}
-          <section className="operational-panel">
+          {visiblePanels.operationalMetrics && <section className="operational-panel">
             <PanelTitle title="OPERATIONAL METRICS" />
             <div className="operational-metrics-body">
               <Metric label="ACTIVE SOS" value={alertCount} color="red" />
@@ -1464,10 +1557,10 @@ export const Dashboard = () => {
                 color="green"
               />
             </div>
-          </section>
+          </section>}
 
           {/* BOTTOM: Live SOS Feed */}
-          <section className="feed-panel">
+          {visiblePanels.sosFeed && <section className="feed-panel">
             <PanelTitle title="LIVE SOS FEED" badge="LIVE" onClick={() => openModal('alerts')} />
             <div className="feed-list">
               <div className="feed-view-switch" role="group" aria-label="Choose SOS alert view">
@@ -1624,11 +1717,11 @@ export const Dashboard = () => {
                 </div>
               )}
             </div>
-          </section>
-        </aside>
+          </section>}
+        </aside>}
 
         {/* CENTER COLUMN: MAP ONLY */}
-        <main className="center-column map-only-column">
+        {visiblePanels.tacticalMap && <main className="center-column map-only-column">
           <section className="map-panel">
             <PanelTitle title="CDRRMO TACTICAL MAP AREA" badge="TRACKING MAP" />
             <div className="map-stage" style={{ height: `${mapHeight}px` }}>
@@ -1660,12 +1753,12 @@ export const Dashboard = () => {
               <button className="map-resize-handle" onPointerDown={startMapResize} aria-label="Drag to resize map" title="Drag to resize map">↕</button>
             </div>
           </section>
-        </main>
+        </main>}
 
         {/* RIGHT RAIL: Average Response -> Vehicles -> Rescuer Profiles */}
-        <aside className="right-rail">
+        {hasRightRail && <aside className="right-rail">
           {/* 1. TOP: Average Response */}
-          <section className="metric-card response-card">
+          {visiblePanels.averageResponse && <section className="metric-card response-card">
             <small>AVERAGE RESPONSE</small>
             <strong>{averageResponseMinutes === null ? '—' : `${averageResponseMinutes.toFixed(1)} min`}</strong>
             <span>
@@ -1673,10 +1766,10 @@ export const Dashboard = () => {
                 ? 'No closed alerts to calculate'
                 : `Mean from ${closedAlertResponseTimes.length} closed alert${closedAlertResponseTimes.length === 1 ? '' : 's'}`}
             </span>
-          </section>
+          </section>}
 
           {/* 2. MIDDLE: Vehicles */}
-          <section className="rail-box vehicle-box">
+          {visiblePanels.vehicles && <section className="rail-box vehicle-box">
             <div className="unit-panel-heading">
               <PanelTitle
                 title="VEHICLES"
@@ -1707,16 +1800,24 @@ export const Dashboard = () => {
                 ))
               )}
             </div>
-          </section>
+          </section>}
 
           {/* 3. BOTTOM: Rescuer Profiles */}
-          <section className="rail-box rescuer-box">
+          {visiblePanels.rescuers && <section className="rail-box rescuer-box">
             <div className="unit-panel-heading">
               <PanelTitle
                 title="RESCUER PROFILES"
                 badge={`${rescueUnits.rescuers.length} ACTIVE`}
                 onClick={() => openModal('units')}
               />
+              <button
+                className="call-rescuer-button"
+                type="button"
+                disabled={!isVoiceReady || Boolean(callId) || !sortedRescuers.some((rescuer) => rescuer.user_id != null)}
+                onClick={() => startCall(sortedRescuers.map((rescuer) => rescuer.user_id).filter((userId) => userId != null))}
+              >
+                CALL ALL
+              </button>
               <select
                 value={unitSort}
                 onChange={(event) => setUnitSort(event.target.value)}
@@ -1732,18 +1833,106 @@ export const Dashboard = () => {
                 <p className="unit-empty">No rescuer profiles</p>
               ) : (
                 sortedRescuers.map((rescuer) => (
-                  <Unit
-                    key={`rescuer-${rescuer.id}`}
-                    name={rescuer.full_name || rescuer.username}
-                    detail={`${rescuer.station_name || 'No station'} · @${rescuer.username}`}
-                    status={rescuer.status}
-                  />
+                  <div key={`rescuer-${rescuer.id}`} className="rescuer-call-row">
+                    <Unit
+                      name={rescuer.full_name || rescuer.username}
+                      detail={`${rescuer.station_name || 'No station'} · @${rescuer.username}`}
+                      status={rescuer.status}
+                    />
+                    <button
+                      className="call-rescuer-button"
+                      type="button"
+                      disabled={!isVoiceReady || rescuer.user_id == null || Boolean(callId)}
+                      onClick={() => startCall([rescuer.user_id])}
+                      aria-label={`Call ${rescuer.full_name || rescuer.username}`}
+                    >
+                      CALL
+                    </button>
+                  </div>
                 ))
               )}
             </div>
-          </section>
-        </aside>
+          </section>}
+        </aside>}
       </section>
+
+      {/* Voice call footer */}
+      {callError && !callId && (
+        <div role="alert" className="voice-call-error">{callError}</div>
+      )}
+      {callId && (
+        <div
+          style={{
+            position: 'fixed',
+            bottom: 24,
+            right: 24,
+            zIndex: 99999,
+            background: '#0b1120',
+            border: '1px solid #1e293b',
+            borderRadius: '12px',
+            padding: '16px 20px',
+            width: '360px',
+            maxWidth: 'calc(100vw - 48px)',
+            boxShadow: '0 10px 40px rgba(0,0,0,0.4)',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '12px',
+            alignItems: 'stretch',
+          }}
+        >
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <span style={{ color: '#f1f5f9', fontWeight: '600', fontSize: '14px' }}>
+              Conference call
+            </span>
+            <button
+              onClick={endCall}
+              style={{
+                background: 'none', border: 'none', color: '#94a3b8', cursor: 'pointer',
+                fontSize: '18px', padding: '4px', lineHeight: 1,
+              }}
+            >
+              &times;
+            </button>
+          </div>
+
+          {Object.entries(remoteStreams).map(([userId, stream]) => (
+            <audio
+              key={userId}
+              autoPlay
+              ref={(audio) => {
+                if (audio && audio.srcObject !== stream) audio.srcObject = stream
+              }}
+              aria-label={`Audio from rescuer ${userId}`}
+            />
+          ))}
+          <div style={{ color: '#cbd5e1', fontSize: '13px' }}>
+            {callParticipants.map((participant) => (
+              <p key={participant.user_id} style={{ margin: '4px 0' }}>
+                {participant.display_name} · {participant.status}
+              </p>
+            ))}
+            {!callParticipants.some((participant) => participant.status === 'connected')
+              && <p style={{ color: '#f59e0b', textAlign: 'center' }}>Waiting for rescuers to accept…</p>}
+          </div>
+          {callError && (
+            <p style={{ color: '#ef4444', textAlign: 'center', fontSize: '12px' }}>{callError}</p>
+          )}
+
+          <div style={{ display: 'flex', gap: '8px', marginTop: '8px' }}>
+            {callParticipants.length > 0 && (
+              <button
+                onClick={endCall}
+                style={{
+                  flex: 1, padding: '8px', borderRadius: '8px', fontWeight: '600', cursor: 'pointer',
+                  background: '#ef4444', color: '#fff', border: 'none', fontSize: '13px',
+                }}
+              >
+                End Call
+              </button>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* MODAL */}
       {activeModal && (

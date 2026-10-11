@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import Logo from '../components/Logo';
 import MapContainer from '../components/MapContainer';
 import { useWebSocket } from '../hooks/useWebSocket';
+import useVoiceCommunication from '../hooks/useVoiceCommunication.jsx';
 import { API_URL, WS_URL } from '../dataProvider';
 import {
   AlertTriangle,Map,ClipboardList,Bluetooth,UploadCloud,Menu,ChevronDown,User,MapPin,Users,Waves,Navigation,ExternalLink,Check,RotateCcw,MessageSquare,LogOut,} from 'lucide-react';
@@ -13,6 +14,7 @@ const disasterLabels = { flood: 'Flood', earthquake: 'Earthquake', fire: 'Fire',
 
 const RescuerDashboard = () => {
   const auth = JSON.parse(localStorage.getItem('auth') || '{}');
+  const authToken = auth?.token || auth?.access_token;
   const [activeView, setActiveView] = useState('alert');
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [isProfileMenuOpen, setIsProfileMenuOpen] = useState(false);
@@ -38,10 +40,16 @@ const RescuerDashboard = () => {
   const [statusReportSuccess, setStatusReportSuccess] = useState('');
   const [rescuerStatusInfo, setRescuerStatusInfo] = useState(null);
   const [isUpdatingRescuerStatus, setIsUpdatingRescuerStatus] = useState(false);
+  // ── Voice call state (rescuer receives incoming calls) ────────────────
+  // Hook for inbound call (rescuer accepts)
+  const { status: callStatusState, incomingCall, audioRef, acceptCall, endCall, declineCall } =
+    useVoiceCommunication({
+      wsUrl: WS_URL,
+      authToken,
+    })
   const [rescuerStatusError, setRescuerStatusError] = useState('');
   const navigate = useNavigate();
   const { isConnected, lastMessage } = useWebSocket(WS_URL);
-  const authToken = auth?.token || auth?.access_token;
   const displayName = currentUser?.full_name || currentUser?.username || 'Rescuer';
   const recoveryDeadline = Date.parse(rescuerStatusInfo?.recovering_until || '');
   const recoveryRemainingMs = Number.isFinite(recoveryDeadline)
@@ -582,9 +590,55 @@ const RescuerDashboard = () => {
             </div>
             <div style={{ marginTop: '12px', display: 'flex', flexDirection: 'column', gap: '4px', fontSize: '11px', fontWeight: 500, color: '#64748b' }}>
               <p style={{ margin: 0 }}>{currentUser?.username ? `@${currentUser.username}` : 'Rescuer account'}</p>
+              {incomingCall && callStatusState === 'idle' && (
+                <div style={{
+                  background: 'rgba(239, 68, 68, 0.2)',
+                  border: '1px solid rgba(239, 68, 68, 0.5)',
+                  borderRadius: '8px',
+                  padding: '10px',
+                  color: '#fecaca',
+                  fontSize: '12px',
+                  fontWeight: '500',
+                }}>
+                  <div style={{ fontWeight: '700', marginBottom: '4px', color: '#fca5a5' }}>Incoming call from {incomingCall.dispatcher_name}</div>
+                  <div style={{ display: 'flex', gap: '6px' }}>
+                    <button
+                      onClick={() => {
+                        acceptCall(incomingCall).catch((error) => {
+                          console.error('Unable to accept incoming call.', error)
+                        })
+                      }}
+                      style={{
+                        background: '#22c55e', color: '#fff', border: 'none', borderRadius: '4px',
+                        padding: '3px 8px', fontWeight: '600', cursor: 'pointer', fontSize: '11px',
+                      }}
+                    >
+                      Accept
+                    </button>
+                    <button
+                      onClick={() => declineCall(incomingCall)}
+                      style={{
+                        background: '#475569', color: '#cbd5e1', border: 'none', borderRadius: '4px',
+                        padding: '3px 8px', fontWeight: '600', cursor: 'pointer', fontSize: '11px',
+                      }}
+                    >
+                      Decline
+                    </button>
+                  </div>
+                </div>
+              )}
+              {callStatusState === 'connecting' && (
+                <p style={{ color: '#f59e0b', margin: 0 }}>Ringing…</p>
+              )}
+              {callStatusState === 'connected' && (
+                <p style={{ color: '#64f573', margin: 0 }}>● Connected to dispatcher</p>
+              )}
+              {callStatusState === 'idle' && (
+                <p style={{ color: '#94a3b8', margin: 0 }}>Waiting for incoming call…</p>
+              )}
+            </div>
               <p style={{ fontFamily: 'var(--ops-font)', color: '#475569', margin: 0 }}>{formattedCurrentTime}</p>
             </div>
-          </div>
         )}
       </aside>
 
@@ -627,6 +681,7 @@ const RescuerDashboard = () => {
             </div>
           </div>
         </header>
+        <audio ref={audioRef} style={{ display: 'none' }} aria-label="Dispatcher call audio" />
 
         {/* Scrollable Viewport */}
         <div style={{ flex: 1, minWidth: 0, overflowY: 'auto', padding: '20px' }}>
@@ -1055,7 +1110,47 @@ const RescuerDashboard = () => {
                   {statusReportError && <p role="alert" style={{ margin: 0, color: '#fca5a5' }}>{statusReportError}</p>}
                   {statusReportSuccess && <p role="status" style={{ margin: 0, color: '#86efac' }}>{statusReportSuccess}</p>}
 
-                  <div style={{ borderTop: '1px solid #1e293b', paddingTop: '16px' }}>
+          {/* Voice call audio + controls */}
+          {callStatusState !== 'idle' && (
+            <div
+              style={{
+                backgroundColor: '#0b1120',
+                border: '1px solid #1e293b',
+                borderRadius: '8px',
+                padding: '12px 16px',
+                marginTop: '12px',
+              }}
+            >
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                <span style={{ color: '#e2e8f0', fontWeight: '600', fontSize: '13px' }}>
+                  Voice Call
+                  {callStatusState === 'connected' && (
+                    <span style={{ color: '#64f573', marginLeft: '8px' }}>● Connected</span>
+                  )}
+                </span>
+                <div style={{ display: 'flex', gap: '8px' }}>
+                  {callStatusState !== 'idle' && (
+                    <button
+                      onClick={endCall}
+                      style={{
+                        background: '#ef4444', color: '#fff', border: 'none', borderRadius: '6px',
+                        padding: '4px 10px', fontWeight: '600', cursor: 'pointer', fontSize: '12px',
+                      }}
+                    >
+                      End Call
+                    </button>
+                  )}
+                </div>
+              </div>
+              {callStatusState === 'connecting' && (
+                <p style={{ color: '#64748b', fontSize: '12px', textAlign: 'center' }}>
+                  Joining dispatcher call…
+                </p>
+              )}
+            </div>
+          )}
+
+          <div style={{ borderTop: '1px solid #1e293b', paddingTop: '16px' }}>
                     <h4 style={{ margin: '0 0 10px', color: '#cbd5e1', fontSize: '13px' }}>Recent reports</h4>
                     {statusReports.length === 0 ? (
                       <p style={{ margin: 0, color: '#64748b', fontSize: '12px' }}>No status reports have been sent for this alert.</p>

@@ -151,9 +151,9 @@ const Login = () => {
 
   if (isPageLoading) {
     return (
-      <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', backgroundColor: '#f3f4f6', padding: '1.5rem' }}>
+      <div className="login-page" style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', backgroundColor: '#f3f4f6', padding: '1.5rem' }}>
         <style>{skeletonPulseStyle}</style>
-        <div style={{
+        <div className="login-card" style={{
           maxWidth: '960px',
           width: '100%',
           minHeight: '560px',
@@ -182,10 +182,10 @@ const Login = () => {
   }
 
   return (
-    <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', backgroundColor: '#f3f4f6', padding: '1.5rem' }}>
+    <div className="login-page" style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', backgroundColor: '#f3f4f6', padding: '1.5rem' }}>
       <style>{pinPulseStyle}</style>
 
-      <div style={{
+      <div className="login-card" style={{
         maxWidth: '960px',
         width: '100%',
         minHeight: '560px',
@@ -195,7 +195,7 @@ const Login = () => {
         boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04)',
         backgroundColor: '#ffffff'
       }}>
-        <div style={{
+        <div className="login-hero-pane" style={{
           flex: '1',
           background: `linear-gradient(135deg, rgba(197, 34, 34, 0.85) 0%, rgba(163, 107, 22, 0.85) 100%), url('https://preview.redd.it/was-there-any-urban-masterplan-for-caloocan-city-v0-rcfgre5qrpjc1.jpg?width=640&crop=smart&auto=webp&s=00978c251414bcb6fb0459978ca5eedcd113d39a')`,
           backgroundSize: 'cover',
