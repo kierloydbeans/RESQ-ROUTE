@@ -123,6 +123,33 @@ RESCUER_RECOVERY_DURATION = timedelta(minutes=30)
 RESCUER_PRESENCE_TIMEOUT = timedelta(minutes=2)
 
 
+async def _release_alert_vehicles(session: AsyncSession, alert: EmergencyAlert) -> None:
+    try:
+        vehicle_ids = json.loads(alert.assigned_vehicle_ids or "[]")
+    except (TypeError, ValueError, json.JSONDecodeError):
+        logger.warning("Unable to release vehicles for alert %s: invalid assigned vehicle IDs", alert.id)
+        return
+
+    if not isinstance(vehicle_ids, list):
+        logger.warning("Unable to release vehicles for alert %s: assigned vehicle IDs are not a list", alert.id)
+        return
+
+    try:
+        vehicle_ids = [int(vehicle_id) for vehicle_id in vehicle_ids]
+    except (TypeError, ValueError):
+        logger.warning("Unable to release vehicles for alert %s: assigned vehicle IDs contain invalid values", alert.id)
+        return
+
+    if not vehicle_ids:
+        return
+
+    vehicle_result = await session.execute(select(Vehicle).where(Vehicle.id.in_(vehicle_ids)))
+    for vehicle in vehicle_result.scalars().all():
+        if vehicle.status in {"assigned", "in_transit"}:
+            vehicle.status = "available"
+            vehicle.rescuer_onboard = None
+
+
 async def _get_or_create_rescuer_profile(session: AsyncSession, user: User) -> RescuerProfile:
     result = await session.execute(select(RescuerProfile).where(RescuerProfile.user_id == user.id))
     profile = result.scalar_one_or_none()
@@ -810,6 +837,7 @@ async def update_alert(
     assigned_user_id = payload.get("assigned_rescuer_id")
     assigned_vehicle_ids = payload.get("assigned_vehicle_ids")
     rescuer_user = None
+    assignment_note = None
 
     if assigned_user_id:
         # Verify the user exists and has role rescuer
@@ -836,7 +864,19 @@ async def update_alert(
             await session.refresh(rescuer_profile)
         effective_severity = str(payload.get("severity", alert.severity) or "").lower()
         if rescuer_profile.status == RescuerStatus.RECOVERING and effective_severity != "critical":
-            raise HTTPException(status_code=409, detail="This rescuer is recovering; only a critical alert can override this status")
+            available_rescuer_result = await session.execute(
+                select(RescuerProfile.id)
+                .where(RescuerProfile.status == RescuerStatus.AVAILABLE)
+                .limit(1)
+            )
+            if available_rescuer_result.scalar_one_or_none() is not None:
+                raise HTTPException(
+                    status_code=409,
+                    detail="This rescuer is recovering; assign an available rescuer or use a critical alert",
+                )
+            assignment_note = (
+                "You were assigned while recovering because no other rescuers were available."
+            )
         if rescuer_profile.status == RescuerStatus.OFF_DUTY:
             raise HTTPException(status_code=409, detail="This rescuer is off duty")
         rescuer_profile.status = RescuerStatus.ASSIGNED
@@ -848,6 +888,7 @@ async def update_alert(
         payload.setdefault("assigned_rescuer_name", rescuer_user.full_name or rescuer_user.username)
         # default status to assigned if caller didn't set it
         payload.setdefault("status", AlertStatus.ASSIGNED)
+        payload["assignment_note"] = assignment_note
 
     try:
         vehicle_ids = [int(vehicle_id) for vehicle_id in json.loads(assigned_vehicle_ids or "[]")]
@@ -868,6 +909,7 @@ async def update_alert(
         normalized_status = requested_status.value if isinstance(requested_status, AlertStatus) else str(requested_status)
         if normalized_status.lower() == AlertStatus.CLOSED.value:
             alert.updated_at = datetime.utcnow()
+            await _release_alert_vehicles(session, alert)
 
     await session.commit()
     await session.refresh(alert)
@@ -922,6 +964,7 @@ async def create_alert_status_report(
         message = message or "Rescuer marked the alert as resolved."
         alert.status = AlertStatus.CLOSED
         alert.updated_at = datetime.utcnow()
+        await _release_alert_vehicles(session, alert)
     elif report_type == "need_backup":
         message = message or "Rescuer requested backup."
     elif not message:

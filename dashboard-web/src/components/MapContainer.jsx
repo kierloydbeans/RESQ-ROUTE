@@ -115,7 +115,9 @@ const MapContainer = ({
   markers = [], 
   route = null, 
   center = null,
+  centerZoom = 14,
   focusMarkerId = null,
+  highlightMarkerId = null,
   centerRequestKey = 0,
   pinnedLocation = null, 
   onMapClick, 
@@ -132,6 +134,7 @@ const MapContainer = ({
   const routeRef = useRef(route)
   const centerRef = useRef(center)
   const focusMarkerIdRef = useRef(focusMarkerId)
+  const highlightMarkerIdRef = useRef(highlightMarkerId)
   const onMapClickRef = useRef(onMapClick)
   const markersSignature = JSON.stringify(markers)
   const centerSignature = JSON.stringify(center)
@@ -149,9 +152,13 @@ const MapContainer = ({
       const hasFocusedMarker = focusMarkerIdRef.current != null
       const element = createMarkerElement(marker.color, marker.icon)
       const isAlertMarker = marker.kind === 'alert' && marker.id != null
+      const isShelterHighlighted = marker.id != null && String(marker.id) === String(highlightMarkerIdRef.current)
+      if (marker.id != null) element.dataset.markerId = String(marker.id)
       if (isAlertMarker) element.dataset.alertId = String(marker.id)
+      element.classList.toggle('is-full-shelter', marker.kind === 'shelter' && marker.isFull === true)
       element.classList.toggle('is-alert-marker', isAlertMarker)
       element.classList.toggle('is-focused', isFocused)
+      element.classList.toggle('is-shelter-highlighted', isShelterHighlighted)
       element.classList.toggle('is-dimmed', isAlertMarker && hasFocusedMarker && !isFocused)
       element.style.zIndex = isFocused ? '1000' : ''
       const markerInstance = new maplibregl.Marker({ element, anchor: 'center' })
@@ -186,9 +193,15 @@ const MapContainer = ({
           .setLngLat(coords)
           .setPopup(new maplibregl.Popup({ offset: 25 }).setText('Pinned incident location'))
           .addTo(mapRef.current)
+        pinnedMarkerRef.current.getElement().classList.add('citizen-pinned-marker')
       } else {
         pinnedMarkerRef.current.setLngLat(coords)
       }
+
+      const markerElement = pinnedMarkerRef.current.getElement()
+      markerElement.classList.remove('pin-dropping')
+      void markerElement.offsetWidth
+      markerElement.classList.add('pin-dropping')
     } else if (pinnedMarkerRef.current) {
       pinnedMarkerRef.current.remove()
       pinnedMarkerRef.current = null
@@ -218,7 +231,7 @@ const MapContainer = ({
           container: mapContainerRef.current,
           style,
           center: normalizeCoordinates(centerRef.current),
-          zoom: centerRef.current ? 14 : 13,
+          zoom: centerRef.current ? centerZoom : 13,
           transformRequest: (url, resourceType) => {
             const isVectorTile = resourceType === 'Tile' && url.includes('.pbf')
             return { url }
@@ -238,6 +251,9 @@ const MapContainer = ({
 
         // Handle Map Clicks
         map.on('click', (e) => {
+          const target = e.originalEvent.target
+          if (target instanceof Element && target.closest('.maplibregl-marker')) return
+
           const { lng, lat } = e.lngLat
           if (onMapClickRef.current) {
             onMapClickRef.current({
@@ -350,11 +366,24 @@ const MapContainer = ({
   }, [focusMarkerId])
 
   useEffect(() => {
+    highlightMarkerIdRef.current = highlightMarkerId
+    markerInstancesRef.current.forEach((marker) => {
+      const element = marker.getElement()
+      const isHighlighted = element.dataset.markerId === String(highlightMarkerId)
+      element.classList.remove('is-shelter-highlighted')
+      if (isHighlighted) {
+        void element.offsetWidth
+        element.classList.add('is-shelter-highlighted')
+      }
+    })
+  }, [highlightMarkerId])
+
+  useEffect(() => {
     centerRef.current = center
     if (centerRef.current && mapRef.current) {
-      mapRef.current.flyTo({ center: normalizeCoordinates(centerRef.current), zoom: focusMarkerId == null ? 14 : 16, speed: 0.7 })
+      mapRef.current.flyTo({ center: normalizeCoordinates(centerRef.current), zoom: focusMarkerId == null ? centerZoom : 16, speed: 0.7 })
     }
-  }, [centerSignature, centerRequestKey, focusMarkerId])
+  }, [centerSignature, centerRequestKey, centerZoom, focusMarkerId])
 
   useEffect(() => {
     if (mapRef.current?.isStyleLoaded() && mapRef.current.getSource('citizen-route')) {

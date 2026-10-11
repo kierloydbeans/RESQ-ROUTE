@@ -134,7 +134,8 @@ const Login = () => {
     }
     .skeleton-box {
       animation: pulse 1.5s cubic-bezier(0.4, 0, 0.6, 1) infinite;
-      background-color: #e5e7eb;
+      background-color: var(--login-skeleton-base);
+      transition: background-color 280ms ease;
     }
   `
 
@@ -151,7 +152,7 @@ const Login = () => {
 
   if (isPageLoading) {
     return (
-      <div className="login-page" style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', backgroundColor: '#f3f4f6', padding: '1.5rem' }}>
+      <div className="login-page" style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', backgroundColor: 'var(--ops-bg)', padding: '1.5rem' }}>
         <style>{skeletonPulseStyle}</style>
         <div className="login-card" style={{
           maxWidth: '960px',
@@ -161,10 +162,10 @@ const Login = () => {
           borderRadius: '20px',
           overflow: 'hidden',
           boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04)',
-          backgroundColor: '#ffffff'
+          backgroundColor: 'var(--ops-surface)'
         }}>
-          <div className="skeleton-box" style={{ flex: '1', backgroundColor: '#d1d5db' }}></div>
-          <div style={{ flex: '1', padding: '3rem 2.5rem', display: 'flex', flexDirection: 'column', justifyContent: 'center', backgroundColor: '#ffffff' }}>
+          <div className="skeleton-box" style={{ flex: '1', backgroundColor: 'var(--login-skeleton-strong)' }}></div>
+          <div style={{ flex: '1', padding: '3rem 2.5rem', display: 'flex', flexDirection: 'column', justifyContent: 'center', backgroundColor: 'var(--ops-surface)' }}>
             <div style={{ marginBottom: '2rem' }}>
               <div className="skeleton-box" style={{ height: '48px', width: '140px', borderRadius: '8px', marginBottom: '1rem' }}></div>
               <div className="skeleton-box" style={{ height: '32px', width: '100px', borderRadius: '8px' }}></div>

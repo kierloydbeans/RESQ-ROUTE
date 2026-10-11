@@ -446,7 +446,7 @@
 
 .operational-metrics-body {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 4px;
   padding: 2px 8px 6px;
 }
@@ -455,6 +455,8 @@
   display: flex;
   flex-direction: column;
   align-items: center;
+  min-width: 0;
+  margin: 0;
   text-align: center;
   padding: 4px 2px;
   background: var(--ops-rail-metric-bg);
@@ -818,6 +820,66 @@
 .rail-box,
 .metric-card {
   border-radius: 0 !important;
+}
+
+.ops-console .map-overlay-toggle {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  z-index: 2;
+  display: grid;
+  width: 26px;
+  height: 26px;
+  place-items: center;
+  padding: 0;
+  border: 1px solid var(--ops-border);
+  border-radius: 6px;
+  background: var(--ops-surface-2);
+  color: var(--ops-text);
+  font: 600 16px/1 var(--ops-font);
+  cursor: pointer;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, .2);
+  transition: background-color .15s ease, border-color .15s ease, color .15s ease, transform .15s ease, box-shadow .15s ease;
+}
+
+.ops-console .map-overlay-toggle:hover {
+  transform: translateY(-1px);
+  border-color: var(--ops-red);
+  background: var(--ops-surface);
+  color: var(--ops-red);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, .25);
+}
+
+.ops-console .map-overlay-toggle:active { transform: translateY(0) scale(.96); }
+.ops-console .map-overlay-toggle:focus-visible { outline: 2px solid var(--ops-red); outline-offset: 2px; }
+.ops-console .map-overlay-draggable:not(.minimized) { padding-top: 34px; }
+.ops-console .map-overlay-draggable.minimized { min-width: 34px; min-height: 34px; padding: 3px; }
+.ops-console .map-overlay-draggable.minimized .map-overlay-toggle { position: static; }
+
+.ops-console .panel-visibility-entering {
+  animation: panel-visibility-enter 220ms cubic-bezier(.2, .8, .2, 1) both;
+}
+
+.ops-console .panel-visibility-exiting {
+  animation: panel-visibility-exit 220ms cubic-bezier(.4, 0, 1, 1) both;
+  pointer-events: none;
+}
+
+@keyframes panel-visibility-enter {
+  from { opacity: 0; transform: translateY(8px) scale(.985); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+@keyframes panel-visibility-exit {
+  from { opacity: 1; transform: translateY(0) scale(1); }
+  to { opacity: 0; transform: translateY(-6px) scale(.985); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ops-console .panel-visibility-entering,
+  .ops-console .panel-visibility-exiting {
+    animation-duration: 1ms;
+  }
 }
 
 @media (max-width: 680px) {

@@ -14,10 +14,18 @@
   --ops-report-border: #0e7490;
   --ops-report-bg: rgba(8, 47, 73, .45);
   --ops-report-accent: #67e8f9;
+  --citizen-accent: #f07a43;
+  --citizen-accent-strong: #ff9461;
+  --citizen-accent-soft: #3b211d;
+  --citizen-accent-border: #8b4a37;
+  --citizen-accent-gradient-start: #c52222;
+  --citizen-accent-gradient-end: #a36b16;
   --ops-backup-border: #b45309;
   --ops-backup-bg: rgba(120, 53, 15, .35);
   --ops-backup-accent: #fbbf24;
   --auth-role-active-bg: rgba(242, 62, 79, .14);
+  --login-skeleton-base: #1f2937;
+  --login-skeleton-strong: #374151;
   --ops-font: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
   --ops-mono: var(--ops-font);
 }
@@ -34,10 +42,47 @@
   --ops-report-border: #0e7490;
   --ops-report-bg: #ecfeff;
   --ops-report-accent: #0e7490;
+  --citizen-accent: #b83b20;
+  --citizen-accent-strong: #9f321b;
+  --citizen-accent-soft: #fff0e8;
+  --citizen-accent-border: #e9b39b;
+  --citizen-accent-gradient-start: #c52222;
+  --citizen-accent-gradient-end: #a36b16;
   --ops-backup-border: #b45309;
   --ops-backup-bg: #fff7ed;
   --ops-backup-accent: #92400e;
   --auth-role-active-bg: #fef2f2;
+  --login-skeleton-base: #e5e7eb;
+  --login-skeleton-strong: #d1d5db;
+}
+
+::view-transition-old(root),
+::view-transition-new(root) {
+  animation-duration: 280ms;
+  animation-timing-function: ease-in-out;
+}
+
+::view-transition-old(root) {
+  animation-name: theme-crossfade-out;
+}
+
+::view-transition-new(root) {
+  animation-name: theme-crossfade-in;
+}
+
+@keyframes theme-crossfade-out {
+  to { opacity: 0; }
+}
+
+@keyframes theme-crossfade-in {
+  from { opacity: 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  ::view-transition-old(root),
+  ::view-transition-new(root) {
+    animation-duration: 0.01ms;
+  }
 }
 
 * { box-sizing: border-box; }

@@ -760,6 +760,23 @@ const RescuerDashboard = () => {
                   </span>
                 </div>
 
+                {activeAlert.assignment_note && (
+                  <div
+                    role="status"
+                    style={{
+                      border: '1px solid rgba(245, 158, 11, 0.45)',
+                      borderRadius: '8px',
+                      padding: '12px 16px',
+                      backgroundColor: 'rgba(245, 158, 11, 0.08)',
+                      color: '#fbbf24',
+                      fontSize: '13px',
+                      fontWeight: 600,
+                    }}
+                  >
+                    {activeAlert.assignment_note} Please respond to this task.
+                  </div>
+                )}
+
                 {/* MAIN INCIDENT CARD */}
                 <div style={{ backgroundColor: '#0b1120', borderRadius: '8px', padding: '16px', border: '1px solid #1e293b', display: 'flex', flexDirection: 'column', gap: '16px' }}>
 

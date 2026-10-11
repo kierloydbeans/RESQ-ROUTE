@@ -11,7 +11,7 @@ const speedOptions = [
   { label: 'Fast', seconds: 18 }
 ]
 
-const HazardTicker = ({ hazards = [] }) => {
+const HazardTicker = ({ hazards = [], className = '' }) => {
   const [speedIndex, setSpeedIndex] = useState(() => {
     const storedSpeed = Number(localStorage.getItem('resq-hazard-speed'))
     return Number.isInteger(storedSpeed) && storedSpeed >= 0 && storedSpeed < speedOptions.length ? storedSpeed : 1
@@ -28,7 +28,7 @@ const HazardTicker = ({ hazards = [] }) => {
   }
 
   return (
-    <div className="incident-ticker">
+    <div className={`incident-ticker ${className}`.trim()}>
       <b>LIVE ROAD HAZARD STREAM</b>
       <button className="incident-ticker-speed" type="button" onClick={cycleSpeed} aria-label={`Hazard stream speed: ${speed.label}`} title={`Speed: ${speed.label}. Click to change`}>
         <Gauge size={12} />

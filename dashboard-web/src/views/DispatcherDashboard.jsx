@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useRef } from 'react'
+import React, { useEffect, useLayoutEffect, useState, useRef } from 'react'
 import { useWebSocket } from '../hooks/useWebSocket'
 import { useVoiceConference } from '../hooks/useVoiceConference'
 import MapContainer from '../components/MapContainer'
@@ -7,10 +7,10 @@ import { useTheme } from '../ThemeContext'
 import HazardTicker from '../components/HazardTicker'
 import AssignmentModal from '../components/AssignmentModal'
 import DeployedVehicles from '../components/DeployedVehicles'
+import { BASE_URL, WS_URL } from '../dataProvider'
 import '../styles/ops-console.css'
 import { ChevronLeft, ChevronRight, SlidersHorizontal, X } from 'lucide-react'
 
-const WS_URL = import.meta.env.VITE_WS_URL || 'ws://localhost:8000/ws';
 const getStoredAuth = () => {
   try {
     return JSON.parse(localStorage.getItem('auth'))
@@ -94,11 +94,18 @@ const isUnattendedAlert = (alert, now) => {
 const alertMarkerColors = { flood: '#3298df', earthquake: '#d18c48', fire: '#f04444', medical: '#dd5ca8', trapped: '#a56ee7', other: '#dc2626' }
 const rescuerMarkerColors = { available: '#00d6a0', recovering: '#f59e0b', in_transit: '#2563eb' }
 const vehicleMarkerColors = { available: '#00d6a0', in_transit: '#2563eb', maintenance: '#dc2626' }
+const isCriticalAlert = (alert) => String(alert?.severity || '').toLowerCase() === 'critical'
+const isRecoveringRescuer = (rescuer) => String(rescuer?.status || '').toLowerCase() === 'recovering'
+const isAvailableRescuer = (rescuer) => String(rescuer?.status || '').toLowerCase() === 'available'
+const getEligibleAssignmentRescuers = (rescuers, alert) => {
+  if (isCriticalAlert(alert)) return rescuers
+  const availableRescuers = rescuers.filter(isAvailableRescuer)
+  return availableRescuers.length > 0
+    ? availableRescuers
+    : rescuers.filter(isRecoveringRescuer)
+}
 
-// Convert http/https base URL to ws/wss dynamically
-const rawApiBase = (import.meta.env.VITE_API_URL || import.meta.env.VITE_API_BASE_URL || 'https://resq-route.onrender.com').replace(/\/$/, '')
-const API_BASE_URL = rawApiBase.endsWith('/api/v1') ? rawApiBase.replace(/\/api\/v1$/, '') : rawApiBase
-const WS_BASE_URL = API_BASE_URL.replace(/^http/, 'ws')
+const API_BASE_URL = BASE_URL
 
 const disasterIcons = {
   flood: '⌁',
@@ -216,7 +223,7 @@ export const Dashboard = () => {
   const [isExportingReport, setIsExportingReport] = useState(false)
   const [reportExportError, setReportExportError] = useState('')
   const [isPanelDrawerOpen, setIsPanelDrawerOpen] = useState(false)
-  const [visiblePanels, setVisiblePanels] = useState({
+  const initialPanelVisibility = {
     operationsReport: true,
     operationalMetrics: true,
     sosFeed: true,
@@ -224,24 +231,95 @@ export const Dashboard = () => {
     averageResponse: true,
     vehicles: true,
     rescuers: true,
+  }
+  const [visiblePanels, setVisiblePanels] = useState({
+    ...initialPanelVisibility,
   })
+  const [renderedPanels, setRenderedPanels] = useState({ ...initialPanelVisibility })
+  const [panelAnimationStates, setPanelAnimationStates] = useState({})
+  const panelAnimationTimers = useRef({})
+  const panelLayoutBeforeChange = useRef(null)
+  const capturePanelLayout = () => {
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return
+
+    panelLayoutBeforeChange.current = new Map(
+      Array.from(document.querySelectorAll(
+        '.ops-console .ops-grid .operational-panel, .ops-console .ops-grid .feed-panel, .ops-console .ops-grid .map-only-column, .ops-console .ops-grid .metric-card, .ops-console .ops-grid .rail-box'
+      ), (element) => [element, element.getBoundingClientRect()])
+    )
+  }
+  const setPanelVisibility = (panel, shouldShow) => {
+    window.clearTimeout(panelAnimationTimers.current[panel])
+    setVisiblePanels((current) => ({ ...current, [panel]: shouldShow }))
+
+    const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches
+    const duration = reducedMotion ? 0 : 220
+    setPanelAnimationStates((current) => ({ ...current, [panel]: shouldShow ? 'entering' : 'exiting' }))
+
+    if (shouldShow) {
+      capturePanelLayout()
+      setRenderedPanels((current) => ({ ...current, [panel]: true }))
+    }
+    panelAnimationTimers.current[panel] = window.setTimeout(() => {
+      if (!shouldShow) {
+        capturePanelLayout()
+        setRenderedPanels((current) => ({ ...current, [panel]: false }))
+      }
+      setPanelAnimationStates((current) => {
+        const next = { ...current }
+        delete next[panel]
+        return next
+      })
+      delete panelAnimationTimers.current[panel]
+    }, duration)
+  }
   const togglePanel = (panel) => {
-    setVisiblePanels((current) => ({ ...current, [panel]: !current[panel] }))
+    setPanelVisibility(panel, !visiblePanels[panel])
   }
   const allPanelsVisible = Object.values(visiblePanels).every(Boolean)
   const toggleAllPanels = () => {
-    setVisiblePanels((current) => Object.fromEntries(
-      Object.keys(current).map((panel) => [panel, !Object.values(current).every(Boolean)])
-    ))
+    const shouldShow = !allPanelsVisible
+    Object.keys(visiblePanels).forEach((panel) => setPanelVisibility(panel, shouldShow))
   }
-  const hasLeftRail = visiblePanels.operationalMetrics || visiblePanels.sosFeed
-  const hasRightRail = visiblePanels.averageResponse || visiblePanels.vehicles || visiblePanels.rescuers
+  const getPanelAnimationClass = (panel) => {
+    const state = panelAnimationStates[panel]
+    return state ? `panel-visibility-${state}` : ''
+  }
+  const hasLeftRail = renderedPanels.operationalMetrics || renderedPanels.sosFeed
+  const hasRightRail = renderedPanels.averageResponse || renderedPanels.vehicles || renderedPanels.rescuers
   const gridColumns = [
     ...(hasLeftRail ? ['200px'] : []),
-    ...(visiblePanels.tacticalMap ? ['minmax(0, 1fr)'] : []),
+    ...(renderedPanels.tacticalMap ? ['minmax(0, 1fr)'] : []),
     ...(hasRightRail ? ['213px'] : []),
   ]
-  if (!visiblePanels.tacticalMap && gridColumns.length > 0) gridColumns.fill('minmax(0, 1fr)')
+  if (!renderedPanels.tacticalMap && gridColumns.length > 0) gridColumns.fill('minmax(0, 1fr)')
+
+  useEffect(() => () => {
+    Object.values(panelAnimationTimers.current).forEach(window.clearTimeout)
+  }, [])
+  useLayoutEffect(() => {
+    const previousPositions = panelLayoutBeforeChange.current
+    if (!previousPositions) return
+    panelLayoutBeforeChange.current = null
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return
+
+    document.querySelectorAll(
+      '.ops-console .ops-grid .operational-panel, .ops-console .ops-grid .feed-panel, .ops-console .ops-grid .map-only-column, .ops-console .ops-grid .metric-card, .ops-console .ops-grid .rail-box'
+    ).forEach((element) => {
+      const previousPosition = previousPositions.get(element)
+      if (!previousPosition) return
+
+      const nextPosition = element.getBoundingClientRect()
+      const offsetX = previousPosition.left - nextPosition.left
+      const offsetY = previousPosition.top - nextPosition.top
+      if (Math.abs(offsetX) < 1 && Math.abs(offsetY) < 1) return
+
+      element.animate(
+        [{ translate: `${offsetX}px ${offsetY}px` }, { translate: '0 0' }],
+        { duration: 280, easing: 'cubic-bezier(.2, .8, .2, 1)' }
+      )
+    })
+  })
 
   const closedAlerts = alertRecords.filter(isClosedAlert)
   const closedAlertResponseTimes = closedAlerts
@@ -699,7 +777,7 @@ export const Dashboard = () => {
 
   const verifiedAlert = verifiedAlertState
   const setVerifiedAlert = (alert) => setVerifiedAlertState((current) => current?.id === alert?.id ? null : alert)
-  const { socket, isConnected, lastMessage } = useWebSocket(`${WS_BASE_URL}/api/v1/ws`)
+  const { socket, isConnected, lastMessage } = useWebSocket(WS_URL)
 
   useEffect(() => {
     const clock = window.setInterval(() => setCurrentTime(new Date()), 1000)
@@ -1161,6 +1239,13 @@ export const Dashboard = () => {
 
     try {
       const rescuer = findRescuerBySelection(normalizedRescuerSelection)
+      const alert = alerts.find((entry) => String(entry.id) === String(alertId))
+      const hasAvailableRescuer = rescueUnits.rescuers.some(isAvailableRescuer)
+      if (rescuer && isRecoveringRescuer(rescuer) && !isCriticalAlert(alert) && hasAvailableRescuer) {
+        setAlertStatus('Recovering rescuers can only be assigned to critical alerts or when no rescuer is available.')
+        return false
+      }
+
       const response = await fetch(`${API_BASE_URL}/api/v1/auth/alerts/${alertId}`, {
         method: 'PATCH',
         headers: getAuthHeaders(),
@@ -1172,7 +1257,10 @@ export const Dashboard = () => {
         })
       })
 
-      if (!response.ok) throw new Error('Unable to assign rescuer')
+      if (!response.ok) {
+        const responseData = await response.json()
+        throw new Error(responseData.detail || 'Unable to assign rescuer')
+      }
 
       const refreshed = await fetch(`${API_BASE_URL}/api/v1/auth/alerts`, { headers: getAuthHeaders() })
       if (refreshed.ok) setAlerts(await refreshed.json())
@@ -1185,12 +1273,10 @@ export const Dashboard = () => {
     }
   }
 
-  useEffect(() => {
-    if (assigningAlert && selectedRescuerId) {
-      handleAssignAlert(assigningAlert.id, selectedRescuerId)
-      setAssigningAlert(null)
-    }
-  }, [assigningAlert, selectedRescuerId])
+  const openAssignmentModal = (alertId) => {
+    const alert = alerts.find((entry) => String(entry.id) === String(alertId))
+    if (alert) setAssigningAlert(alert)
+  }
 
   const handleMergeAlerts = async () => {
     if (selectedMergeIds.length < 2) return
@@ -1347,9 +1433,16 @@ export const Dashboard = () => {
   }
 
   const rankedAssignmentRescuers = assigningAlert
-    ? [...rescueUnits.rescuers].sort((first, second) => {
-      const firstAvailable = first.status === 'available' ? 0 : 1
-      const secondAvailable = second.status === 'available' ? 0 : 1
+    ? getEligibleAssignmentRescuers(rescueUnits.rescuers, assigningAlert)
+      .sort((first, second) => {
+      const hasAvailableRescuer = rescueUnits.rescuers.some(isAvailableRescuer)
+      if (!hasAvailableRescuer) {
+        const firstRecovering = isRecoveringRescuer(first) ? 0 : 1
+        const secondRecovering = isRecoveringRescuer(second) ? 0 : 1
+        if (firstRecovering !== secondRecovering) return firstRecovering - secondRecovering
+      }
+      const firstAvailable = isAvailableRescuer(first) ? 0 : 1
+      const secondAvailable = isAvailableRescuer(second) ? 0 : 1
       if (firstAvailable !== secondAvailable) return firstAvailable - secondAvailable
       const firstCoordinates = getRescuerCoordinates(first)
       const secondCoordinates = getRescuerCoordinates(second)
@@ -1384,6 +1477,27 @@ export const Dashboard = () => {
     </div>
   )
 
+  const animateDashboardCardClick = (event) => {
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return
+
+    const target = event.target
+    if (!(target instanceof Element)) return
+
+    const card = target.closest(
+      '.sos-item, .rail-metric, .metric-card, .unit-row, .operational-panel, .feed-panel, .rail-box, .panel-title-clickable'
+    )
+    if (!card || !event.currentTarget.contains(card)) return
+
+    card.animate(
+      [
+        { transform: 'scale(1)' },
+        { transform: 'scale(0.985)', offset: 0.45 },
+        { transform: 'scale(1)' }
+      ],
+      { duration: 220, easing: 'cubic-bezier(0.2, 0.8, 0.2, 1)' }
+    )
+  }
+
   if (role !== 'dispatcher') {
     return (
       <main className="restricted-console">
@@ -1396,7 +1510,7 @@ export const Dashboard = () => {
   }
 
   return (
-    <main className="ops-console">
+    <main className="ops-console" onClickCapture={animateDashboardCardClick}>
       <header className="ops-header">
         <div className="brand-lockup">
           <Logo size="small" />
@@ -1420,7 +1534,12 @@ export const Dashboard = () => {
         </div>
       </header>
 
-      {visiblePanels.operationsReport && <HazardTicker hazards={roadHazards} />}
+      {renderedPanels.operationsReport && (
+        <HazardTicker
+          hazards={roadHazards}
+          className={getPanelAnimationClass('operationsReport')}
+        />
+      )}
 
       {isPanelDrawerOpen && (
         <>
@@ -1494,7 +1613,7 @@ export const Dashboard = () => {
         </section>
       )}
 
-      {visiblePanels.operationsReport && <section className="report-toolbar" aria-labelledby="report-toolbar-title">
+      {renderedPanels.operationsReport && <section className={`report-toolbar ${getPanelAnimationClass('operationsReport')}`} aria-labelledby="report-toolbar-title">
         <div className="report-toolbar-heading">
           <strong id="report-toolbar-title">OPERATIONS REPORT</strong>
           <span>
@@ -1542,7 +1661,7 @@ export const Dashboard = () => {
         {/* LEFT COLUMN: Operational Metrics (Top) + Live SOS Feed (Bottom) */}
         {hasLeftRail && <aside className="left-rail">
           {/* TOP: Operational Metrics */}
-          {visiblePanels.operationalMetrics && <section className="operational-panel">
+          {renderedPanels.operationalMetrics && <section className={`operational-panel ${getPanelAnimationClass('operationalMetrics')}`}>
             <PanelTitle title="OPERATIONAL METRICS" />
             <div className="operational-metrics-body">
               <Metric label="ACTIVE SOS" value={alertCount} color="red" />
@@ -1560,7 +1679,7 @@ export const Dashboard = () => {
           </section>}
 
           {/* BOTTOM: Live SOS Feed */}
-          {visiblePanels.sosFeed && <section className="feed-panel">
+          {renderedPanels.sosFeed && <section className={`feed-panel ${getPanelAnimationClass('sosFeed')}`}>
             <PanelTitle title="LIVE SOS FEED" badge="LIVE" onClick={() => openModal('alerts')} />
             <div className="feed-list">
               <div className="feed-view-switch" role="group" aria-label="Choose SOS alert view">
@@ -1645,7 +1764,7 @@ export const Dashboard = () => {
                           key={`pinned-${alert.id}`}
                           alert={alert}
                           now={currentTime}
-                          onAssign={handleAssignAlert}
+                          onAssign={openAssignmentModal}
                           onView={handleViewAlert}
                         />
                       ))
@@ -1686,7 +1805,7 @@ export const Dashboard = () => {
                           key={alert.id}
                           alert={alert}
                           now={currentTime}
-                          onAssign={handleAssignAlert}
+                          onAssign={openAssignmentModal}
                           onView={handleViewAlert}
                         />
                       ))
@@ -1721,7 +1840,7 @@ export const Dashboard = () => {
         </aside>}
 
         {/* CENTER COLUMN: MAP ONLY */}
-        {visiblePanels.tacticalMap && <main className="center-column map-only-column">
+        {renderedPanels.tacticalMap && <main className={`center-column map-only-column ${getPanelAnimationClass('tacticalMap')}`}>
           <section className="map-panel">
             <PanelTitle title="CDRRMO TACTICAL MAP AREA" badge="TRACKING MAP" />
             <div className="map-stage" style={{ height: `${mapHeight}px` }}>
@@ -1758,7 +1877,7 @@ export const Dashboard = () => {
         {/* RIGHT RAIL: Average Response -> Vehicles -> Rescuer Profiles */}
         {hasRightRail && <aside className="right-rail">
           {/* 1. TOP: Average Response */}
-          {visiblePanels.averageResponse && <section className="metric-card response-card">
+          {renderedPanels.averageResponse && <section className={`metric-card response-card ${getPanelAnimationClass('averageResponse')}`}>
             <small>AVERAGE RESPONSE</small>
             <strong>{averageResponseMinutes === null ? '—' : `${averageResponseMinutes.toFixed(1)} min`}</strong>
             <span>
@@ -1769,7 +1888,7 @@ export const Dashboard = () => {
           </section>}
 
           {/* 2. MIDDLE: Vehicles */}
-          {visiblePanels.vehicles && <section className="rail-box vehicle-box">
+          {renderedPanels.vehicles && <section className={`rail-box vehicle-box ${getPanelAnimationClass('vehicles')}`}>
             <div className="unit-panel-heading">
               <PanelTitle
                 title="VEHICLES"
@@ -1803,7 +1922,7 @@ export const Dashboard = () => {
           </section>}
 
           {/* 3. BOTTOM: Rescuer Profiles */}
-          {visiblePanels.rescuers && <section className="rail-box rescuer-box">
+          {renderedPanels.rescuers && <section className={`rail-box rescuer-box ${getPanelAnimationClass('rescuers')}`}>
             <div className="unit-panel-heading">
               <PanelTitle
                 title="RESCUER PROFILES"
@@ -1976,7 +2095,7 @@ export const Dashboard = () => {
                         <div className="modal-alert-actions">
                           <select value={selectedRescuerId} onChange={(event) => setSelectedRescuerId(event.target.value)} aria-label="Select rescuer">
                             <option value="">Assign...</option>
-                            {rescuers.map((rescuer) => (
+                            {getEligibleAssignmentRescuers(rescuers, alert).map((rescuer) => (
                               <option key={rescuer.id} value={rescuer.id}>
                                 {rescuer.display_name || rescuer.full_name || rescuer.username}
                               </option>
@@ -2039,13 +2158,15 @@ export const Dashboard = () => {
 
       {assigningAlert && (
         <AssignmentModal
+          key={assigningAlert.id}
           alert={assigningAlert}
           rescuers={rankedAssignmentRescuers}
+          hasAvailableRescuer={rescueUnits.rescuers.some(isAvailableRescuer)}
           vehicles={rescueUnits.vehicles}
           getRescuerDistance={getRescuerDistance}
           onConfirm={async (rescuer, vehicleIds) => {
-            await handleAssignAlert(assigningAlert.id, String(rescuer.user_id), vehicleIds)
-            setAssigningAlert(null)
+            const assigned = await handleAssignAlert(assigningAlert.id, String(rescuer.user_id), vehicleIds)
+            if (assigned) setAssigningAlert(null)
           }}
           onClose={() => setAssigningAlert(null)}
         />
