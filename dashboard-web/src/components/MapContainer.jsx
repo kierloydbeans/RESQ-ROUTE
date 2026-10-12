@@ -104,6 +104,7 @@ const createMarkerElement = (color = '#dc2626', icon = null) => {
   el.style.background = icon ? '#fff7ed' : color
   el.style.border = icon ? `2px solid ${color}` : '2px solid white'
   el.style.boxShadow = '0 2px 6px rgba(0,0,0,0.3)'
+  el.style.setProperty('--marker-color', color)
   el.style.color = icon ? color : '#ffffff'
   el.style.fontSize = icon ? '16px' : '0'
   el.style.fontWeight = '700'
@@ -118,6 +119,7 @@ const MapContainer = ({
   centerZoom = 14,
   focusMarkerId = null,
   highlightMarkerId = null,
+  selectedAlertCategory = 'all',
   centerRequestKey = 0,
   pinnedLocation = null, 
   onMapClick, 
@@ -125,7 +127,7 @@ const MapContainer = ({
 }) => {
   const mapContainerRef = useRef(null)
   const mapRef = useRef(null)
-  const markerInstancesRef = useRef([])
+  const markerInstancesRef = useRef(new Map())
   const deviceMarkerRef = useRef(null)
   const pinnedMarkerRef = useRef(null)
   const watchIdRef = useRef(null)
@@ -135,6 +137,7 @@ const MapContainer = ({
   const centerRef = useRef(center)
   const focusMarkerIdRef = useRef(focusMarkerId)
   const highlightMarkerIdRef = useRef(highlightMarkerId)
+  const selectedAlertCategoryRef = useRef(selectedAlertCategory)
   const onMapClickRef = useRef(onMapClick)
   const markersSignature = JSON.stringify(markers)
   const centerSignature = JSON.stringify(center)
@@ -143,30 +146,87 @@ const MapContainer = ({
     onMapClickRef.current = onMapClick
   }, [onMapClick])
 
-  const renderMarkers = (map, nextMarkers) => {
-    markerInstancesRef.current.forEach((marker) => marker.remove())
-    markerInstancesRef.current = []
-    nextMarkers.forEach((marker) => {
-      const [lng, lat] = normalizeCoordinates(marker.position)
-      const isFocused = marker.id != null && String(marker.id) === String(focusMarkerIdRef.current)
+  const updateAlertMarkerEmphasis = () => {
+    markerInstancesRef.current.forEach(({ marker }) => {
+      const element = marker.getElement()
+      const isAlertMarker = element.classList.contains('is-alert-marker')
+      const isFocused = element.dataset.alertId === String(focusMarkerIdRef.current)
       const hasFocusedMarker = focusMarkerIdRef.current != null
+      const isCategoryHighlighted = isAlertMarker
+        && selectedAlertCategoryRef.current !== 'all'
+        && element.dataset.alertCategory === selectedAlertCategoryRef.current
+
+      element.classList.toggle('is-focused', isFocused)
+      element.classList.toggle('is-category-highlighted', isCategoryHighlighted)
+      element.classList.toggle('is-dimmed', isAlertMarker && hasFocusedMarker && !isFocused)
+      element.style.zIndex = isFocused ? '1000' : ''
+    })
+  }
+
+  const renderMarkers = (map, nextMarkers) => {
+    const visibleMarkers = new Map()
+    nextMarkers.forEach((marker, index) => {
+      if (marker.kind === 'alert' && selectedAlertCategoryRef.current !== 'all'
+        && (marker.category || 'other') !== selectedAlertCategoryRef.current) return
+      const key = marker.id == null ? `${marker.kind || 'marker'}:${index}` : `${marker.kind || 'marker'}:${marker.id}`
+      visibleMarkers.set(key, marker)
+    })
+
+    markerInstancesRef.current.forEach((entry, key) => {
+      if (visibleMarkers.has(key)) {
+        if (entry.removalTimer !== null) {
+          window.clearTimeout(entry.removalTimer)
+          entry.removalTimer = null
+          entry.marker.getElement().classList.remove('is-exiting')
+        }
+        return
+      }
+      if (entry.removalTimer !== null) return
+      const element = entry.marker.getElement()
+      element.classList.remove('is-entering')
+      element.classList.add('is-exiting')
+      entry.removalTimer = window.setTimeout(() => {
+        if (markerInstancesRef.current.get(key) !== entry) return
+        entry.marker.remove()
+        markerInstancesRef.current.delete(key)
+      }, 180)
+    })
+
+    visibleMarkers.forEach((marker, key) => {
+      const signature = JSON.stringify(marker)
+      const existingEntry = markerInstancesRef.current.get(key)
+      if (existingEntry && existingEntry.signature === signature) return
+      if (existingEntry) {
+        if (existingEntry.removalTimer !== null) window.clearTimeout(existingEntry.removalTimer)
+        existingEntry.marker.remove()
+        markerInstancesRef.current.delete(key)
+      }
+
+      const [lng, lat] = normalizeCoordinates(marker.position)
       const element = createMarkerElement(marker.color, marker.icon)
+      element.classList.add('is-entering')
       const isAlertMarker = marker.kind === 'alert' && marker.id != null
       const isShelterHighlighted = marker.id != null && String(marker.id) === String(highlightMarkerIdRef.current)
       if (marker.id != null) element.dataset.markerId = String(marker.id)
-      if (isAlertMarker) element.dataset.alertId = String(marker.id)
+      if (isAlertMarker) {
+        element.dataset.alertId = String(marker.id)
+        element.dataset.alertCategory = marker.category || 'other'
+      }
       element.classList.toggle('is-full-shelter', marker.kind === 'shelter' && marker.isFull === true)
       element.classList.toggle('is-alert-marker', isAlertMarker)
-      element.classList.toggle('is-focused', isFocused)
       element.classList.toggle('is-shelter-highlighted', isShelterHighlighted)
-      element.classList.toggle('is-dimmed', isAlertMarker && hasFocusedMarker && !isFocused)
-      element.style.zIndex = isFocused ? '1000' : ''
       const markerInstance = new maplibregl.Marker({ element, anchor: 'center' })
         .setLngLat([lng, lat])
         .setPopup(new maplibregl.Popup({ offset: 25, closeOnClick: false, closeOnMove: false, closeButton: true }).setHTML(formatPopupDetails(marker)))
         .addTo(map)
-      markerInstancesRef.current.push(markerInstance)
+      const entry = { marker: markerInstance, signature, removalTimer: null }
+      markerInstancesRef.current.set(key, entry)
+      void element.offsetWidth
+      window.requestAnimationFrame(() => {
+        if (markerInstancesRef.current.get(key) === entry) element.classList.remove('is-entering')
+      })
     })
+    updateAlertMarkerEmphasis()
   }
 
   const updateRoute = (map, nextRoute) => {
@@ -329,8 +389,11 @@ const MapContainer = ({
       }
       deviceMarkerRef.current?.remove()
       pinnedMarkerRef.current?.remove()
-      markerInstancesRef.current.forEach((marker) => marker.remove())
-      markerInstancesRef.current = []
+      markerInstancesRef.current.forEach(({ marker, removalTimer }) => {
+        if (removalTimer !== null) window.clearTimeout(removalTimer)
+        marker.remove()
+      })
+      markerInstancesRef.current.clear()
       mapRef.current?.remove()
       mapRef.current = null
     }
@@ -355,19 +418,17 @@ const MapContainer = ({
 
   useEffect(() => {
     focusMarkerIdRef.current = focusMarkerId
-    markerInstancesRef.current.forEach((marker) => {
-      const isFocused = marker.getElement().dataset.alertId === String(focusMarkerId)
-      const element = marker.getElement()
-      const isAlertMarker = element.classList.contains('is-alert-marker')
-      element.classList.toggle('is-focused', isFocused)
-      element.classList.toggle('is-dimmed', isAlertMarker && focusMarkerId != null && !isFocused)
-      element.style.zIndex = isFocused ? '1000' : ''
-    })
+    updateAlertMarkerEmphasis()
   }, [focusMarkerId])
 
   useEffect(() => {
+    selectedAlertCategoryRef.current = selectedAlertCategory
+    if (mapRef.current) renderMarkers(mapRef.current, markersRef.current)
+  }, [selectedAlertCategory])
+
+  useEffect(() => {
     highlightMarkerIdRef.current = highlightMarkerId
-    markerInstancesRef.current.forEach((marker) => {
+    markerInstancesRef.current.forEach(({ marker }) => {
       const element = marker.getElement()
       const isHighlighted = element.dataset.markerId === String(highlightMarkerId)
       element.classList.remove('is-shelter-highlighted')

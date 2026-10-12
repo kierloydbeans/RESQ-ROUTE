@@ -124,6 +124,18 @@ const disasterLabels = {
   trapped: 'Rescue',
   other: 'Other'
 }
+const alertCategoryOptions = [
+  { value: 'all', label: 'All alerts', color: '#e7edf5' },
+  ...Object.entries(disasterLabels).map(([value, label]) => ({
+    value,
+    label,
+    color: alertMarkerColors[value]
+  }))
+]
+const normalizeDisasterType = (value) => {
+  const category = String(value || 'other').toLowerCase()
+  return Object.prototype.hasOwnProperty.call(disasterLabels, category) ? category : 'other'
+}
 
 const distanceBetween = (firstLatitude, firstLongitude, secondLatitude, secondLongitude) => {
   const [normalizedFirstLatitude, normalizedFirstLongitude, normalizedSecondLatitude, normalizedSecondLongitude] = [firstLatitude, firstLongitude, secondLatitude, secondLongitude].map(Number)
@@ -217,6 +229,7 @@ export const Dashboard = () => {
   const [mapHeight, setMapHeight] = useState(480)
   const [focusedAlertLocation, setFocusedAlertLocation] = useState(null)
   const [focusedAlertId, setFocusedAlertId] = useState(null)
+  const [selectedMapAlertCategory, setSelectedMapAlertCategory] = useState('all')
   const [focusRequestKey, setFocusRequestKey] = useState(0)
   const [reportEndDate, setReportEndDate] = useState(() => manilaDateKey(new Date()))
   const [reportStartDate, setReportStartDate] = useState(() => shiftDateKey(manilaDateKey(new Date()), -29))
@@ -321,7 +334,10 @@ export const Dashboard = () => {
     })
   })
 
-  const closedAlerts = alertRecords.filter(isClosedAlert)
+  const categoryFilteredAlertRecords = selectedMapAlertCategory === 'all'
+    ? alertRecords
+    : alertRecords.filter((alert) => normalizeDisasterType(alert.disaster_type) === selectedMapAlertCategory)
+  const closedAlerts = categoryFilteredAlertRecords.filter(isClosedAlert)
   const closedAlertResponseTimes = closedAlerts
     .map(getAlertResponseMinutes)
     .filter((minutes) => minutes !== null)
@@ -739,7 +755,7 @@ export const Dashboard = () => {
       setIsExportingReport(false)
     }
   }
-  const alerts = alertRecords.filter((alert) => !isClosedAlert(alert))
+  const alerts = categoryFilteredAlertRecords.filter((alert) => !isClosedAlert(alert))
   const unattendedAlerts = alerts.filter((alert) => isUnattendedAlert(alert, currentTime))
   const pinnedAlertPageCount = Math.max(1, Math.ceil(unattendedAlerts.length / ALERTS_PER_PAGE))
   const currentPinnedAlertPage = Math.min(pinnedAlertPage, pinnedAlertPageCount - 1)
@@ -1307,15 +1323,19 @@ export const Dashboard = () => {
     }
   })
 
-  const alertMarkers = alerts.map((alert) => ({
-    kind: 'alert',
-    id: alert.id,
-    position: [alert.longitude, alert.latitude],
-    label: `${alert.sender_name} · ${statusLabel(alert.status)}`,
-    color: alertMarkerColors[alert.disaster_type] || alertMarkerColors.other,
-    icon: disasterIcons[alert.disaster_type] || disasterIcons.other,
-    details: { type: disasterLabels[alert.disaster_type] || 'Other alert', status: statusLabel(alert.status), reported_by: alert.sender_name, time: formatTime(alert.created_at), location: `${alert.latitude}, ${alert.longitude}`, severity: alert.severity, message: alert.message }
-  }))
+  const alertMarkers = alerts.map((alert) => {
+    const category = normalizeDisasterType(alert.disaster_type)
+    return {
+      kind: 'alert',
+      id: alert.id,
+      category,
+      position: [alert.longitude, alert.latitude],
+      label: `${alert.sender_name} · ${statusLabel(alert.status)}`,
+      color: alertMarkerColors[category],
+      icon: disasterIcons[category],
+      details: { type: disasterLabels[category], status: statusLabel(alert.status), reported_by: alert.sender_name, time: formatTime(alert.created_at), location: `${alert.latitude}, ${alert.longitude}`, severity: alert.severity, message: alert.message }
+    }
+  })
 
   const rescuerMarkers = rescueUnits.rescuers.filter((rescuer) => rescuer.current_latitude !== null && rescuer.current_longitude !== null).map((rescuer) => ({
     position: [rescuer.current_longitude, rescuer.current_latitude],
@@ -1843,6 +1863,25 @@ export const Dashboard = () => {
         {renderedPanels.tacticalMap && <main className={`center-column map-only-column ${getPanelAnimationClass('tacticalMap')}`}>
           <section className="map-panel">
             <PanelTitle title="CDRRMO TACTICAL MAP AREA" badge="TRACKING MAP" />
+            <div className="map-category-filter" role="group" aria-label="Filter alert markers by category">
+              {alertCategoryOptions.map((category) => (
+                <button
+                  key={category.value}
+                  type="button"
+                  className={selectedMapAlertCategory === category.value ? 'is-selected' : ''}
+                  style={{ '--category-color': category.color }}
+                  aria-pressed={selectedMapAlertCategory === category.value}
+                  onClick={() => {
+                    setSelectedMapAlertCategory(category.value)
+                    setRegularAlertPage(0)
+                    setPinnedAlertPage(0)
+                    setClosedAlertPage(0)
+                  }}
+                >
+                  {category.label}
+                </button>
+              ))}
+            </div>
             <div className="map-stage" style={{ height: `${mapHeight}px` }}>
               <DraggableMapOverlay className="map-coordinate" label="Map center coordinates" defaultPosition={{ left: 12, top: 12 }}>
                 {primaryCenter ? <>CENTER: {Number(primaryCenter.latitude).toFixed(5)}° N<br />LONG: {Number(primaryCenter.longitude).toFixed(5)}° E</> : 'CENTER: NO ACTIVE CENTER'}
@@ -1853,7 +1892,7 @@ export const Dashboard = () => {
                 <span><i className="dot green" /> AVAILABLE / CENTER</span>
                 <span><i className="dot blue" /> RESOLVING / IN TRANSIT</span>
               </DraggableMapOverlay>
-              <MapContainer markers={[...mapMarkers, ...activeRouteMarkers]} center={focusedAlertLocation} focusMarkerId={focusedAlertId} centerRequestKey={focusRequestKey} route={activeEvacuationRoute?.geometry} trackDeviceLocation={false} />
+              <MapContainer markers={[...mapMarkers, ...activeRouteMarkers]} center={focusedAlertLocation} focusMarkerId={focusedAlertId} selectedAlertCategory={selectedMapAlertCategory} centerRequestKey={focusRequestKey} route={activeEvacuationRoute?.geometry} trackDeviceLocation={false} />
               {activeEvacuationRoute && (
                 <DraggableMapOverlay className="evac-label evac-label-list" label="Active citizen evacuation route" defaultPosition={{ left: 280, top: 12 }}>
                   <b>ACTIVE EVACUATION ROUTE</b>
