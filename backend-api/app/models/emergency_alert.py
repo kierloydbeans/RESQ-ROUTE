@@ -26,6 +26,7 @@ class EmergencyAlertBase(SQLModel):
     assigned_rescuer_id: Optional[int] = Field(default=None, foreign_key="user.id")
     assigned_rescuer_name: Optional[str] = None
     assigned_vehicle_ids: Optional[str] = None
+    assignment_note: Optional[str] = None
 
 
 class EmergencyAlert(EmergencyAlertBase, table=True):

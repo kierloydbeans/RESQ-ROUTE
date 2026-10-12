@@ -1,8 +1,33 @@
 import React, { useState } from 'react'
 
-const AssignmentModal = ({ alert, rescuers, vehicles, getRescuerDistance, onConfirm, onClose }) => {
-  const [selectedRescuer, setSelectedRescuer] = useState(null)
-  const [selectedVehicleIds, setSelectedVehicleIds] = useState([])
+const recommendedVehicleTypes = {
+  fire: ['firetruck', 'fireengine', 'firevehicle', 'truck'],
+  flood: ['rubberboat', 'rescueboat', 'boat', 'waterrescue'],
+  medical: ['ambulance'],
+  trapped: ['rescuetruck', 'rescuevehicle', 'truck', 'van'],
+  earthquake: ['rescuetruck', 'rescuevehicle', 'truck', 'van']
+}
+
+const normalizeVehicleType = (type) => String(type || '').toLowerCase().replace(/[^a-z0-9]/g, '')
+
+const getRecommendedVehicleId = (alert, vehicles) => {
+  const types = recommendedVehicleTypes[String(alert.disaster_type || '').toLowerCase()]
+  if (!types) return null
+
+  const availableVehicles = vehicles.filter((vehicle) => String(vehicle.status).toLowerCase() === 'available')
+  for (const type of types) {
+    const vehicle = availableVehicles.find((candidate) => normalizeVehicleType(candidate.vehicle_type).includes(type))
+    if (vehicle) return vehicle.id
+  }
+  return null
+}
+
+const AssignmentModal = ({ alert, rescuers, hasAvailableRescuer, vehicles, getRescuerDistance, onConfirm, onClose }) => {
+  const [selectedRescuer, setSelectedRescuer] = useState(() => rescuers[0] || null)
+  const [selectedVehicleIds, setSelectedVehicleIds] = useState(() => {
+    const recommendedVehicleId = getRecommendedVehicleId(alert, vehicles)
+    return recommendedVehicleId == null ? [] : [recommendedVehicleId]
+  })
   const availableVehicles = vehicles.filter((vehicle) => vehicle.status !== 'maintenance')
 
   const toggleVehicle = (vehicleId) => {
@@ -22,10 +47,15 @@ const AssignmentModal = ({ alert, rescuers, vehicles, getRescuerDistance, onConf
           <button className="modal-close" onClick={onClose} aria-label="Close assignment modal">×</button>
         </div>
         <div className="assignment-body">
+          {!hasAvailableRescuer && (
+            <p className="assignment-availability-warning" role="status">
+              No rescuer is available. A recovering rescuer is selected as a fallback when possible.
+            </p>
+          )}
           {!selectedRescuer ? (
             <>
               <p>Choose a rescuer for <b>{alert.sender_name}</b>.</p>
-              {rescuers.length === 0 ? <p className="modal-empty">No rescuer profiles found.</p> : rescuers.map((rescuer) => (
+              {rescuers.length === 0 ? <p className="modal-empty">No eligible rescuers are available.</p> : rescuers.map((rescuer) => (
                 <button className="rescuer-choice" key={rescuer.id} onClick={() => setSelectedRescuer(rescuer)}>
                   <span><b>{rescuer.full_name || rescuer.username}</b><small>@{rescuer.username} · {rescuer.station_name || 'Unassigned station'}</small></span>
                   <em>{getRescuerDistance(rescuer) ?? 'Distance unavailable'}{getRescuerDistance(rescuer) !== null ? ' km away' : ''} · {String(rescuer.status).replace('_', ' ')}</em>

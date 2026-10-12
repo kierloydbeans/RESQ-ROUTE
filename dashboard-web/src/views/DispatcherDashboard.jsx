@@ -1,13 +1,15 @@
-import React, { useEffect, useState, useRef } from 'react'
+import React, { useEffect, useLayoutEffect, useState, useRef } from 'react'
 import { useWebSocket } from '../hooks/useWebSocket'
+import { useVoiceConference } from '../hooks/useVoiceConference'
 import MapContainer from '../components/MapContainer'
 import Logo from '../components/Logo'
 import { useTheme } from '../ThemeContext'
 import HazardTicker from '../components/HazardTicker'
 import AssignmentModal from '../components/AssignmentModal'
 import DeployedVehicles from '../components/DeployedVehicles'
+import { BASE_URL, WS_URL } from '../dataProvider'
 import '../styles/ops-console.css'
-import { ChevronLeft, ChevronRight } from 'lucide-react'
+import { ChevronLeft, ChevronRight, SlidersHorizontal, X } from 'lucide-react'
 
 const getStoredAuth = () => {
   try {
@@ -92,11 +94,18 @@ const isUnattendedAlert = (alert, now) => {
 const alertMarkerColors = { flood: '#3298df', earthquake: '#d18c48', fire: '#f04444', medical: '#dd5ca8', trapped: '#a56ee7', other: '#dc2626' }
 const rescuerMarkerColors = { available: '#00d6a0', recovering: '#f59e0b', in_transit: '#2563eb' }
 const vehicleMarkerColors = { available: '#00d6a0', in_transit: '#2563eb', maintenance: '#dc2626' }
+const isCriticalAlert = (alert) => String(alert?.severity || '').toLowerCase() === 'critical'
+const isRecoveringRescuer = (rescuer) => String(rescuer?.status || '').toLowerCase() === 'recovering'
+const isAvailableRescuer = (rescuer) => String(rescuer?.status || '').toLowerCase() === 'available'
+const getEligibleAssignmentRescuers = (rescuers, alert) => {
+  if (isCriticalAlert(alert)) return rescuers
+  const availableRescuers = rescuers.filter(isAvailableRescuer)
+  return availableRescuers.length > 0
+    ? availableRescuers
+    : rescuers.filter(isRecoveringRescuer)
+}
 
-// Convert http/https base URL to ws/wss dynamically
-const rawApiBase = (import.meta.env.VITE_API_URL || import.meta.env.VITE_API_BASE_URL || 'https://resq-route.onrender.com').replace(/\/$/, '')
-const API_BASE_URL = rawApiBase.endsWith('/api/v1') ? rawApiBase.replace(/\/api\/v1$/, '') : rawApiBase
-const WS_BASE_URL = API_BASE_URL.replace(/^http/, 'ws')
+const API_BASE_URL = BASE_URL
 
 const disasterIcons = {
   flood: '⌁',
@@ -114,6 +123,18 @@ const disasterLabels = {
   medical: 'Medical',
   trapped: 'Rescue',
   other: 'Other'
+}
+const alertCategoryOptions = [
+  { value: 'all', label: 'All alerts', color: '#e7edf5' },
+  ...Object.entries(disasterLabels).map(([value, label]) => ({
+    value,
+    label,
+    color: alertMarkerColors[value]
+  }))
+]
+const normalizeDisasterType = (value) => {
+  const category = String(value || 'other').toLowerCase()
+  return Object.prototype.hasOwnProperty.call(disasterLabels, category) ? category : 'other'
 }
 
 const distanceBetween = (firstLatitude, firstLongitude, secondLatitude, secondLongitude) => {
@@ -166,7 +187,6 @@ const SosFeedItem = ({ alert, now, onAssign, onView, isClosed = false }) => {
 export const Dashboard = () => {
   const auth = getStoredAuth()
   const role = normalizeRole(auth?.user?.role) || 'citizen'
-  const rescuerId = auth?.user?.id
   const [latestGps, setLatestGps] = useState(null)
   const [liveRescuerLocations, setLiveRescuerLocations] = useState({})
   const [alertMessage, setAlertMessage] = useState('')
@@ -189,6 +209,12 @@ export const Dashboard = () => {
   const [selectedIncident, setSelectedIncident] = useState('')
   const [selectedSeverity, setSelectedSeverity] = useState('high')
   const [activeModal, setActiveModal] = useState(null)
+  // ── Voice call state ──────────────────────────────────────────────────
+  const { callId, callError, isSocketReady: isVoiceReady, participants: callParticipants, remoteStreams, startCall, endCall } =
+    useVoiceConference({
+      wsUrl: WS_URL,
+      authToken: auth?.token || auth?.access_token,
+    })
   const [rescueUnits, setRescueUnits] = useState({ rescuers: [], vehicles: [] })
   const [unitSort, setUnitSort] = useState('status')
   const [modalLoading, setModalLoading] = useState(false)
@@ -203,13 +229,115 @@ export const Dashboard = () => {
   const [mapHeight, setMapHeight] = useState(480)
   const [focusedAlertLocation, setFocusedAlertLocation] = useState(null)
   const [focusedAlertId, setFocusedAlertId] = useState(null)
+  const [selectedMapAlertCategory, setSelectedMapAlertCategory] = useState('all')
   const [focusRequestKey, setFocusRequestKey] = useState(0)
   const [reportEndDate, setReportEndDate] = useState(() => manilaDateKey(new Date()))
   const [reportStartDate, setReportStartDate] = useState(() => shiftDateKey(manilaDateKey(new Date()), -29))
   const [isExportingReport, setIsExportingReport] = useState(false)
   const [reportExportError, setReportExportError] = useState('')
+  const [isPanelDrawerOpen, setIsPanelDrawerOpen] = useState(false)
+  const initialPanelVisibility = {
+    operationsReport: true,
+    operationalMetrics: true,
+    sosFeed: true,
+    tacticalMap: true,
+    averageResponse: true,
+    vehicles: true,
+    rescuers: true,
+  }
+  const [visiblePanels, setVisiblePanels] = useState({
+    ...initialPanelVisibility,
+  })
+  const [renderedPanels, setRenderedPanels] = useState({ ...initialPanelVisibility })
+  const [panelAnimationStates, setPanelAnimationStates] = useState({})
+  const panelAnimationTimers = useRef({})
+  const panelLayoutBeforeChange = useRef(null)
+  const capturePanelLayout = () => {
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return
 
-  const closedAlerts = alertRecords.filter(isClosedAlert)
+    panelLayoutBeforeChange.current = new Map(
+      Array.from(document.querySelectorAll(
+        '.ops-console .ops-grid .operational-panel, .ops-console .ops-grid .feed-panel, .ops-console .ops-grid .map-only-column, .ops-console .ops-grid .metric-card, .ops-console .ops-grid .rail-box'
+      ), (element) => [element, element.getBoundingClientRect()])
+    )
+  }
+  const setPanelVisibility = (panel, shouldShow) => {
+    window.clearTimeout(panelAnimationTimers.current[panel])
+    setVisiblePanels((current) => ({ ...current, [panel]: shouldShow }))
+
+    const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches
+    const duration = reducedMotion ? 0 : 220
+    setPanelAnimationStates((current) => ({ ...current, [panel]: shouldShow ? 'entering' : 'exiting' }))
+
+    if (shouldShow) {
+      capturePanelLayout()
+      setRenderedPanels((current) => ({ ...current, [panel]: true }))
+    }
+    panelAnimationTimers.current[panel] = window.setTimeout(() => {
+      if (!shouldShow) {
+        capturePanelLayout()
+        setRenderedPanels((current) => ({ ...current, [panel]: false }))
+      }
+      setPanelAnimationStates((current) => {
+        const next = { ...current }
+        delete next[panel]
+        return next
+      })
+      delete panelAnimationTimers.current[panel]
+    }, duration)
+  }
+  const togglePanel = (panel) => {
+    setPanelVisibility(panel, !visiblePanels[panel])
+  }
+  const allPanelsVisible = Object.values(visiblePanels).every(Boolean)
+  const toggleAllPanels = () => {
+    const shouldShow = !allPanelsVisible
+    Object.keys(visiblePanels).forEach((panel) => setPanelVisibility(panel, shouldShow))
+  }
+  const getPanelAnimationClass = (panel) => {
+    const state = panelAnimationStates[panel]
+    return state ? `panel-visibility-${state}` : ''
+  }
+  const hasLeftRail = renderedPanels.operationalMetrics || renderedPanels.sosFeed
+  const hasRightRail = renderedPanels.averageResponse || renderedPanels.vehicles || renderedPanels.rescuers
+  const gridColumns = [
+    ...(hasLeftRail ? ['200px'] : []),
+    ...(renderedPanels.tacticalMap ? ['minmax(0, 1fr)'] : []),
+    ...(hasRightRail ? ['213px'] : []),
+  ]
+  if (!renderedPanels.tacticalMap && gridColumns.length > 0) gridColumns.fill('minmax(0, 1fr)')
+
+  useEffect(() => () => {
+    Object.values(panelAnimationTimers.current).forEach(window.clearTimeout)
+  }, [])
+  useLayoutEffect(() => {
+    const previousPositions = panelLayoutBeforeChange.current
+    if (!previousPositions) return
+    panelLayoutBeforeChange.current = null
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return
+
+    document.querySelectorAll(
+      '.ops-console .ops-grid .operational-panel, .ops-console .ops-grid .feed-panel, .ops-console .ops-grid .map-only-column, .ops-console .ops-grid .metric-card, .ops-console .ops-grid .rail-box'
+    ).forEach((element) => {
+      const previousPosition = previousPositions.get(element)
+      if (!previousPosition) return
+
+      const nextPosition = element.getBoundingClientRect()
+      const offsetX = previousPosition.left - nextPosition.left
+      const offsetY = previousPosition.top - nextPosition.top
+      if (Math.abs(offsetX) < 1 && Math.abs(offsetY) < 1) return
+
+      element.animate(
+        [{ translate: `${offsetX}px ${offsetY}px` }, { translate: '0 0' }],
+        { duration: 280, easing: 'cubic-bezier(.2, .8, .2, 1)' }
+      )
+    })
+  })
+
+  const categoryFilteredAlertRecords = selectedMapAlertCategory === 'all'
+    ? alertRecords
+    : alertRecords.filter((alert) => normalizeDisasterType(alert.disaster_type) === selectedMapAlertCategory)
+  const closedAlerts = categoryFilteredAlertRecords.filter(isClosedAlert)
   const closedAlertResponseTimes = closedAlerts
     .map(getAlertResponseMinutes)
     .filter((minutes) => minutes !== null)
@@ -627,7 +755,7 @@ export const Dashboard = () => {
       setIsExportingReport(false)
     }
   }
-  const alerts = alertRecords.filter((alert) => !isClosedAlert(alert))
+  const alerts = categoryFilteredAlertRecords.filter((alert) => !isClosedAlert(alert))
   const unattendedAlerts = alerts.filter((alert) => isUnattendedAlert(alert, currentTime))
   const pinnedAlertPageCount = Math.max(1, Math.ceil(unattendedAlerts.length / ALERTS_PER_PAGE))
   const currentPinnedAlertPage = Math.min(pinnedAlertPage, pinnedAlertPageCount - 1)
@@ -665,7 +793,7 @@ export const Dashboard = () => {
 
   const verifiedAlert = verifiedAlertState
   const setVerifiedAlert = (alert) => setVerifiedAlertState((current) => current?.id === alert?.id ? null : alert)
-  const { socket, isConnected, lastMessage } = useWebSocket(`${WS_BASE_URL}/api/v1/ws`)
+  const { socket, isConnected, lastMessage } = useWebSocket(WS_URL)
 
   useEffect(() => {
     const clock = window.setInterval(() => setCurrentTime(new Date()), 1000)
@@ -1127,6 +1255,13 @@ export const Dashboard = () => {
 
     try {
       const rescuer = findRescuerBySelection(normalizedRescuerSelection)
+      const alert = alerts.find((entry) => String(entry.id) === String(alertId))
+      const hasAvailableRescuer = rescueUnits.rescuers.some(isAvailableRescuer)
+      if (rescuer && isRecoveringRescuer(rescuer) && !isCriticalAlert(alert) && hasAvailableRescuer) {
+        setAlertStatus('Recovering rescuers can only be assigned to critical alerts or when no rescuer is available.')
+        return false
+      }
+
       const response = await fetch(`${API_BASE_URL}/api/v1/auth/alerts/${alertId}`, {
         method: 'PATCH',
         headers: getAuthHeaders(),
@@ -1138,7 +1273,10 @@ export const Dashboard = () => {
         })
       })
 
-      if (!response.ok) throw new Error('Unable to assign rescuer')
+      if (!response.ok) {
+        const responseData = await response.json()
+        throw new Error(responseData.detail || 'Unable to assign rescuer')
+      }
 
       const refreshed = await fetch(`${API_BASE_URL}/api/v1/auth/alerts`, { headers: getAuthHeaders() })
       if (refreshed.ok) setAlerts(await refreshed.json())
@@ -1151,12 +1289,10 @@ export const Dashboard = () => {
     }
   }
 
-  useEffect(() => {
-    if (assigningAlert && selectedRescuerId) {
-      handleAssignAlert(assigningAlert.id, selectedRescuerId)
-      setAssigningAlert(null)
-    }
-  }, [assigningAlert, selectedRescuerId])
+  const openAssignmentModal = (alertId) => {
+    const alert = alerts.find((entry) => String(entry.id) === String(alertId))
+    if (alert) setAssigningAlert(alert)
+  }
 
   const handleMergeAlerts = async () => {
     if (selectedMergeIds.length < 2) return
@@ -1187,15 +1323,19 @@ export const Dashboard = () => {
     }
   })
 
-  const alertMarkers = alerts.map((alert) => ({
-    kind: 'alert',
-    id: alert.id,
-    position: [alert.longitude, alert.latitude],
-    label: `${alert.sender_name} · ${statusLabel(alert.status)}`,
-    color: alertMarkerColors[alert.disaster_type] || alertMarkerColors.other,
-    icon: disasterIcons[alert.disaster_type] || disasterIcons.other,
-    details: { type: disasterLabels[alert.disaster_type] || 'Other alert', status: statusLabel(alert.status), reported_by: alert.sender_name, time: formatTime(alert.created_at), location: `${alert.latitude}, ${alert.longitude}`, severity: alert.severity, message: alert.message }
-  }))
+  const alertMarkers = alerts.map((alert) => {
+    const category = normalizeDisasterType(alert.disaster_type)
+    return {
+      kind: 'alert',
+      id: alert.id,
+      category,
+      position: [alert.longitude, alert.latitude],
+      label: `${alert.sender_name} · ${statusLabel(alert.status)}`,
+      color: alertMarkerColors[category],
+      icon: disasterIcons[category],
+      details: { type: disasterLabels[category], status: statusLabel(alert.status), reported_by: alert.sender_name, time: formatTime(alert.created_at), location: `${alert.latitude}, ${alert.longitude}`, severity: alert.severity, message: alert.message }
+    }
+  })
 
   const rescuerMarkers = rescueUnits.rescuers.filter((rescuer) => rescuer.current_latitude !== null && rescuer.current_longitude !== null).map((rescuer) => ({
     position: [rescuer.current_longitude, rescuer.current_latitude],
@@ -1313,9 +1453,16 @@ export const Dashboard = () => {
   }
 
   const rankedAssignmentRescuers = assigningAlert
-    ? [...rescueUnits.rescuers].sort((first, second) => {
-      const firstAvailable = first.status === 'available' ? 0 : 1
-      const secondAvailable = second.status === 'available' ? 0 : 1
+    ? getEligibleAssignmentRescuers(rescueUnits.rescuers, assigningAlert)
+      .sort((first, second) => {
+      const hasAvailableRescuer = rescueUnits.rescuers.some(isAvailableRescuer)
+      if (!hasAvailableRescuer) {
+        const firstRecovering = isRecoveringRescuer(first) ? 0 : 1
+        const secondRecovering = isRecoveringRescuer(second) ? 0 : 1
+        if (firstRecovering !== secondRecovering) return firstRecovering - secondRecovering
+      }
+      const firstAvailable = isAvailableRescuer(first) ? 0 : 1
+      const secondAvailable = isAvailableRescuer(second) ? 0 : 1
       if (firstAvailable !== secondAvailable) return firstAvailable - secondAvailable
       const firstCoordinates = getRescuerCoordinates(first)
       const secondCoordinates = getRescuerCoordinates(second)
@@ -1350,6 +1497,27 @@ export const Dashboard = () => {
     </div>
   )
 
+  const animateDashboardCardClick = (event) => {
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return
+
+    const target = event.target
+    if (!(target instanceof Element)) return
+
+    const card = target.closest(
+      '.sos-item, .rail-metric, .metric-card, .unit-row, .operational-panel, .feed-panel, .rail-box, .panel-title-clickable'
+    )
+    if (!card || !event.currentTarget.contains(card)) return
+
+    card.animate(
+      [
+        { transform: 'scale(1)' },
+        { transform: 'scale(0.985)', offset: 0.45 },
+        { transform: 'scale(1)' }
+      ],
+      { duration: 220, easing: 'cubic-bezier(0.2, 0.8, 0.2, 1)' }
+    )
+  }
+
   if (role !== 'dispatcher') {
     return (
       <main className="restricted-console">
@@ -1362,7 +1530,7 @@ export const Dashboard = () => {
   }
 
   return (
-    <main className="ops-console">
+    <main className="ops-console" onClickCapture={animateDashboardCardClick}>
       <header className="ops-header">
         <div className="brand-lockup">
           <Logo size="small" />
@@ -1371,11 +1539,72 @@ export const Dashboard = () => {
         <div className="header-actions">
           <span className={`connection ${isConnected ? 'online' : 'offline'}`}><i /> WebSocket: {isConnected ? 'Connected' : 'Reconnecting'}</span>
           <span className="header-time">{formattedCurrentTime} PHT</span>
+          <button
+            type="button"
+            className="panel-drawer-toggle"
+            aria-label={isPanelDrawerOpen ? 'Close dashboard panel settings' : 'Open dashboard panel settings'}
+            aria-expanded={isPanelDrawerOpen}
+            aria-controls="dashboard-panel-drawer"
+            onClick={() => setIsPanelDrawerOpen((open) => !open)}
+          >
+            <SlidersHorizontal size={15} />
+            <span>Panels</span>
+          </button>
           {accountMenu}
         </div>
       </header>
 
-      <HazardTicker hazards={roadHazards} />
+      {renderedPanels.operationsReport && (
+        <HazardTicker
+          hazards={roadHazards}
+          className={getPanelAnimationClass('operationsReport')}
+        />
+      )}
+
+      {isPanelDrawerOpen && (
+        <>
+          <button
+            type="button"
+            className="panel-drawer-backdrop"
+            aria-label="Close dashboard panel settings"
+            onClick={() => setIsPanelDrawerOpen(false)}
+          />
+          <aside id="dashboard-panel-drawer" className="panel-drawer" aria-label="Dashboard panel visibility">
+            <div className="panel-drawer-heading">
+              <div>
+                <strong>Dashboard panels</strong>
+                <span>Choose which cards are visible</span>
+              </div>
+              <button type="button" className="panel-drawer-close" onClick={() => setIsPanelDrawerOpen(false)} aria-label="Close panel settings">
+                <X size={16} />
+              </button>
+            </div>
+            <button type="button" className="panel-drawer-show-all" onClick={toggleAllPanels}>
+              {allPanelsVisible ? 'Hide all panels' : 'Show all panels'}
+            </button>
+            <div className="panel-drawer-options">
+              {[
+                ['operationsReport', 'Operations report and hazard ticker'],
+                ['operationalMetrics', 'Operational metrics'],
+                ['sosFeed', 'Live SOS feed'],
+                ['tacticalMap', 'Tactical map'],
+                ['averageResponse', 'Average response'],
+                ['vehicles', 'Vehicles'],
+                ['rescuers', 'Rescuer profiles'],
+              ].map(([panel, label]) => (
+                <label key={panel} className="panel-drawer-option">
+                  <input
+                    type="checkbox"
+                    checked={visiblePanels[panel]}
+                    onChange={() => togglePanel(panel)}
+                  />
+                  <span>{label}</span>
+                </label>
+              ))}
+            </div>
+          </aside>
+        </>
+      )}
 
       {latestStatusReport && (
         <section
@@ -1404,7 +1633,7 @@ export const Dashboard = () => {
         </section>
       )}
 
-      <section className="report-toolbar" aria-labelledby="report-toolbar-title">
+      {renderedPanels.operationsReport && <section className={`report-toolbar ${getPanelAnimationClass('operationsReport')}`} aria-labelledby="report-toolbar-title">
         <div className="report-toolbar-heading">
           <strong id="report-toolbar-title">OPERATIONS REPORT</strong>
           <span>
@@ -1443,13 +1672,16 @@ export const Dashboard = () => {
           <span className="report-range-error" role="alert">The start date must be on or before the end date.</span>
         )}
         {reportExportError && <span className="report-range-error" role="alert">{reportExportError}</span>}
-      </section>
+      </section>}
 
-      <section className="ops-grid">
+      <section
+        className={`ops-grid${gridColumns.length === 0 ? ' is-empty' : ''}`}
+        style={gridColumns.length > 0 ? { gridTemplateColumns: gridColumns.join(' ') } : undefined}
+      >
         {/* LEFT COLUMN: Operational Metrics (Top) + Live SOS Feed (Bottom) */}
-        <aside className="left-rail">
+        {hasLeftRail && <aside className="left-rail">
           {/* TOP: Operational Metrics */}
-          <section className="operational-panel">
+          {renderedPanels.operationalMetrics && <section className={`operational-panel ${getPanelAnimationClass('operationalMetrics')}`}>
             <PanelTitle title="OPERATIONAL METRICS" />
             <div className="operational-metrics-body">
               <Metric label="ACTIVE SOS" value={alertCount} color="red" />
@@ -1464,10 +1696,10 @@ export const Dashboard = () => {
                 color="green"
               />
             </div>
-          </section>
+          </section>}
 
           {/* BOTTOM: Live SOS Feed */}
-          <section className="feed-panel">
+          {renderedPanels.sosFeed && <section className={`feed-panel ${getPanelAnimationClass('sosFeed')}`}>
             <PanelTitle title="LIVE SOS FEED" badge="LIVE" onClick={() => openModal('alerts')} />
             <div className="feed-list">
               <div className="feed-view-switch" role="group" aria-label="Choose SOS alert view">
@@ -1552,7 +1784,7 @@ export const Dashboard = () => {
                           key={`pinned-${alert.id}`}
                           alert={alert}
                           now={currentTime}
-                          onAssign={handleAssignAlert}
+                          onAssign={openAssignmentModal}
                           onView={handleViewAlert}
                         />
                       ))
@@ -1593,7 +1825,7 @@ export const Dashboard = () => {
                           key={alert.id}
                           alert={alert}
                           now={currentTime}
-                          onAssign={handleAssignAlert}
+                          onAssign={openAssignmentModal}
                           onView={handleViewAlert}
                         />
                       ))
@@ -1624,13 +1856,32 @@ export const Dashboard = () => {
                 </div>
               )}
             </div>
-          </section>
-        </aside>
+          </section>}
+        </aside>}
 
         {/* CENTER COLUMN: MAP ONLY */}
-        <main className="center-column map-only-column">
+        {renderedPanels.tacticalMap && <main className={`center-column map-only-column ${getPanelAnimationClass('tacticalMap')}`}>
           <section className="map-panel">
             <PanelTitle title="CDRRMO TACTICAL MAP AREA" badge="TRACKING MAP" />
+            <div className="map-category-filter" role="group" aria-label="Filter alert markers by category">
+              {alertCategoryOptions.map((category) => (
+                <button
+                  key={category.value}
+                  type="button"
+                  className={selectedMapAlertCategory === category.value ? 'is-selected' : ''}
+                  style={{ '--category-color': category.color }}
+                  aria-pressed={selectedMapAlertCategory === category.value}
+                  onClick={() => {
+                    setSelectedMapAlertCategory(category.value)
+                    setRegularAlertPage(0)
+                    setPinnedAlertPage(0)
+                    setClosedAlertPage(0)
+                  }}
+                >
+                  {category.label}
+                </button>
+              ))}
+            </div>
             <div className="map-stage" style={{ height: `${mapHeight}px` }}>
               <DraggableMapOverlay className="map-coordinate" label="Map center coordinates" defaultPosition={{ left: 12, top: 12 }}>
                 {primaryCenter ? <>CENTER: {Number(primaryCenter.latitude).toFixed(5)}° N<br />LONG: {Number(primaryCenter.longitude).toFixed(5)}° E</> : 'CENTER: NO ACTIVE CENTER'}
@@ -1641,7 +1892,7 @@ export const Dashboard = () => {
                 <span><i className="dot green" /> AVAILABLE / CENTER</span>
                 <span><i className="dot blue" /> RESOLVING / IN TRANSIT</span>
               </DraggableMapOverlay>
-              <MapContainer markers={[...mapMarkers, ...activeRouteMarkers]} center={focusedAlertLocation} focusMarkerId={focusedAlertId} centerRequestKey={focusRequestKey} route={activeEvacuationRoute?.geometry} trackDeviceLocation={false} />
+              <MapContainer markers={[...mapMarkers, ...activeRouteMarkers]} center={focusedAlertLocation} focusMarkerId={focusedAlertId} selectedAlertCategory={selectedMapAlertCategory} centerRequestKey={focusRequestKey} route={activeEvacuationRoute?.geometry} trackDeviceLocation={false} />
               {activeEvacuationRoute && (
                 <DraggableMapOverlay className="evac-label evac-label-list" label="Active citizen evacuation route" defaultPosition={{ left: 280, top: 12 }}>
                   <b>ACTIVE EVACUATION ROUTE</b>
@@ -1660,12 +1911,12 @@ export const Dashboard = () => {
               <button className="map-resize-handle" onPointerDown={startMapResize} aria-label="Drag to resize map" title="Drag to resize map">↕</button>
             </div>
           </section>
-        </main>
+        </main>}
 
         {/* RIGHT RAIL: Average Response -> Vehicles -> Rescuer Profiles */}
-        <aside className="right-rail">
+        {hasRightRail && <aside className="right-rail">
           {/* 1. TOP: Average Response */}
-          <section className="metric-card response-card">
+          {renderedPanels.averageResponse && <section className={`metric-card response-card ${getPanelAnimationClass('averageResponse')}`}>
             <small>AVERAGE RESPONSE</small>
             <strong>{averageResponseMinutes === null ? '—' : `${averageResponseMinutes.toFixed(1)} min`}</strong>
             <span>
@@ -1673,10 +1924,10 @@ export const Dashboard = () => {
                 ? 'No closed alerts to calculate'
                 : `Mean from ${closedAlertResponseTimes.length} closed alert${closedAlertResponseTimes.length === 1 ? '' : 's'}`}
             </span>
-          </section>
+          </section>}
 
           {/* 2. MIDDLE: Vehicles */}
-          <section className="rail-box vehicle-box">
+          {renderedPanels.vehicles && <section className={`rail-box vehicle-box ${getPanelAnimationClass('vehicles')}`}>
             <div className="unit-panel-heading">
               <PanelTitle
                 title="VEHICLES"
@@ -1707,16 +1958,24 @@ export const Dashboard = () => {
                 ))
               )}
             </div>
-          </section>
+          </section>}
 
           {/* 3. BOTTOM: Rescuer Profiles */}
-          <section className="rail-box rescuer-box">
+          {renderedPanels.rescuers && <section className={`rail-box rescuer-box ${getPanelAnimationClass('rescuers')}`}>
             <div className="unit-panel-heading">
               <PanelTitle
                 title="RESCUER PROFILES"
                 badge={`${rescueUnits.rescuers.length} ACTIVE`}
                 onClick={() => openModal('units')}
               />
+              <button
+                className="call-rescuer-button"
+                type="button"
+                disabled={!isVoiceReady || Boolean(callId) || !sortedRescuers.some((rescuer) => rescuer.user_id != null)}
+                onClick={() => startCall(sortedRescuers.map((rescuer) => rescuer.user_id).filter((userId) => userId != null))}
+              >
+                CALL ALL
+              </button>
               <select
                 value={unitSort}
                 onChange={(event) => setUnitSort(event.target.value)}
@@ -1732,18 +1991,106 @@ export const Dashboard = () => {
                 <p className="unit-empty">No rescuer profiles</p>
               ) : (
                 sortedRescuers.map((rescuer) => (
-                  <Unit
-                    key={`rescuer-${rescuer.id}`}
-                    name={rescuer.full_name || rescuer.username}
-                    detail={`${rescuer.station_name || 'No station'} · @${rescuer.username}`}
-                    status={rescuer.status}
-                  />
+                  <div key={`rescuer-${rescuer.id}`} className="rescuer-call-row">
+                    <Unit
+                      name={rescuer.full_name || rescuer.username}
+                      detail={`${rescuer.station_name || 'No station'} · @${rescuer.username}`}
+                      status={rescuer.status}
+                    />
+                    <button
+                      className="call-rescuer-button"
+                      type="button"
+                      disabled={!isVoiceReady || rescuer.user_id == null || Boolean(callId)}
+                      onClick={() => startCall([rescuer.user_id])}
+                      aria-label={`Call ${rescuer.full_name || rescuer.username}`}
+                    >
+                      CALL
+                    </button>
+                  </div>
                 ))
               )}
             </div>
-          </section>
-        </aside>
+          </section>}
+        </aside>}
       </section>
+
+      {/* Voice call footer */}
+      {callError && !callId && (
+        <div role="alert" className="voice-call-error">{callError}</div>
+      )}
+      {callId && (
+        <div
+          style={{
+            position: 'fixed',
+            bottom: 24,
+            right: 24,
+            zIndex: 99999,
+            background: '#0b1120',
+            border: '1px solid #1e293b',
+            borderRadius: '12px',
+            padding: '16px 20px',
+            width: '360px',
+            maxWidth: 'calc(100vw - 48px)',
+            boxShadow: '0 10px 40px rgba(0,0,0,0.4)',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '12px',
+            alignItems: 'stretch',
+          }}
+        >
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <span style={{ color: '#f1f5f9', fontWeight: '600', fontSize: '14px' }}>
+              Conference call
+            </span>
+            <button
+              onClick={endCall}
+              style={{
+                background: 'none', border: 'none', color: '#94a3b8', cursor: 'pointer',
+                fontSize: '18px', padding: '4px', lineHeight: 1,
+              }}
+            >
+              &times;
+            </button>
+          </div>
+
+          {Object.entries(remoteStreams).map(([userId, stream]) => (
+            <audio
+              key={userId}
+              autoPlay
+              ref={(audio) => {
+                if (audio && audio.srcObject !== stream) audio.srcObject = stream
+              }}
+              aria-label={`Audio from rescuer ${userId}`}
+            />
+          ))}
+          <div style={{ color: '#cbd5e1', fontSize: '13px' }}>
+            {callParticipants.map((participant) => (
+              <p key={participant.user_id} style={{ margin: '4px 0' }}>
+                {participant.display_name} · {participant.status}
+              </p>
+            ))}
+            {!callParticipants.some((participant) => participant.status === 'connected')
+              && <p style={{ color: '#f59e0b', textAlign: 'center' }}>Waiting for rescuers to accept…</p>}
+          </div>
+          {callError && (
+            <p style={{ color: '#ef4444', textAlign: 'center', fontSize: '12px' }}>{callError}</p>
+          )}
+
+          <div style={{ display: 'flex', gap: '8px', marginTop: '8px' }}>
+            {callParticipants.length > 0 && (
+              <button
+                onClick={endCall}
+                style={{
+                  flex: 1, padding: '8px', borderRadius: '8px', fontWeight: '600', cursor: 'pointer',
+                  background: '#ef4444', color: '#fff', border: 'none', fontSize: '13px',
+                }}
+              >
+                End Call
+              </button>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* MODAL */}
       {activeModal && (
@@ -1787,7 +2134,7 @@ export const Dashboard = () => {
                         <div className="modal-alert-actions">
                           <select value={selectedRescuerId} onChange={(event) => setSelectedRescuerId(event.target.value)} aria-label="Select rescuer">
                             <option value="">Assign...</option>
-                            {rescuers.map((rescuer) => (
+                            {getEligibleAssignmentRescuers(rescuers, alert).map((rescuer) => (
                               <option key={rescuer.id} value={rescuer.id}>
                                 {rescuer.display_name || rescuer.full_name || rescuer.username}
                               </option>
@@ -1850,13 +2197,15 @@ export const Dashboard = () => {
 
       {assigningAlert && (
         <AssignmentModal
+          key={assigningAlert.id}
           alert={assigningAlert}
           rescuers={rankedAssignmentRescuers}
+          hasAvailableRescuer={rescueUnits.rescuers.some(isAvailableRescuer)}
           vehicles={rescueUnits.vehicles}
           getRescuerDistance={getRescuerDistance}
           onConfirm={async (rescuer, vehicleIds) => {
-            await handleAssignAlert(assigningAlert.id, String(rescuer.user_id), vehicleIds)
-            setAssigningAlert(null)
+            const assigned = await handleAssignAlert(assigningAlert.id, String(rescuer.user_id), vehicleIds)
+            if (assigned) setAssigningAlert(null)
           }}
           onClose={() => setAssigningAlert(null)}
         />

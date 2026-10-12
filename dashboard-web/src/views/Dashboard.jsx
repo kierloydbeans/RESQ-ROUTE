@@ -2,6 +2,7 @@ import React from 'react'
 import { Navigate } from 'react-router-dom'
 import CitizenDashboard from './CitizenDashboard'
 import DispatcherDashboard from './DispatcherDashboard'
+import CoordinatorDashboard from './CoordinatorDashboard'
 
 const getStoredAuth = () => {
   try {
@@ -26,7 +27,11 @@ export const Dashboard = () => {
     return <CitizenDashboard auth={auth} onLogout={handleLogout} />
   }
 
-  if (['dispatcher', 'coordinator', 'admin'].includes(role)) {
+  if (role === 'coordinator') {
+    return <CoordinatorDashboard auth={auth} onLogout={handleLogout} />
+  }
+
+  if (['dispatcher', 'admin'].includes(role)) {
     return <DispatcherDashboard auth={auth} onLogout={handleLogout} />
   }
 

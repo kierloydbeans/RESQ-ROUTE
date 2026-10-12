@@ -2,29 +2,11 @@ import React, { useEffect, useRef, useState } from 'react'
 import { useWebSocket } from '../hooks/useWebSocket'
 import MapContainer from '../components/MapContainer'
 import Logo from '../components/Logo'
-import { UploadCloud } from 'lucide-react'
+import { Menu, UploadCloud } from 'lucide-react'
 import 'maplibre-gl/dist/maplibre-gl.css'
 import "../styles/citizen-console.css";
 
 const Icons = {
-  Sun: () => (
-    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <circle cx="12" cy="12" r="5" />
-      <line x1="12" y1="1" x2="12" y2="3" />
-      <line x1="12" y1="21" x2="12" y2="23" />
-      <line x1="4.22" y1="4.22" x2="5.64" y2="5.64" />
-      <line x1="18.36" y1="18.36" x2="19.78" y2="19.78" />
-      <line x1="1" y1="12" x2="3" y2="12" />
-      <line x1="21" y1="12" x2="23" y2="12" />
-      <line x1="4.22" y1="19.78" x2="5.64" y2="18.36" />
-      <line x1="18.36" y1="5.64" x2="19.78" y2="4.22" />
-    </svg>
-  ),
-  Moon: () => (
-    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" />
-    </svg>
-  ),
   Water: () => (
     <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
       <path d="M12 2.69l5.66 5.66a8 8 0 1 1-11.31 0z" />
@@ -198,18 +180,60 @@ const rawApiBase = (import.meta.env.VITE_API_URL || import.meta.env.VITE_API_BAS
 const API_BASE_URL = rawApiBase.endsWith('/api/v1') ? rawApiBase.replace(/\/api\/v1$/, '') : rawApiBase
 const WS_BASE_URL = API_BASE_URL.replace(/^http/, 'ws')
 
+const isCenterFull = (center) => {
+  const capacity = Number(center?.capacity) || 100
+  const occupancy = Number(center?.current_occupancy) || 0
+  return occupancy >= capacity
+}
+
+const isCenterAvailable = (center) => center?.is_active !== false && !isCenterFull(center)
+
+const getDistanceKm = (latitude, longitude, center) => {
+  const centerLatitude = Number(center.latitude)
+  const centerLongitude = Number(center.longitude)
+  const radians = (degrees) => (degrees * Math.PI) / 180
+  const latitudeDelta = radians(centerLatitude - latitude)
+  const longitudeDelta = radians(centerLongitude - longitude)
+  const arc =
+    Math.sin(latitudeDelta / 2) ** 2 +
+    Math.cos(radians(latitude)) *
+      Math.cos(radians(centerLatitude)) *
+      Math.sin(longitudeDelta / 2) ** 2
+  return 6371 * 2 * Math.atan2(Math.sqrt(arc), Math.sqrt(1 - arc))
+}
+
+const getReadablePinnedLocation = (location, centers) => {
+  if (!location || centers.length === 0) return 'Map location selected'
+
+  const nearestCenter = centers
+    .filter((center) => Number.isFinite(Number(center.latitude)) && Number.isFinite(Number(center.longitude)))
+    .map((center) => ({ center, distance: getDistanceKm(location.latitude, location.longitude, center) }))
+    .sort((first, second) => first.distance - second.distance)[0]
+
+  if (!nearestCenter || nearestCenter.distance > 1.5) return 'Map location selected'
+  return `Near ${nearestCenter.center.address || nearestCenter.center.name}`
+}
+
 export const CitizenDashboard = ({ auth, onLogout }) => {
   const [latestGps, setLatestGps] = useState(null)
   const [centers, setCenters] = useState([])
   const [roadHazards, setRoadHazards] = useState([])
   const [selectedCenter, setSelectedCenter] = useState(null)
+  const [centerRequestKey, setCenterRequestKey] = useState(0)
+  const [isDetailClosing, setIsDetailClosing] = useState(false)
+  const detailCloseTimeoutRef = useRef(null)
+  const [isReportClosing, setIsReportClosing] = useState(false)
+  const reportCloseTimeoutRef = useRef(null)
   const [evacuationRoute, setEvacuationRoute] = useState(null)
   const [routeLoading, setRouteLoading] = useState(false)
   const [routeInfo, setRouteInfo] = useState(null)
   const [searchQuery, setSearchQuery] = useState('')
+  const [isShelterPanelCollapsed, setIsShelterPanelCollapsed] = useState(false)
   const [activeTab, setActiveTab] = useState('shelters')
+  const [isProfileMenuOpen, setIsProfileMenuOpen] = useState(false)
   const [savedShelterIds, setSavedShelterIds] = useState([])
   const [copyFeedback, setCopyFeedback] = useState('')
+  const profileMenuRef = useRef(null)
 
   const [pinnedLocation, setPinnedLocation] = useState(null)
 
@@ -229,8 +253,6 @@ export const CitizenDashboard = ({ auth, onLogout }) => {
 
   const [peopleAffected, setPeopleAffected] = useState(3)
 
-  const [isDark, setIsDark] = useState(() => localStorage.getItem('resq-theme') === 'dark')
-
   const { isConnected } = useWebSocket(`${WS_BASE_URL}/api/v1/ws`)
   const displayName = auth?.user?.full_name || auth?.user?.username || 'Resident'
   const [currentTime, setCurrentTime] = useState(() => new Date())
@@ -240,10 +262,33 @@ export const CitizenDashboard = ({ auth, onLogout }) => {
     return () => clearInterval(clockInterval)
   }, [])
 
+  useEffect(() => () => {
+    window.clearTimeout(detailCloseTimeoutRef.current)
+    window.clearTimeout(reportCloseTimeoutRef.current)
+  }, [])
+
+  useEffect(() => {
+    if (!isProfileMenuOpen) return undefined
+
+    const closeOnOutsideClick = (event) => {
+      if (!profileMenuRef.current?.contains(event.target)) setIsProfileMenuOpen(false)
+    }
+    const closeOnEscape = (event) => {
+      if (event.key === 'Escape') setIsProfileMenuOpen(false)
+    }
+
+    document.addEventListener('pointerdown', closeOnOutsideClick)
+    document.addEventListener('keydown', closeOnEscape)
+    return () => {
+      document.removeEventListener('pointerdown', closeOnOutsideClick)
+      document.removeEventListener('keydown', closeOnEscape)
+    }
+  }, [isProfileMenuOpen])
+
   const handleMapClick = (coords) => {
     setPinnedLocation(coords)
     if (activeTab === 'alert') {
-      setAlertStatus(`Pinned location: ${coords.latitude.toFixed(4)}, ${coords.longitude.toFixed(4)}`)
+      setAlertStatus(`Pinned location: ${getReadablePinnedLocation(coords, centers)}`)
     }
   }
 
@@ -255,7 +300,7 @@ export const CitizenDashboard = ({ auth, onLogout }) => {
     hour12: false
   }).format(currentTime)
 
-  const alternativeCenter = centers.find((c) => c.id !== selectedCenter?.id && c.is_active !== false) || null
+  const alternativeCenter = centers.find((c) => c.id !== selectedCenter?.id && isCenterAvailable(c)) || null
 
   useEffect(() => {
     if (!('geolocation' in navigator)) return
@@ -266,11 +311,6 @@ export const CitizenDashboard = ({ auth, onLogout }) => {
     )
     return () => navigator.geolocation.clearWatch(watchId)
   }, [])
-
-  useEffect(() => {
-    document.documentElement.dataset.theme = isDark ? 'dark' : 'light'
-    localStorage.setItem('resq-theme', isDark ? 'dark' : 'light')
-  }, [isDark])
 
   useEffect(() => {
     fetch(`${API_BASE_URL}/api/v1/shelters/?limit=100`)
@@ -293,6 +333,8 @@ export const CitizenDashboard = ({ auth, onLogout }) => {
   }, [])
 
   const handleRouteToCenter = async (center) => {
+    if (!isCenterAvailable(center)) return
+
     const originLocation = pinnedLocation || latestGps
     if (!originLocation) {
       setAlertStatus('Location required. Please enable GPS or pin a location on the map.')
@@ -330,9 +372,43 @@ export const CitizenDashboard = ({ auth, onLogout }) => {
   }
 
   const handleCloseDetail = () => {
-    setSelectedCenter(null)
-    setEvacuationRoute(null)
-    setRouteInfo(null)
+    if (!selectedCenter || isDetailClosing) return
+    setIsDetailClosing(true)
+    detailCloseTimeoutRef.current = window.setTimeout(() => {
+      setSelectedCenter(null)
+      setIsDetailClosing(false)
+      setEvacuationRoute(null)
+      setRouteInfo(null)
+    }, 260)
+  }
+
+  const handleCloseReport = ({ clearShelterSelection = false } = {}) => {
+    if (activeTab !== 'alert' || isReportClosing) return
+    setIsReportClosing(true)
+    reportCloseTimeoutRef.current = window.setTimeout(() => {
+      if (clearShelterSelection) {
+        setSelectedCenter(null)
+        setEvacuationRoute(null)
+        setRouteInfo(null)
+      }
+      setActiveTab('shelters')
+      setIsReportClosing(false)
+    }, 260)
+  }
+
+  const handleOpenReport = () => {
+    window.clearTimeout(reportCloseTimeoutRef.current)
+    window.clearTimeout(detailCloseTimeoutRef.current)
+    setIsReportClosing(false)
+    setIsDetailClosing(false)
+    setActiveTab('alert')
+  }
+
+  const handleSelectCenter = (center) => {
+    window.clearTimeout(detailCloseTimeoutRef.current)
+    setIsDetailClosing(false)
+    setSelectedCenter(center)
+    setCenterRequestKey((requestKey) => requestKey + 1)
   }
 
   const toggleSaveShelter = (centerId) => {
@@ -454,9 +530,12 @@ export const CitizenDashboard = ({ auth, onLogout }) => {
   }
 
   const centerMarkers = centers.filter((c) => c.is_active !== false).map((c) => ({
+    id: c.id,
+    kind: 'shelter',
     position: [c.longitude, c.latitude],
     label: c.name,
-    color: '#1a73e8',
+    color: isCenterFull(c) ? '#dc2626' : '#1a73e8',
+    isFull: isCenterFull(c),
     icon: '⌂'
   }))
 
@@ -468,8 +547,10 @@ export const CitizenDashboard = ({ auth, onLogout }) => {
   }))
 
   const isSaved = selectedCenter && savedShelterIds.includes(selectedCenter.id)
-  const capacity = selectedCenter?.capacity || 100
-  const occupancy = selectedCenter?.current_occupancy || 0
+  const capacity = Number(selectedCenter?.capacity) || 100
+  const occupancy = Number(selectedCenter?.current_occupancy) || 0
+  const selectedCenterFull = Boolean(selectedCenter && isCenterFull(selectedCenter))
+  const selectedCenterAvailable = Boolean(selectedCenter && isCenterAvailable(selectedCenter))
   const remainingSpaces = Math.max(0, capacity - occupancy)
   const occupancyRate = Math.min(100, Math.round((occupancy / capacity) * 100))
 
@@ -532,26 +613,36 @@ export const CitizenDashboard = ({ auth, onLogout }) => {
         <MapContainer
           markers={[...centerMarkers, ...hazardMarkers]}
           route={evacuationRoute}
+          center={selectedCenter ? [selectedCenter.longitude, selectedCenter.latitude] : null}
+          centerRequestKey={centerRequestKey}
+          centerZoom={17}
+          highlightMarkerId={selectedCenter?.id ?? null}
           pinnedLocation={pinnedLocation}
           onMapClick={handleMapClick}
         />
       </div>
 
       {/* 2. Top Pill Filter Chips */}
-      <div className="citizen-top-bar">
+      <div
+        className={`citizen-top-bar ${activeTab === 'shelters' && isShelterPanelCollapsed ? 'shelter-panel-collapsed' : ''}`}
+      >
         <div className="citizen-chip-row">
           <button
             className={`citizen-chip ${activeTab === 'shelters' ? 'active' : ''}`}
             onClick={() => {
-              setActiveTab('shelters')
-              setSelectedCenter(null)
+              if (activeTab === 'alert') {
+                handleCloseReport({ clearShelterSelection: true })
+              } else {
+                setActiveTab('shelters')
+                handleCloseDetail()
+              }
             }}
           >
             <Icons.Shelter /> Evacuation Centers
           </button>
           <button
             className={`citizen-chip alert-chip ${activeTab === 'alert' ? 'active' : ''}`}
-            onClick={() => setActiveTab('alert')}
+            onClick={handleOpenReport}
           >
             <Icons.Alert /> Report Emergency
           </button>
@@ -562,44 +653,75 @@ export const CitizenDashboard = ({ auth, onLogout }) => {
         </div>
       </div>
 
-      {/* 3. Floating Controls (Theme Toggle & Circular Profile/Logout) */}
+      {/* 3. Profile and logout controls */}
       <div className="citizen-top-right-controls">
-        <button
-          type="button"
-          className="theme-toggle-btn"
-          onClick={() => setIsDark((prev) => !prev)}
-          title="Toggle Dark/Light Mode"
-        >
-          {isDark ? <Icons.Sun /> : <Icons.Moon />}
-        </button>
-
         {onLogout && (
-          <button
-            type="button"
-            className="citizen-profile-avatar-btn"
-            onClick={onLogout}
-            title={`Logged in as ${displayName} — Click to Logout`}
-          >
-            {displayName.charAt(0).toUpperCase()}
-          </button>
+          <div className="citizen-profile-menu" ref={profileMenuRef}>
+            <button
+              type="button"
+              className="citizen-profile-avatar-btn"
+              onClick={() => setIsProfileMenuOpen((isOpen) => !isOpen)}
+              title={`Logged in as ${displayName}`}
+              aria-label={`Account menu for ${displayName}`}
+              aria-haspopup="menu"
+              aria-expanded={isProfileMenuOpen}
+            >
+              {displayName.charAt(0).toUpperCase()}
+            </button>
+            {isProfileMenuOpen && (
+              <div className="citizen-profile-dropdown" role="menu">
+                <span className="citizen-profile-name">{displayName}</span>
+                <button
+                  type="button"
+                  role="menuitem"
+                  onClick={() => {
+                    setIsProfileMenuOpen(false)
+                    onLogout()
+                  }}
+                >
+                  Logout
+                </button>
+              </div>
+            )}
+          </div>
         )}
       </div>
 
       {/* 4. Left Panel */}
-      <aside className="citizen-sidebar">
+      {activeTab === 'shelters' && (
+        <button
+          type="button"
+          className={`shelter-panel-toggle ${isShelterPanelCollapsed ? 'collapsed' : ''}`}
+          aria-label={isShelterPanelCollapsed ? 'Show shelter panel' : 'Hide shelter panel'}
+          aria-expanded={!isShelterPanelCollapsed}
+          aria-controls="citizen-shelter-sidebar"
+          onClick={() => setIsShelterPanelCollapsed((collapsed) => !collapsed)}
+        >
+          <Menu size={20} aria-hidden="true" />
+        </button>
+      )}
+      <aside
+        id="citizen-shelter-sidebar"
+        className={`citizen-sidebar ${activeTab === 'shelters' ? 'shelter-sidebar' : 'report-sidebar'} ${activeTab === 'shelters' && isShelterPanelCollapsed ? 'collapsed' : ''}`}
+        aria-hidden={activeTab === 'shelters' && isShelterPanelCollapsed}
+        inert={activeTab === 'shelters' && isShelterPanelCollapsed}
+      >
         <div className="mobile-pull-handle" />
         {activeTab === 'alert' ? (
-          <div className="citizen-scroll-content report-panel-padding">
+          <div
+            className={`citizen-scroll-content report-panel-padding${isReportClosing ? ' closing' : ''}`}
+            aria-hidden={isReportClosing}
+          >
             <div className="report-incident-card">
               <div className="report-header-row">
                 <div>
                   <h2 className="report-header-title">Report incident</h2>
-                  <p className="report-header-subtitle">Shares live coordinates directly to dispatchers.</p>
+                  <p className="report-header-subtitle">Shares your selected location directly with dispatchers.</p>
                 </div>
                 <button
                   type="button"
                   className="report-close-btn"
-                  onClick={() => setActiveTab('shelters')}
+                  onClick={() => handleCloseReport()}
                 >
                   <Icons.Close />
                 </button>
@@ -607,7 +729,7 @@ export const CitizenDashboard = ({ auth, onLogout }) => {
 
               {pinnedLocation && (
                 <div className="pinned-location-banner">
-                  <span>📍 Pin set: {pinnedLocation.latitude.toFixed(4)}, {pinnedLocation.longitude.toFixed(4)}</span>
+                  <span>📍 Pin set: {getReadablePinnedLocation(pinnedLocation, centers)}</span>
                   <button
                     type="button"
                     className="pinned-location-clear-btn"
@@ -742,10 +864,12 @@ export const CitizenDashboard = ({ auth, onLogout }) => {
                 <span>{isSubmittingAlert ? 'Sending SOS...' : isUploadingMedia ? 'Uploading media...' : pendingMediaAlertId ? 'Retry media upload' : 'Send emergency SOS'}</span>
               </button>
 
-              <div className="report-offline-banner">
-                <Icons.WifiOff />
-                <span>No signal? Report queues and sends automatically once connected.</span>
-              </div>
+              {!isConnected && (
+                <div className="report-offline-banner">
+                  <Icons.WifiOff />
+                  <span>No signal? Report queues and sends automatically once connected.</span>
+                </div>
+              )}
 
               <div className="report-status-section">
                 <span className="report-status-heading">Status & activity</span>
@@ -757,7 +881,7 @@ export const CitizenDashboard = ({ auth, onLogout }) => {
             </div>
           </div>
         ) : selectedCenter ? (
-          <div className="shelter-detail-wrapper">
+          <div className={`shelter-detail-wrapper ${isDetailClosing ? 'closing' : ''}`}>
             <div className="detail-nav-bar">
               <button className="detail-nav-btn" onClick={handleCloseDetail} title="Back to list">
                 <Icons.Back />
@@ -784,14 +908,14 @@ export const CitizenDashboard = ({ auth, onLogout }) => {
                       <Icons.ImageIcon />
                     </div> */}
                   </div>
-                  <span className="shelter-hero-caption">Safe haven facility</span>
+                  <span className="shelter-hero-caption">Evacuation center</span>
                 </div>
 
                 <div className="shelter-header-group">
                   <div className="shelter-title-row">
                     <h2 className="shelter-name-heading">{selectedCenter.name}</h2>
-                    <span className={`shelter-status-pill ${selectedCenter.is_active !== false ? 'open' : 'closed'}`}>
-                      {selectedCenter.is_active !== false ? 'Open' : 'Closed'}
+                    <span className={`shelter-status-pill ${selectedCenterAvailable ? 'open' : 'closed'}`}>
+                      {selectedCenterAvailable ? 'Open' : 'Closed'}
                     </span>
                   </div>
                   <span className="shelter-updated-time">Updated 4 minutes ago</span>
@@ -810,7 +934,7 @@ export const CitizenDashboard = ({ auth, onLogout }) => {
                     type="button"
                     className="shelter-btn-pill"
                     onClick={() => handleRouteToCenter(selectedCenter)}
-                    disabled={routeLoading}
+                    disabled={routeLoading || !selectedCenterAvailable}
                   >
                     <Icons.Directions />
                     <span>{routeLoading ? 'Calculating...' : 'Directions'}</span>
@@ -840,7 +964,7 @@ export const CitizenDashboard = ({ auth, onLogout }) => {
                     <span className="occupancy-label">Occupancy</span>
                     <span className={`occupancy-status-alert ${occupancyRate >= 75 ? 'critical' : occupancyRate >= 50 ? 'warning' : 'good'}`}>
                       <Icons.TrendUp />
-                      <span>{occupancyRate >= 75 ? 'Near capacity' : occupancyRate >= 50 ? 'Filling fast' : 'Slots available'}</span>
+                      <span>{selectedCenterFull ? 'Full capacity' : occupancyRate >= 75 ? 'Near capacity' : occupancyRate >= 50 ? 'Filling fast' : 'Slots available'}</span>
                     </span>
                   </div>
 
@@ -886,7 +1010,7 @@ export const CitizenDashboard = ({ auth, onLogout }) => {
                       role="button"
                       tabIndex={0}
                       onClick={() => {
-                        setSelectedCenter(alternativeCenter)
+                        handleSelectCenter(alternativeCenter)
                         handleRouteToCenter(alternativeCenter)
                       }}
                     >
@@ -906,58 +1030,60 @@ export const CitizenDashboard = ({ auth, onLogout }) => {
         ) : (
           <>
             <div className="shelter-search-section">
-              <div className="citizen-search-box">
-                <Icons.Search />
-                <input
-                  type="text"
-                  className="citizen-search-field"
-                  placeholder="Search evacuation centers..."
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                />
-                {searchQuery && (
-                  <button className="citizen-clear-btn" onClick={() => setSearchQuery('')}>
-                    <Icons.Close />
-                  </button>
-                )}
-              </div>
+              <div className="shelter-search-controls">
+                <div className="citizen-search-box">
+                  <Icons.Search />
+                  <input
+                    type="text"
+                    className="citizen-search-field"
+                    placeholder="Search evacuation centers..."
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                  />
+                  {searchQuery && (
+                    <button className="citizen-clear-btn" onClick={() => setSearchQuery('')}>
+                      <Icons.Close />
+                    </button>
+                  )}
+                </div>
 
-              <div className="shelter-filter-row">
-                <button
-                  type="button"
-                  className={`shelter-filter-pill ${filterType === 'nearest' ? 'active' : ''}`}
-                  onClick={() => setFilterType('nearest')}
-                >
-                  Nearest
-                </button>
-                <button
-                  type="button"
-                  className={`shelter-filter-pill ${filterType === 'most_space' ? 'active' : ''}`}
-                  onClick={() => setFilterType('most_space')}
-                >
-                  Most space
-                </button>
-                <button
-                  type="button"
-                  className={`shelter-filter-pill ${filterType === 'accessible' ? 'active' : ''}`}
-                  onClick={() => setFilterType('accessible')}
-                >
-                  <Icons.Accessible /> Accessible
-                </button>
-                <button
-                  type="button"
-                  className={`shelter-filter-pill ${filterType === 'pet' ? 'active' : ''}`}
-                  onClick={() => setFilterType('pet')}
-                >
-                  <Icons.Pet /> Pet ok
-                </button>
+                <div className="shelter-filter-row">
+                  <button
+                    type="button"
+                    className={`shelter-filter-pill ${filterType === 'nearest' ? 'active' : ''}`}
+                    onClick={() => setFilterType('nearest')}
+                  >
+                    Nearest
+                  </button>
+                  <button
+                    type="button"
+                    className={`shelter-filter-pill ${filterType === 'most_space' ? 'active' : ''}`}
+                    onClick={() => setFilterType('most_space')}
+                  >
+                    Most space
+                  </button>
+                  <button
+                    type="button"
+                    className={`shelter-filter-pill ${filterType === 'accessible' ? 'active' : ''}`}
+                    onClick={() => setFilterType('accessible')}
+                  >
+                    <Icons.Accessible /> Accessible
+                  </button>
+                  <button
+                    type="button"
+                    className={`shelter-filter-pill ${filterType === 'pet' ? 'active' : ''}`}
+                    onClick={() => setFilterType('pet')}
+                  >
+                    <Icons.Pet /> Pet ok
+                  </button>
+                </div>
               </div>
             </div>
 
             <div className="citizen-scroll-content">
               <div className="shelter-results-list">
                 <h3 className="shelter-results-header">
-                  NEARBY SAFE HAVENS ({processedCenters.length})
+                  NEARBY EVACUATION CENTERS ({processedCenters.length})
                 </h3>
 
                 {processedCenters.map((center) => {
@@ -970,7 +1096,7 @@ export const CitizenDashboard = ({ auth, onLogout }) => {
                       className="shelter-item-card"
                       role="button"
                       tabIndex={0}
-                      onClick={() => setSelectedCenter(center)}
+                      onClick={() => handleSelectCenter(center)}
                     >
                       <div className="shelter-item-avatar">
                         <Icons.Shelter />
@@ -998,8 +1124,8 @@ export const CitizenDashboard = ({ auth, onLogout }) => {
                               }}
                             />
                           </div>
-                          <span className="shelter-open-count" style={{ color: barColor }}>
-                            {center.openSlots} open
+                          <span className="shelter-open-count" style={{ color: center.occPct >= 100 ? '#dc2626' : barColor }}>
+                            {center.occPct >= 100 ? 'Full capacity' : `${center.openSlots} open`}
                           </span>
                         </div>
                       </div>
