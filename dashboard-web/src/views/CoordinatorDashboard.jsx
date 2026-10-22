@@ -46,6 +46,10 @@ const loadResqLogoBytes = async () => {
   return new Uint8Array(await response.arrayBuffer())
 }
 
+const SkeletonLine = ({ className = '' }) => (
+  <span className={`coord-skeleton ${className}`} aria-hidden="true" />
+)
+
 export const CoordinatorDashboard = ({ auth, onLogout }) => {
   // Navigation tabs: 'centers' | 'registry' | 'inventory'
   const [activeTab, setActiveTab] = useState('centers')
@@ -265,15 +269,29 @@ const [selectedCenterId, setSelectedCenterId] = useState(null)
 
 // Per-center inventory state (fetched from center_inventory_detail view)
 const [centerInventory, setCenterInventory] = useState([])
+const [isCenterInventoryLoading, setIsCenterInventoryLoading] = useState(false)
+const [centerInventoryError, setCenterInventoryError] = useState('')
+
+const handleCenterSelect = (centerId) => {
+  const nextCenterId = selectedCenterId === centerId ? null : centerId
+  setSelectedCenterId(nextCenterId)
+  setCenterInventory([])
+  setCenterInventoryError('')
+  setIsCenterInventoryLoading(nextCenterId !== null)
+}
 
 // Fetch per-center inventory when selectedCenterId changes
 useEffect(() => {
   if (!selectedCenterId) {
     setCenterInventory([])
+    setIsCenterInventoryLoading(false)
     return
   }
 
   let isMounted = true
+  setCenterInventory([])
+  setCenterInventoryError('')
+  setIsCenterInventoryLoading(true)
   fetchCoordinatorCenterInventory(
     auth?.token || auth?.access_token,
     selectedCenterId
@@ -281,11 +299,16 @@ useEffect(() => {
     .then((data) => {
       if (isMounted) {
         setCenterInventory(Array.isArray(data) ? data : [])
+        setIsCenterInventoryLoading(false)
       }
     })
     .catch((error) => {
       console.error('[RESQ Coordinator] Failed to fetch center inventory:', error)
-      if (isMounted) setCenterInventory([])
+      if (isMounted) {
+        setCenterInventory([])
+        setCenterInventoryError('Unable to fetch stocks for this center. Please try again.')
+        setIsCenterInventoryLoading(false)
+      }
     })
 
   return () => {
@@ -972,7 +995,7 @@ const exportCoordinatorReportPdf = async () => {
       {/* 3. Main Dashboard Workspace */}
       <main className="coord-main-grid">
         {/* Left Interactive Panel */}
-        <div className="coord-left-column">
+        <div className="coord-left-column coord-tab-panel-enter" key={activeTab}>
           {/* TAB 1: CENTERS OVERVIEW */}
           {/* TAB 1: CENTERS OVERVIEW */}
           {activeTab === 'centers' && (
@@ -980,12 +1003,39 @@ const exportCoordinatorReportPdf = async () => {
               <section className="coord-panel coord-sites-panel">
                 <div className="coord-panel-header">
                   <h2 className="coord-panel-title">ACTIVE EVACUATION SITES</h2>
-                  <span className="coord-count-tag">{centers.length} CENTERS LISTED</span>
+                  <span className="coord-count-tag">
+                    {loading && !hasCentersData ? <SkeletonLine className="coord-skeleton-count" /> : `${centers.length} CENTERS LISTED`}
+                  </span>
                 </div>
 
                 <div className="coord-sites-scroll-grid">
-                  {loading && centers.length === 0 ? (
-                    <div className="coord-empty-state">Syncing evacuation facilities...</div>
+                  {loading && !hasCentersData ? (
+                    <div className="coord-skeleton-sites" role="status" aria-label="Loading evacuation sites">
+                      {Array.from({ length: 6 }, (_, index) => (
+                        <div className="coord-site-card coord-site-skeleton" key={index}>
+                          <div className="coord-site-top">
+                            <div className="coord-site-skeleton-copy">
+                              <SkeletonLine className="coord-skeleton-title" />
+                              <SkeletonLine className="coord-skeleton-address" />
+                            </div>
+                            <SkeletonLine className="coord-skeleton-status" />
+                          </div>
+                          <div className="coord-site-occupancy-row">
+                            <SkeletonLine className="coord-skeleton-occupancy" />
+                            <SkeletonLine className="coord-skeleton-percent" />
+                          </div>
+                          <SkeletonLine className="coord-skeleton-progress" />
+                          <div className="coord-demographics-grid">
+                            {Array.from({ length: 4 }, (_, metricIndex) => (
+                              <div className="coord-demo-box" key={metricIndex}>
+                                <SkeletonLine className="coord-skeleton-metric" />
+                                <SkeletonLine className="coord-skeleton-label" />
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
                   ) : centers.length === 0 ? (
                     <div className="coord-empty-state">No evacuation facilities registered.</div>
                   ) : (
@@ -1021,7 +1071,7 @@ const exportCoordinatorReportPdf = async () => {
                         <div
                           className={`coord-site-card clickable-site-card ${selectedCenterId === center.id ? 'is-selected-center' : ''}`}
                           key={center.id}
-                          onClick={() => setSelectedCenterId((prev) => (prev === center.id ? null : center.id))}
+                          onClick={() => handleCenterSelect(center.id)}
                         >
                           <div className="coord-site-top">
                             <div>
@@ -1179,7 +1229,12 @@ const exportCoordinatorReportPdf = async () => {
                       <button
                         type="button"
                         className="coord-clear-filter-btn"
-                        onClick={() => setSelectedCenterId(null)}
+                        onClick={() => {
+                          setSelectedCenterId(null)
+                          setCenterInventory([])
+                          setCenterInventoryError('')
+                          setIsCenterInventoryLoading(false)
+                        }}
                       >
                         View All Centers (Reset)
                       </button>
@@ -1214,12 +1269,44 @@ const exportCoordinatorReportPdf = async () => {
                       </tr>
                     </thead>
                     <tbody>
-                      {displayedInventory.length === 0 ? (
+                      {isCenterInventoryLoading ? (
+                        <>
+                          {Array.from({ length: 3 }, (_, index) => (
+                            <tr className="coord-skeleton-table-row" key={`center-inventory-skeleton-${index}`} aria-hidden="true">
+                              <td><SkeletonLine className="coord-skeleton-cell coord-skeleton-cell-short" /></td>
+                              <td><SkeletonLine className="coord-skeleton-cell" /></td>
+                              <td><SkeletonLine className="coord-skeleton-cell coord-skeleton-cell-small" /></td>
+                              <td><SkeletonLine className="coord-skeleton-cell coord-skeleton-cell-small" /></td>
+                              <td><SkeletonLine className="coord-skeleton-cell" /></td>
+                            </tr>
+                          ))}
+                          <tr>
+                            <td colSpan="5" className="coord-stock-loading-message" role="status" aria-live="polite">
+                              <span className="coord-loading-spinner" aria-hidden="true" />
+                              Fetching the stocks. Wait for a few seconds.
+                            </td>
+                          </tr>
+                        </>
+                      ) : centerInventoryError ? (
+                        <tr>
+                          <td colSpan="5" className="coord-empty-td" role="alert">{centerInventoryError}</td>
+                        </tr>
+                      ) : loading && !hasInventoryData && !selectedCenterId ? (
+                        Array.from({ length: 5 }, (_, index) => (
+                          <tr className="coord-skeleton-table-row" key={`inventory-skeleton-${index}`} aria-hidden="true">
+                            <td><SkeletonLine className="coord-skeleton-cell coord-skeleton-cell-short" /></td>
+                            <td><SkeletonLine className="coord-skeleton-cell" /></td>
+                            <td><SkeletonLine className="coord-skeleton-cell coord-skeleton-cell-small" /></td>
+                            <td><SkeletonLine className="coord-skeleton-cell coord-skeleton-cell-small" /></td>
+                            <td><SkeletonLine className="coord-skeleton-cell" /></td>
+                          </tr>
+                        ))
+                      ) : displayedInventory.length === 0 ? (
                         <tr>
                           <td colSpan="5" className="coord-empty-td">
                             {selectedCenterId
                               ? `No dedicated supply inventory found for ${activeCenterObj?.name || 'this center'}.`
-                              : (loading ? 'Fetching supply levels...' : 'No inventory records available.')}
+                              : 'No inventory records available.'}
                           </td>
                         </tr>
                       ) : (
@@ -1335,7 +1422,9 @@ const exportCoordinatorReportPdf = async () => {
             <section className="coord-panel coord-full-tab-panel">
               <div className="coord-panel-header">
                 <h2 className="coord-panel-title">EVACUEE REGISTRY</h2>
-                <span className="coord-count-tag">{filteredEvacuees.length} HOUSEHOLDS</span>
+                <span className="coord-count-tag">
+                  {loading && !hasCentersData ? <SkeletonLine className="coord-skeleton-count" /> : `${filteredEvacuees.length} HOUSEHOLDS`}
+                </span>
               </div>
 
               {/* Filters Bar */}
@@ -1387,10 +1476,20 @@ const exportCoordinatorReportPdf = async () => {
                     </tr>
                   </thead>
                   <tbody>
-                    {filteredEvacuees.length === 0 ? (
+                    {loading && !hasCentersData ? (
+                      Array.from({ length: 5 }, (_, index) => (
+                        <tr className="coord-skeleton-table-row" key={`registry-skeleton-${index}`} aria-hidden="true">
+                          {Array.from({ length: 6 }, (_, cellIndex) => (
+                            <td key={cellIndex}>
+                              <SkeletonLine className={`coord-skeleton-cell ${cellIndex === 1 || cellIndex === 3 ? 'coord-skeleton-cell-long' : ''}`} />
+                            </td>
+                          ))}
+                        </tr>
+                      ))
+                    ) : filteredEvacuees.length === 0 ? (
                       <tr>
                         <td colSpan="6" className="coord-empty-td">
-                          {loading ? 'Fetching registry roster...' : 'No matching registered evacuee households found.'}
+                          No matching registered evacuee households found.
                         </td>
                       </tr>
                     ) : (
@@ -1428,7 +1527,9 @@ const exportCoordinatorReportPdf = async () => {
               <div className="coord-panel-header">
                 <h2 className="coord-panel-title">RESOURCE INVENTORY</h2>
                 <div className="coord-inventory-header-actions">
-                  <span className="coord-count-tag">CONSOLIDATED VIEW — ALL CENTERS</span>
+                  <span className="coord-count-tag">
+                    {loading && !hasInventoryData ? <SkeletonLine className="coord-skeleton-count" /> : 'CONSOLIDATED VIEW — ALL CENTERS'}
+                  </span>
                   <button
                     type="button"
                     className="coord-add-item-btn"
@@ -1445,9 +1546,29 @@ const exportCoordinatorReportPdf = async () => {
 
               {shipmentError && <p className="coord-shipment-error" role="alert">{shipmentError}</p>}
               <div className="coord-inventory-cards-grid">
-                {consolidatedInventory.length === 0 ? (
+                {loading && !hasInventoryData ? (
+                  <div className="coord-inventory-skeleton-grid" role="status" aria-label="Loading resource inventory">
+                    {Array.from({ length: 4 }, (_, index) => (
+                      <div className="coord-inventory-card coord-inventory-skeleton" key={index}>
+                        <div className="coord-inv-top">
+                          <SkeletonLine className="coord-skeleton-title" />
+                          <SkeletonLine className="coord-skeleton-status" />
+                        </div>
+                        <div className="coord-inv-count-row">
+                          <SkeletonLine className="coord-skeleton-inventory-count" />
+                        </div>
+                        <SkeletonLine className="coord-skeleton-progress" />
+                        <div className="coord-inv-footer">
+                          <SkeletonLine className="coord-skeleton-label" />
+                          <SkeletonLine className="coord-skeleton-date" />
+                        </div>
+                        <SkeletonLine className="coord-skeleton-action" />
+                      </div>
+                    ))}
+                  </div>
+                ) : consolidatedInventory.length === 0 ? (
                   <div className="coord-empty-state">
-                    {loading ? 'Loading resource inventory stocks...' : 'No inventory items currently tracked.'}
+                    No inventory items currently tracked.
                   </div>
                 ) : (
                   consolidatedInventory.map((item, idx) => {
@@ -1596,21 +1717,21 @@ const exportCoordinatorReportPdf = async () => {
             <div className="coord-stat-metric-block">
               <span className="coord-stat-label">TOTAL SHELTERED EVACUEES</span>
               <strong className="coord-stat-number blue-text">
-              {shelteredEvacueesCount?.toLocaleString() ?? '—'}
+              {loading && shelteredEvacueesCount == null ? <SkeletonLine className="coord-skeleton-stat" /> : shelteredEvacueesCount?.toLocaleString() ?? '—'}
               </strong>
             </div>
 
             <div className="coord-stat-metric-block">
               <span className="coord-stat-label">ACTIVE CAPACITY UTILIZATION</span>
               <strong className="coord-stat-number amber-text">
-              {hasCentersData ? `${activeUtilization}%` : '—'}
+              {loading && !hasCentersData ? <SkeletonLine className="coord-skeleton-stat" /> : hasCentersData ? `${activeUtilization}%` : '—'}
               </strong>
             </div>
 
             <div className="coord-stat-metric-block">
               <span className="coord-stat-label">STOCKED HUMANITARIAN PACKS</span>
               <strong className="coord-stat-number green-text">
-              {hasInventoryData ? totalStockPacks.toLocaleString() : '—'}
+              {loading && !hasInventoryData ? <SkeletonLine className="coord-skeleton-stat" /> : hasInventoryData ? totalStockPacks.toLocaleString() : '—'}
               </strong>
             </div>
           </section>
@@ -1623,7 +1744,16 @@ const exportCoordinatorReportPdf = async () => {
             </div>
 
             <div className="coord-alerts-feed">
-              {supplyAlerts.length === 0 ? (
+              {loading && !hasInventoryData ? (
+                <div className="coord-alert-skeletons" role="status" aria-label="Loading supply alerts">
+                  {Array.from({ length: 4 }, (_, index) => (
+                    <div className="coord-alert-row" key={index}>
+                      <span className="coord-alert-line-indicator" />
+                      <SkeletonLine className="coord-skeleton-alert" />
+                    </div>
+                  ))}
+                </div>
+              ) : supplyAlerts.length === 0 ? (
                 <div className="coord-empty-state small">All inventory and shelter supplies normal.</div>
               ) : (
                 supplyAlerts.map((message, idx) => (

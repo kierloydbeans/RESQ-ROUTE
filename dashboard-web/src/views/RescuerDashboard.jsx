@@ -37,10 +37,12 @@ const RescuerDashboard = () => {
   const [otherReportMessage, setOtherReportMessage] = useState('');
   const [additionalReportNotes, setAdditionalReportNotes] = useState('');
   const [isStatusReportSubmitting, setIsStatusReportSubmitting] = useState(false);
+  const [submittingStatusReportType, setSubmittingStatusReportType] = useState('');
   const [statusReportError, setStatusReportError] = useState('');
   const [statusReportSuccess, setStatusReportSuccess] = useState('');
   const [rescuerStatusInfo, setRescuerStatusInfo] = useState(null);
   const [isUpdatingRescuerStatus, setIsUpdatingRescuerStatus] = useState(false);
+  const [rescuerStatusUpdateTarget, setRescuerStatusUpdateTarget] = useState('');
   // ── Voice call state (rescuer receives incoming calls) ────────────────
   // Hook for inbound call (rescuer accepts)
   const { status: callStatusState, incomingCall, audioRef, acceptCall, endCall, declineCall } =
@@ -413,6 +415,7 @@ const RescuerDashboard = () => {
     }
 
     setIsStatusReportSubmitting(true);
+    setSubmittingStatusReportType(reportType);
     setStatusReportError('');
     setStatusReportSuccess('');
     try {
@@ -460,12 +463,14 @@ const RescuerDashboard = () => {
       setStatusReportError(error.message || 'Unable to send status report.');
     } finally {
       setIsStatusReportSubmitting(false);
+      setSubmittingStatusReportType('');
     }
   };
 
   const choosePostAlertStatus = async (nextStatus) => {
     if (!['available', 'recovering'].includes(nextStatus) || isUpdatingRescuerStatus) return;
     setIsUpdatingRescuerStatus(true);
+    setRescuerStatusUpdateTarget(nextStatus);
     setRescuerStatusError('');
     try {
       const response = await fetch(`${API_URL}/auth/rescuers/me/status`, {
@@ -488,10 +493,17 @@ const RescuerDashboard = () => {
       setRescuerStatusError(error.message || 'Unable to update availability.');
     } finally {
       setIsUpdatingRescuerStatus(false);
+      setRescuerStatusUpdateTarget('');
     }
   };
 
   const formattedAcknowledgementTime = `${String(Math.floor(acknowledgementSecondsLeft / 60)).padStart(2, '0')}:${String(acknowledgementSecondsLeft % 60).padStart(2, '0')}`;
+  const nextStatusReportType = ({
+    assigned: 'resolving',
+    pending: 'resolving',
+    resolving: 'going_to_evacuation_center',
+    evacuating: 'resolved',
+  })[activeAlert?.status];
 
   const navItems = [
     { id: 'alert', label: 'Assignment Alert', icon: AlertTriangle },
@@ -691,12 +703,21 @@ const RescuerDashboard = () => {
               <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
                 {rescuerStatusInfo.status !== 'recovering' && (
                   <>
-                    <button type="button" disabled={isUpdatingRescuerStatus || assignedAlerts.length > 0} onClick={() => choosePostAlertStatus('available')} style={{ padding: '9px 14px', border: '1px solid #059669', borderRadius: '6px', background: '#064e3b', color: '#d1fae5', fontWeight: 700, cursor: 'pointer', opacity: isUpdatingRescuerStatus || assignedAlerts.length > 0 ? 0.55 : 1 }}>Available</button>
-                    <button type="button" disabled={isUpdatingRescuerStatus || assignedAlerts.length > 0} onClick={() => choosePostAlertStatus('recovering')} style={{ padding: '9px 14px', border: '1px solid #d97706', borderRadius: '6px', background: '#78350f', color: '#fef3c7', fontWeight: 700, cursor: 'pointer', opacity: isUpdatingRescuerStatus || assignedAlerts.length > 0 ? 0.55 : 1 }}>Recovering (30 min)</button>
+                    <button type="button" aria-busy={rescuerStatusUpdateTarget === 'available'} disabled={isUpdatingRescuerStatus || assignedAlerts.length > 0} onClick={() => choosePostAlertStatus('available')} style={{ padding: '9px 14px', border: '1px solid #059669', borderRadius: '6px', background: '#064e3b', color: '#d1fae5', fontWeight: 700, cursor: 'pointer', opacity: isUpdatingRescuerStatus || assignedAlerts.length > 0 ? 0.55 : 1 }}>
+                      {rescuerStatusUpdateTarget === 'available' && <span className="rescuer-button-spinner" aria-hidden="true" />}
+                      {rescuerStatusUpdateTarget === 'available' ? 'Setting available...' : 'Available'}
+                    </button>
+                    <button type="button" aria-busy={rescuerStatusUpdateTarget === 'recovering'} disabled={isUpdatingRescuerStatus || assignedAlerts.length > 0} onClick={() => choosePostAlertStatus('recovering')} style={{ padding: '9px 14px', border: '1px solid #d97706', borderRadius: '6px', background: '#78350f', color: '#fef3c7', fontWeight: 700, cursor: 'pointer', opacity: isUpdatingRescuerStatus || assignedAlerts.length > 0 ? 0.55 : 1 }}>
+                      {rescuerStatusUpdateTarget === 'recovering' && <span className="rescuer-button-spinner" aria-hidden="true" />}
+                      {rescuerStatusUpdateTarget === 'recovering' ? 'Starting recovery...' : 'Recovering (30 min)'}
+                    </button>
                   </>
                 )}
                 {rescuerStatusInfo.status === 'recovering' && (
-                  <button type="button" disabled={isUpdatingRescuerStatus || assignedAlerts.length > 0} onClick={() => choosePostAlertStatus('available')} style={{ padding: '9px 14px', border: '1px solid #059669', borderRadius: '6px', background: '#064e3b', color: '#d1fae5', fontWeight: 700, cursor: 'pointer', opacity: isUpdatingRescuerStatus || assignedAlerts.length > 0 ? 0.55 : 1 }}>Available now</button>
+                  <button type="button" aria-busy={rescuerStatusUpdateTarget === 'available'} disabled={isUpdatingRescuerStatus || assignedAlerts.length > 0} onClick={() => choosePostAlertStatus('available')} style={{ padding: '9px 14px', border: '1px solid #059669', borderRadius: '6px', background: '#064e3b', color: '#d1fae5', fontWeight: 700, cursor: 'pointer', opacity: isUpdatingRescuerStatus || assignedAlerts.length > 0 ? 0.55 : 1 }}>
+                    {rescuerStatusUpdateTarget === 'available' && <span className="rescuer-button-spinner" aria-hidden="true" />}
+                    {rescuerStatusUpdateTarget === 'available' ? 'Returning to duty...' : 'Available now'}
+                  </button>
                 )}
               </div>
               {assignedAlerts.length > 0 && <small style={{ display: 'block', marginTop: '8px', color: '#fbbf24' }}>Finish your current assignment before changing availability.</small>}
@@ -826,6 +847,7 @@ const RescuerDashboard = () => {
                           style={{ color: hasRescuerLocation ? '#22d3ee' : '#64748b', fontSize: '12px', fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: '6px', border: '1px solid rgba(8, 145, 178, 0.5)', padding: '6px 12px', borderRadius: '6px', backgroundColor: 'transparent', cursor: hasRescuerLocation && !isRouteLoading ? 'pointer' : 'not-allowed' }}
                         >
                           <Navigation style={{ width: '14px', height: '14px' }} />
+                          {isRouteLoading && <span className="rescuer-button-spinner" aria-hidden="true" />}
                           {isRouteLoading ? 'Calculating route...' : 'Route to the alert'}
                         </button>
                         <a href={`https://www.google.com/maps?q=${activeAlert.latitude},${activeAlert.longitude}`} target="_blank" rel="noreferrer" style={{ color: '#22d3ee', fontSize: '12px', fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: '6px', border: '1px solid rgba(8, 145, 178, 0.5)', padding: '6px 12px', borderRadius: '6px', backgroundColor: 'transparent', cursor: 'pointer', textDecoration: 'none' }}>
@@ -1037,18 +1059,15 @@ const RescuerDashboard = () => {
                       <button
                         type="button"
                         onClick={() => {
-                          const nextAction = {
-                            assigned: 'resolving',
-                            pending: 'resolving',
-                            resolving: 'going_to_evacuation_center',
-                            evacuating: 'resolved',
-                          }[activeAlert.status];
-                          if (nextAction) submitStatusReport(nextAction);
+                          if (nextStatusReportType) submitStatusReport(nextStatusReportType);
                         }}
                         disabled={isStatusReportSubmitting || activeAlert.status === 'closed'}
                         style={{ padding: '10px 14px', border: '1px solid #047857', borderRadius: '6px', background: '#064e3b', color: '#d1fae5', fontWeight: 700, cursor: 'pointer', opacity: isStatusReportSubmitting || activeAlert.status === 'closed' ? 0.55 : 1 }}
                       >
-                        {activeAlert.status === 'closed'
+                        {submittingStatusReportType === nextStatusReportType && <span className="rescuer-button-spinner" aria-hidden="true" />}
+                        {submittingStatusReportType === nextStatusReportType
+                          ? 'Updating status...'
+                          : activeAlert.status === 'closed'
                           ? 'Resolved'
                           : ({
                             assigned: 'Mark as resolving',
@@ -1063,7 +1082,8 @@ const RescuerDashboard = () => {
                         disabled={isStatusReportSubmitting}
                         style={{ padding: '10px 14px', border: '1px solid #b45309', borderRadius: '6px', background: '#78350f', color: '#fef3c7', fontWeight: 700, cursor: 'pointer', opacity: isStatusReportSubmitting ? 0.55 : 1 }}
                       >
-                        Request backup
+                        {submittingStatusReportType === 'need_backup' && <span className="rescuer-button-spinner" aria-hidden="true" />}
+                        {submittingStatusReportType === 'need_backup' ? 'Sending request...' : 'Request backup'}
                       </button>
                       <button
                         type="button"
@@ -1196,6 +1216,7 @@ const RescuerDashboard = () => {
                   style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '10px 14px', border: '1px solid #0e7490', borderRadius: '6px', background: '#082f49', color: '#cffafe', fontWeight: 700, cursor: activeAlert && !isRouteLoading ? 'pointer' : 'not-allowed', opacity: activeAlert && !isRouteLoading ? 1 : 0.65 }}
                 >
                   <Navigation size={16} />
+                  {isRouteLoading && <span className="rescuer-button-spinner" aria-hidden="true" />}
                   {isRouteLoading ? 'Calculating route...' : walkingRoute ? 'Refresh route to alert' : 'Route to the alert'}
                 </button>
               </div>
