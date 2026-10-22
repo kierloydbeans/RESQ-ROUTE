@@ -34,7 +34,7 @@ The application code intentionally writes check-ins to the singular `public.evac
 4. Configure `dashboard-web/.env.local`; install dependencies with `npm ci`.
 5. Run the backend with `uvicorn app.main:app --reload --host 0.0.0.0 --port 8000` from `backend-api/`, and run the dashboard with `npm run dev` from `dashboard-web/`.
 
-The Vite dev server listens on port `3000` and proxies API/WebSocket traffic to the backend URL configured by `VITE_API_URL` (WebSocket URL may be set with `VITE_WS_URL`). Do not commit `.env`, `.env.local`, service-role keys, or database credentials.
+The Vite dev server listens on port `3000` and proxies API/WebSocket traffic to the backend URL configured by `VITE_API_URL` (WebSocket URL may be set with `VITE_WS_URL`). The backend engine uses `NullPool`, disables both asyncpg/SQLAlchemy statement caches, and creates unique prepared-statement names for PgBouncer compatibility. Do not commit `.env`, `.env.local`, service-role keys, or database credentials.
 
 ## Frontend dependency notes
 

@@ -58,7 +58,7 @@ EMAILS_FROM_EMAIL=YOUR_SENDER_EMAIL
 
 Optional backend settings include `ALGORITHM`, `ACCESS_TOKEN_EXPIRE_MINUTES`, `CORS_ORIGINS`, `EMAILS_FROM_NAME`, `VALHALLA_URL`, `OSRM_URL`, `GRAPHHOPPER_URL`, and `GRAPHHOPPER_API_KEY`. Keep secrets in local environment files or a secret manager; do not commit them.
 
-When connecting through Supabase or PgBouncer transaction pooling, use the pooler connection string and keep the asyncpg statement cache disabled as configured in `backend-api/app/db/session.py`. This avoids stale prepared-statement errors when database connections are reassigned between transactions.
+When connecting through Supabase or PgBouncer transaction pooling, the backend uses SQLAlchemy's `NullPool`, disables the asyncpg and SQLAlchemy prepared-statement caches, and generates unique prepared-statement names. Keep this configuration if using a transaction pooler, since its server connection can change between transactions.
 
 ### 2. Apply database migrations
 
