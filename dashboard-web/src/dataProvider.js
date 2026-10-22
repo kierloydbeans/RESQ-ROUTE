@@ -10,11 +10,11 @@ if (cleanBase.endsWith('/api/v1')) {
 export const BASE_URL = cleanBase || 'https://resq-route.onrender.com';
 export const API_URL = `${BASE_URL}/api/v1`;
 
-// WebSocket URL matching FastAPI prefix safely
-const wsProtocol = BASE_URL.startsWith('https') ? 'wss' : 'ws';
-const wsHost = BASE_URL.replace(/^https?:\/\//, '');
-
-export const WS_URL = `${wsProtocol}://${wsHost}/api/v1/ws`;
+const rawWsUrl = import.meta.env.VITE_WS_URL || BASE_URL;
+const normalizedWsUrl = rawWsUrl.replace(/^http/, 'ws').replace(/\/$/, '');
+export const WS_URL = /\/(?:api\/v1\/)?ws$/.test(normalizedWsUrl)
+  ? normalizedWsUrl
+  : `${normalizedWsUrl.replace(/\/api\/v1$/, '')}/api/v1/ws`;
 
 const httpClient = fetchUtils.fetchJson;
 

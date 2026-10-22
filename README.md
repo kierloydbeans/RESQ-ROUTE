@@ -87,6 +87,7 @@ VITE_SUPABASE_ANON_KEY=YOUR_SUPABASE_ANON_KEY
 ```
 
 `VITE_SUPABASE_ANON_KEY` is exposed in the browser bundle: use only the project's public anon/publishable key, never a `service_role` key.
+`VITE_WS_URL` is optional; when omitted, the dashboard derives the secure `wss` endpoint from `VITE_API_URL`. In production, ensure `VITE_API_URL` points to the deployed API before building the frontend.
 
 Install the locked frontend dependencies and run the development server:
 

@@ -14,12 +14,11 @@ import {
   markInventoryShipmentArrived
 } from '../lib/inventoryShipments'
 import { fetchActiveAlertsCount } from '../lib/supabase'
+import { WS_URL } from '../dataProvider'
 import '../styles/coordinator-console.css'
 
 const rawApiBase = (import.meta.env.VITE_API_URL || import.meta.env.VITE_API_BASE_URL || 'https://resq-route.onrender.com').replace(/\/$/, '')
 const API_BASE_URL = rawApiBase.endsWith('/api/v1') ? rawApiBase.replace(/\/api\/v1$/, '') : rawApiBase
-const WS_BASE_URL = API_BASE_URL.replace(/^http/, 'ws')
-
 const CenterCoordinatorDashboard = ({ auth, onLogout }) => {
   const centerId = auth?.user?.assigned_center_id
   const token = auth?.token || auth?.access_token
@@ -41,7 +40,7 @@ const CenterCoordinatorDashboard = ({ auth, onLogout }) => {
   const lastScannedValueRef = useRef('')
   const [isProfileMenuOpen, setIsProfileMenuOpen] = useState(false)
   const profileMenuRef = useRef(null)
-  const { isConnected } = useWebSocket(`${WS_BASE_URL}/api/v1/ws`)
+  const { isConnected } = useWebSocket(WS_URL)
 
   const displayName = auth?.user?.full_name || auth?.user?.username || 'Center Coordinator'
   const formattedPhtTime = new Intl.DateTimeFormat('en-PH', {

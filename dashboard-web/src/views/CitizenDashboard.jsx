@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react'
 import { useWebSocket } from '../hooks/useWebSocket'
+import { WS_URL } from '../dataProvider'
 import MapContainer from '../components/MapContainer'
 import Logo from '../components/Logo'
 import { Menu, QrCode, UploadCloud } from 'lucide-react'
@@ -164,7 +165,6 @@ const Icons = {
 
 const rawApiBase = (import.meta.env.VITE_API_URL || import.meta.env.VITE_API_BASE_URL || 'https://resq-route.onrender.com').replace(/\/$/, '')
 const API_BASE_URL = rawApiBase.endsWith('/api/v1') ? rawApiBase.replace(/\/api\/v1$/, '') : rawApiBase
-const WS_BASE_URL = API_BASE_URL.replace(/^http/, 'ws')
 
 const getApiErrorMessage = (detail, fallback) => {
   if (typeof detail === 'string') return detail
@@ -272,7 +272,7 @@ export const CitizenDashboard = ({ auth, onLogout }) => {
 
   const [peopleAffected, setPeopleAffected] = useState(3)
 
-  const { isConnected } = useWebSocket(`${WS_BASE_URL}/api/v1/ws`)
+  const { isConnected } = useWebSocket(WS_URL)
   const displayName = profileUser?.full_name || profileUser?.username || 'Resident'
   const [currentTime, setCurrentTime] = useState(() => new Date())
 

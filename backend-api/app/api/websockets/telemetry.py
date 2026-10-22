@@ -263,6 +263,9 @@ async def websocket_endpoint(websocket: WebSocket):
                     await websocket.close(code=4401)
                 continue
 
+            if isinstance(message, dict) and message.get("type") == "heartbeat":
+                continue
+
             if isinstance(message, dict) and await manager.handle_voice_message(websocket, message):
                 continue
 

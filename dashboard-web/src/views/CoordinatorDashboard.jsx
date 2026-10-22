@@ -22,11 +22,11 @@ import {
   fetchCoordinatorAssignments
 } from '../lib/coordinatorAssignments'
 import { ChevronDown, FileDown, FileSpreadsheet, LogOut, Plus, X } from 'lucide-react'
+import { WS_URL } from '../dataProvider'
 import '../styles/coordinator-console.css'
 
 const rawApiBase = (import.meta.env.VITE_API_URL || import.meta.env.VITE_API_BASE_URL || 'https://resq-route.onrender.com').replace(/\/$/, '')
 const API_BASE_URL = rawApiBase.endsWith('/api/v1') ? rawApiBase.replace(/\/api\/v1$/, '') : rawApiBase
-const WS_BASE_URL = API_BASE_URL.replace(/^http/, 'ws')
 
 const getInventoryStatus = (currentStock, targetStock) => {
   const stockRatio = targetStock > 0 ? currentStock / targetStock : 0
@@ -98,7 +98,7 @@ export const CoordinatorDashboard = ({ auth, onLogout }) => {
 
   // Clock & Realtime Telemetry
   const [currentTime, setCurrentTime] = useState(() => new Date())
-  const { isConnected } = useWebSocket(`${WS_BASE_URL}/api/v1/ws`)
+  const { isConnected } = useWebSocket(WS_URL)
 
   const displayName = auth?.user?.full_name || auth?.user?.username || 'Cmdr. Reyes, J.'
   const userRole = auth?.user?.role?.toUpperCase() || 'COMMAND DIRECTOR'
