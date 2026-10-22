@@ -19,6 +19,25 @@ import '../styles/coordinator-console.css'
 
 const rawApiBase = (import.meta.env.VITE_API_URL || import.meta.env.VITE_API_BASE_URL || 'https://resq-route.onrender.com').replace(/\/$/, '')
 const API_BASE_URL = rawApiBase.endsWith('/api/v1') ? rawApiBase.replace(/\/api\/v1$/, '') : rawApiBase
+
+const SkeletonLine = ({ className = '' }) => (
+  <span className={`coord-skeleton ${className}`} aria-hidden="true" />
+)
+
+const SkeletonTableRows = ({ columns, prefix, count = 5 }) => (
+  <>
+    {Array.from({ length: count }, (_, rowIndex) => (
+      <tr className="coord-skeleton-table-row" key={`${prefix}-${rowIndex}`} aria-hidden="true">
+        {Array.from({ length: columns }, (_, cellIndex) => (
+          <td key={cellIndex}>
+            <SkeletonLine className={`coord-skeleton-cell ${cellIndex === 0 ? 'coord-skeleton-cell-short' : ''} ${cellIndex === 1 ? 'coord-skeleton-cell-long' : ''}`} />
+          </td>
+        ))}
+      </tr>
+    ))}
+  </>
+)
+
 const CenterCoordinatorDashboard = ({ auth, onLogout }) => {
   const centerId = auth?.user?.assigned_center_id
   const token = auth?.token || auth?.access_token
@@ -322,7 +341,7 @@ const CenterCoordinatorDashboard = ({ auth, onLogout }) => {
             title={`Active alerts: ${activeAlertsCount ?? 'unavailable'}`}
           >
             <span className="coord-incident-label">ACTIVE ALERTS:</span>
-            <span>{activeAlertsCount ?? '—'}</span>
+            <span>{loading && activeAlertsCount == null ? <SkeletonLine className="coord-skeleton-alert-count" /> : activeAlertsCount ?? '—'}</span>
           </div>
           <div className="coord-clock">{formattedPhtTime} PHT</div>
           <div className="center-coordinator-profile-menu" ref={profileMenuRef}>
@@ -386,7 +405,7 @@ const CenterCoordinatorDashboard = ({ auth, onLogout }) => {
         </main>
       ) : (
         <main className="coord-main-grid center-coordinator-main-grid">
-          <div className="coord-left-column">
+          <div className="coord-left-column coord-tab-panel-enter" key={activeTab}>
             {error && <p className="coord-shipment-error" role="alert">{error}</p>}
 
             {activeTab === 'overview' && (
@@ -396,7 +415,27 @@ const CenterCoordinatorDashboard = ({ auth, onLogout }) => {
                     <h2 className="coord-panel-title">YOUR EVACUATION CENTER</h2>
                     <span className="coord-count-tag">CENTER #{centerId}</span>
                   </div>
-                  {center ? (
+                  {loading && !center ? (
+                    <article className="coord-site-card center-coordinator-site-card coord-site-skeleton" role="status" aria-label="Loading assigned evacuation center">
+                      <div className="coord-site-top">
+                        <div className="coord-site-skeleton-copy">
+                          <SkeletonLine className="coord-skeleton-title" />
+                          <SkeletonLine className="coord-skeleton-address" />
+                        </div>
+                        <SkeletonLine className="coord-skeleton-status" />
+                      </div>
+                      <div className="coord-site-occupancy-row">
+                        <SkeletonLine className="coord-skeleton-occupancy" />
+                        <SkeletonLine className="coord-skeleton-percent" />
+                      </div>
+                      <SkeletonLine className="coord-skeleton-progress" />
+                      <div className="coord-center-overview-metrics">
+                        {Array.from({ length: 3 }, (_, index) => (
+                          <div key={index}><SkeletonLine className="coord-skeleton-metric" /><SkeletonLine className="coord-skeleton-label" /></div>
+                        ))}
+                      </div>
+                    </article>
+                  ) : center ? (
                     <article className="coord-site-card center-coordinator-site-card">
                       <div className="coord-site-top">
                         <div>
@@ -439,7 +478,16 @@ const CenterCoordinatorDashboard = ({ auth, onLogout }) => {
                       View all shipments
                     </button>
                   </div>
-                  {centerShipments.length ? centerShipments.slice(0, 4).map((shipment) => (
+                  {loading ? (
+                    <div className="coord-center-shipment-skeletons" role="status" aria-label="Loading incoming shipments">
+                      {Array.from({ length: 3 }, (_, index) => (
+                        <div className="coord-center-shipment-row" key={index}>
+                          <span><SkeletonLine className="coord-skeleton-shipment-title" /><SkeletonLine className="coord-skeleton-shipment-meta" /></span>
+                          <SkeletonLine className="coord-skeleton-shipment-action" />
+                        </div>
+                      ))}
+                    </div>
+                  ) : centerShipments.length ? centerShipments.slice(0, 4).map((shipment) => (
                     <div className="coord-center-shipment-row" key={shipment.id}>
                       <span><strong>{shipment.item_description}</strong><small>{shipment.quantity} units · {shipment.created_at ? new Date(shipment.created_at).toLocaleDateString('en-PH', { timeZone: 'Asia/Manila', month: 'short', day: 'numeric' }) : 'Date unavailable'}</small></span>
                       <button
@@ -448,6 +496,7 @@ const CenterCoordinatorDashboard = ({ auth, onLogout }) => {
                         onClick={() => handleShipmentArrival(shipment.id)}
                         disabled={arrivingShipmentId === shipment.id}
                       >
+                        {arrivingShipmentId === shipment.id && <span className="coord-loading-spinner" aria-hidden="true" />}
                         {arrivingShipmentId === shipment.id ? 'Receiving…' : 'Mark arrived'}
                       </button>
                     </div>
@@ -474,9 +523,11 @@ const CenterCoordinatorDashboard = ({ auth, onLogout }) => {
                         setIsQrScannerOpen((open) => !open)
                       }}
                       disabled={isCheckingIn}
+                      aria-busy={isCheckingIn}
                     >
                       <QrCode size={16} aria-hidden="true" />
-                      {isQrScannerOpen ? 'Close scanner' : 'Scan check-in QR'}
+                      {isCheckingIn && <span className="coord-loading-spinner" aria-hidden="true" />}
+                      {isCheckingIn ? 'Recording check-in…' : isQrScannerOpen ? 'Close scanner' : 'Scan check-in QR'}
                     </button>
                   </div>
                 </div>
@@ -517,7 +568,9 @@ const CenterCoordinatorDashboard = ({ auth, onLogout }) => {
                       <tr><th>HOUSEHOLD / ID</th><th>NAME</th><th>MEMBERS</th><th>MEDICAL ATTENTION</th><th>CHECKED IN</th></tr>
                     </thead>
                     <tbody>
-                      {evacuees.length ? evacuees.map((evacuee, index) => (
+                      {loading ? (
+                        <SkeletonTableRows columns={5} prefix="center-registry" />
+                      ) : evacuees.length ? evacuees.map((evacuee, index) => (
                         <tr key={evacuee.id || index}>
                           <td className="coord-mono-id">{evacuee.household_id || evacuee.id || `HH-${1000 + index}`}</td>
                           <td className="coord-item-name">{evacuee.head_of_household || evacuee.head_name || evacuee.name || 'Not recorded'}</td>
@@ -545,7 +598,24 @@ const CenterCoordinatorDashboard = ({ auth, onLogout }) => {
                   <span className="coord-count-tag">{inventory.length} ITEMS TRACKED</span>
                 </div>
                 <div className="coord-inventory-cards-grid">
-                  {inventory.length ? inventory.map(renderInventoryCard) : (
+                  {loading ? (
+                    <div className="coord-inventory-skeleton-grid" role="status" aria-label="Loading center inventory">
+                      {Array.from({ length: 4 }, (_, index) => (
+                        <div className="coord-inventory-card coord-inventory-skeleton" key={index}>
+                          <div className="coord-inv-top">
+                            <SkeletonLine className="coord-skeleton-title" />
+                            <SkeletonLine className="coord-skeleton-status" />
+                          </div>
+                          <div className="coord-inv-count-row"><SkeletonLine className="coord-skeleton-inventory-count" /></div>
+                          <SkeletonLine className="coord-skeleton-progress" />
+                          <div className="coord-inv-footer">
+                            <SkeletonLine className="coord-skeleton-label" />
+                            <SkeletonLine className="coord-skeleton-date" />
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  ) : inventory.length ? inventory.map(renderInventoryCard) : (
                     <div className="coord-empty-state">{loading ? 'Loading center inventory…' : 'No inventory assigned to this center.'}</div>
                   )}
                 </div>
@@ -564,7 +634,9 @@ const CenterCoordinatorDashboard = ({ auth, onLogout }) => {
                       <tr><th>ITEM</th><th>QUANTITY</th><th>ASSIGNED</th><th>ACTION</th></tr>
                     </thead>
                     <tbody>
-                      {centerShipments.length ? centerShipments.map((shipment) => (
+                      {loading ? (
+                        <SkeletonTableRows columns={4} prefix="center-shipments" />
+                      ) : centerShipments.length ? centerShipments.map((shipment) => (
                         <tr key={shipment.id}>
                           <td className="coord-item-name">{shipment.item_description}</td>
                           <td>{Number(shipment.quantity).toLocaleString()}</td>
@@ -580,6 +652,7 @@ const CenterCoordinatorDashboard = ({ auth, onLogout }) => {
                               onClick={() => handleShipmentArrival(shipment.id)}
                               disabled={arrivingShipmentId === shipment.id}
                             >
+                              {arrivingShipmentId === shipment.id && <span className="coord-loading-spinner" aria-hidden="true" />}
                               {arrivingShipmentId === shipment.id ? 'Receiving…' : 'Mark arrived'}
                             </button>
                           </td>
@@ -599,15 +672,15 @@ const CenterCoordinatorDashboard = ({ auth, onLogout }) => {
               <h2 className="coord-sidebar-heading">{center?.name?.toUpperCase() || 'CENTER'} STATS</h2>
               <div className="coord-stat-metric-block">
                 <span className="coord-stat-label">TOTAL SHELTERED EVACUEES</span>
-                <strong className="coord-stat-number blue-text">{activeOccupancy.toLocaleString()}</strong>
+                <strong className="coord-stat-number blue-text">{loading ? <SkeletonLine className="coord-skeleton-stat" /> : activeOccupancy.toLocaleString()}</strong>
               </div>
               <div className="coord-stat-metric-block">
                 <span className="coord-stat-label">ACTIVE CAPACITY UTILIZATION</span>
-                <strong className="coord-stat-number amber-text">{capacity ? `${occupancyPercent}%` : '—'}</strong>
+                <strong className="coord-stat-number amber-text">{loading ? <SkeletonLine className="coord-skeleton-stat" /> : capacity ? `${occupancyPercent}%` : '—'}</strong>
               </div>
               <div className="coord-stat-metric-block">
                 <span className="coord-stat-label">STOCKED HUMANITARIAN PACKS</span>
-                <strong className="coord-stat-number green-text">{totalStock.toLocaleString()}</strong>
+                <strong className="coord-stat-number green-text">{loading ? <SkeletonLine className="coord-skeleton-stat" /> : totalStock.toLocaleString()}</strong>
               </div>
             </section>
 
@@ -617,7 +690,16 @@ const CenterCoordinatorDashboard = ({ auth, onLogout }) => {
                 <h2 className="coord-alert-heading">CENTER SUPPLY ALERTS</h2>
               </div>
               <div className="coord-alerts-feed">
-                {supplyAlerts.length ? supplyAlerts.map((message, index) => (
+                {loading ? (
+                  <div className="coord-alert-skeletons" role="status" aria-label="Loading center supply alerts">
+                    {Array.from({ length: 3 }, (_, index) => (
+                      <div className="coord-alert-row" key={index}>
+                        <span className="coord-alert-line-indicator" />
+                        <SkeletonLine className="coord-skeleton-alert" />
+                      </div>
+                    ))}
+                  </div>
+                ) : supplyAlerts.length ? supplyAlerts.map((message, index) => (
                   <div className="coord-alert-row" key={`${message}-${index}`}>
                     <span className="coord-alert-line-indicator" />
                     <p className="coord-alert-text">{message}</p>

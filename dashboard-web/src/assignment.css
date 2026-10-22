@@ -41,6 +41,18 @@
   color: var(--ops-backup-accent);
   font-size: 12px;
 }
+.assignment-vehicle-toggle {
+  justify-self: start;
+  padding: 5px 0;
+  border: 0;
+  background: transparent;
+  color: var(--ops-blue);
+  cursor: pointer;
+  font: 9px var(--ops-mono);
+  text-align: left;
+}
+.assignment-vehicle-toggle:hover { color: var(--ops-text); }
+.assignment-vehicle-toggle:disabled { cursor: not-allowed; opacity: .6; }
 .rescuer-choice {
   display: flex;
   align-items: center;
@@ -94,7 +106,34 @@
 .vehicle-deployment-choice b, .vehicle-deployment-choice small { display: block; }
 .vehicle-deployment-choice small { margin-top: 3px; color: var(--ops-muted); font: 9px var(--ops-mono); }
 .vehicle-deployment-choice em { color: var(--ops-green); font: 9px var(--ops-mono); font-style: normal; text-transform: uppercase; }
-.assignment-confirm { width: 100%; padding: 11px; border: 1px solid var(--ops-green); background: var(--ops-green); color: #06130f; cursor: pointer; font-weight: 800; }
+.assignment-confirm {
+  position: sticky;
+  bottom: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
+  width: 100%;
+  padding: 11px;
+  border: 1px solid var(--ops-green);
+  background: var(--ops-green);
+  color: #06130f;
+  cursor: pointer;
+  font-weight: 800;
+}
+.assignment-confirm:disabled { cursor: wait; opacity: .85; }
+.assignment-spinner {
+  width: 14px;
+  height: 14px;
+  border: 2px solid currentColor;
+  border-right-color: transparent;
+  border-radius: 50%;
+  animation: assignment-spin .7s linear infinite;
+}
+@keyframes assignment-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) {
+  .assignment-spinner { animation-duration: 1.6s; }
+}
 .rescuer-deployed-vehicles { display: grid; gap: 4px; padding: 10px; border-left: 2px solid var(--ops-green); background: var(--ops-surface-2); }
 .rescuer-deployed-vehicles small { color: var(--ops-green); font: 9px var(--ops-mono); }
 .rescuer-deployed-vehicles span { color: var(--ops-text); font: 10px var(--ops-mono); }
