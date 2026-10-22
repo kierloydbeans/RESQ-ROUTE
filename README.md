@@ -58,6 +58,8 @@ EMAILS_FROM_EMAIL=YOUR_SENDER_EMAIL
 
 Optional backend settings include `ALGORITHM`, `ACCESS_TOKEN_EXPIRE_MINUTES`, `CORS_ORIGINS`, `EMAILS_FROM_NAME`, `VALHALLA_URL`, `OSRM_URL`, `GRAPHHOPPER_URL`, and `GRAPHHOPPER_API_KEY`. Keep secrets in local environment files or a secret manager; do not commit them.
 
+When connecting through Supabase or PgBouncer transaction pooling, use the pooler connection string and keep the asyncpg statement cache disabled as configured in `backend-api/app/db/session.py`. This avoids stale prepared-statement errors when database connections are reassigned between transactions.
+
 ### 2. Apply database migrations
 
 Apply migrations in numeric order from the repository root. For a fresh database, apply every migration from `001_initial_schema.sql` through the latest migration. Existing databases should apply only migrations not yet applied, also in numeric order.
@@ -83,6 +85,8 @@ VITE_MAP_STYLE_URL=YOUR_MAP_STYLE_URL
 VITE_SUPABASE_URL=https://YOUR_PROJECT.supabase.co
 VITE_SUPABASE_ANON_KEY=YOUR_SUPABASE_ANON_KEY
 ```
+
+`VITE_SUPABASE_ANON_KEY` is exposed in the browser bundle: use only the project's public anon/publishable key, never a `service_role` key.
 
 Install the locked frontend dependencies and run the development server:
 
