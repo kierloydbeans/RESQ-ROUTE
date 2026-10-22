@@ -3,6 +3,7 @@ import { Navigate } from 'react-router-dom'
 import CitizenDashboard from './CitizenDashboard'
 import DispatcherDashboard from './DispatcherDashboard'
 import CoordinatorDashboard from './CoordinatorDashboard'
+import CenterCoordinatorDashboard from './CenterCoordinatorDashboard'
 
 const getStoredAuth = () => {
   try {
@@ -20,7 +21,7 @@ export const Dashboard = () => {
 
   const handleLogout = () => {
     localStorage.removeItem('auth')
-    window.location.href = '/login'
+    window.location.href = '/'
   }
 
   if (['citizen', 'public'].includes(role)) {
@@ -29,6 +30,10 @@ export const Dashboard = () => {
 
   if (role === 'coordinator') {
     return <CoordinatorDashboard auth={auth} onLogout={handleLogout} />
+  }
+
+  if (role === 'center_coordinator') {
+    return <CenterCoordinatorDashboard auth={auth} onLogout={handleLogout} />
   }
 
   if (['dispatcher', 'admin'].includes(role)) {

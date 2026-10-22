@@ -13,7 +13,8 @@ const roles = [
   { value: 'citizen', label: 'Citizen' },
   { value: 'dispatcher', label: 'Dispatcher' },
   { value: 'rescuer', label: 'Rescuer' },
-  { value: 'coordinator', label: 'Coordinator' }
+  { value: 'coordinator', label: 'Coordinator' },
+  { value: 'center_coordinator', label: 'Center Coordinator' }
 ]
 const BackgroundPin = ({ top, left, delay }) => (
   <svg

@@ -8,12 +8,14 @@ import { InventoryHub } from './views/InventoryHub'
 import { IncidentTriage } from './views/IncidentTriage'
 import { CoordinatorDashboard } from './views/CoordinatorDashboard'
 import Login from './views/Login'
+import LandingPage from './views/LandingPage'
 import Register from './views/Register'
 import RescuerDashboard from './views/RescuerDashboard'
 import ResetPassword from './views/ResetPassword'
 import { theme } from './theme'
 import { ThemeProvider, useTheme } from './ThemeContext'
 import { Sparkles } from 'lucide-react'
+import RescueErrorScreen from './components/RescueErrorScreen'
 
 const GlobalThemeToggle = () => {
   const { isDark, toggleTheme } = useTheme()
@@ -36,7 +38,7 @@ const GlobalGradientToggle = () => {
 }
 
 const AppLayout = (props) => (
-  <Layout {...props} sidebar={() => null} appBar={() => null} />
+  <Layout {...props} sidebar={() => null} appBar={() => null} error={RescueErrorScreen} />
 )
 
 const ProtectedRescuer = () => {
@@ -63,7 +65,9 @@ const ProtectedAdmin = () => {
   }
 
   if (!auth?.token || !auth?.user?.role) {
-    return <Navigate to="/login" replace />
+    return window.location.pathname === '/'
+      ? <LandingPage />
+      : <Navigate to="/" replace />
   }
 
   return (
@@ -90,6 +94,7 @@ function App() {
           <GlobalThemeToggle />
         </div>
         <Routes>
+          {import.meta.env.DEV && <Route path="/error-preview" element={<RescueErrorScreen />} />}
           <Route path="/login/:role?" element={<Login />} />
           <Route path="/register" element={<Register />} />
           <Route path="/reset-password" element={<ResetPassword />} />

@@ -10,6 +10,7 @@ from starlette.concurrency import run_in_threadpool
 from sqlmodel import select
 from pydantic import BaseModel, EmailStr, Field as PydanticField, field_validator
 from sqlalchemy import func, cast, String
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from supabase import create_client
 
@@ -24,6 +25,8 @@ from app.core.security import (
 )
 from app.db.session import get_session
 from app.models.user import User, UserRead, UserRole
+from app.models.household import Household, HouseholdMember
+from app.models.center import Center
 from app.models.otp import OTPVerification
 from app.models.rescuer import RescuerProfile, RescuerProfileRead, RescuerStatus
 from app.models.emergency_alert import EmergencyAlert, EmergencyAlertRead, AlertStatus
@@ -80,6 +83,44 @@ class ResetPasswordRequest(BaseModel):
 
 class SendOTPRequest(BaseModel):
     email: EmailStr
+
+
+class CenterCoordinatorAssignment(BaseModel):
+    center_id: int | None = PydanticField(default=None, gt=0)
+
+
+class HouseholdMemberSettings(BaseModel):
+    name: str = PydanticField(min_length=1, max_length=120)
+    has_account: bool = False
+
+    @field_validator("name")
+    @classmethod
+    def normalize_name(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("Family member name is required")
+        return value
+
+
+class AccountSettingsUpdate(BaseModel):
+    full_name: str | None = PydanticField(default=None, max_length=255)
+    email: EmailStr
+    current_password: str | None = None
+    new_password: str | None = PydanticField(default=None, min_length=8)
+    household_name: str = PydanticField(default="", max_length=120)
+    family_members: list[HouseholdMemberSettings] = PydanticField(default_factory=list)
+
+    @field_validator("full_name", "household_name")
+    @classmethod
+    def normalize_optional_names(cls, value: str | None) -> str | None:
+        return value.strip() if value is not None else None
+
+    @field_validator("new_password")
+    @classmethod
+    def validate_password_length(cls, value: str | None) -> str | None:
+        if value is not None and len(value.encode("utf-8")) > 72:
+            raise ValueError("New password must be no more than 72 UTF-8 bytes")
+        return value
 
 
 class UserRegisterWithOTP(BaseModel):
@@ -257,7 +298,8 @@ async def login(
             "username": user.username,
             "email": user.email,
             "full_name": user.full_name,
-            "role": user.role.value if hasattr(user.role, "value") else str(user.role)
+            "role": user.role.value if hasattr(user.role, "value") else str(user.role),
+            "assigned_center_id": user.assigned_center_id
         }
     }
 
@@ -293,7 +335,8 @@ async def login_role(
             "username": user.username,
             "email": user.email,
             "full_name": user.full_name,
-            "role": user.role.value if hasattr(user.role, "value") else str(user.role)
+            "role": user.role.value if hasattr(user.role, "value") else str(user.role),
+            "assigned_center_id": user.assigned_center_id
         }
     }
 
@@ -333,6 +376,212 @@ async def get_me(
     if not user:
         raise HTTPException(status_code=404, detail="User account not found")
     return {"user": UserRead.model_validate(user)}
+
+
+@router.get("/settings")
+async def get_account_settings(
+    credentials: dict = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+):
+    user_result = await session.execute(
+        select(User).where(User.username == credentials.get("sub"))
+    )
+    user = user_result.scalar_one_or_none()
+    if not user or not user.is_active:
+        raise HTTPException(status_code=401, detail="Active user account required")
+
+    household_result = await session.execute(
+        select(Household).where(Household.user_id == user.id)
+    )
+    household = household_result.scalar_one_or_none()
+    members = []
+    if household:
+        member_result = await session.execute(
+            select(HouseholdMember)
+            .where(HouseholdMember.household_id == household.id)
+            .order_by(HouseholdMember.id)
+        )
+        members = member_result.scalars().all()
+
+    return {
+        "user": UserRead.model_validate(user),
+        "household": {
+            "id": household.id if household else None,
+            "household_name": household.household_name if household else "",
+            "family_members": [
+                {"id": member.id, "name": member.name, "has_account": member.has_account}
+                for member in members
+            ],
+        },
+    }
+
+
+@router.put("/settings")
+async def update_account_settings(
+    payload: AccountSettingsUpdate,
+    credentials: dict = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+):
+    user_result = await session.execute(
+        select(User).where(User.username == credentials.get("sub"))
+    )
+    user = user_result.scalar_one_or_none()
+    if not user or not user.is_active:
+        raise HTTPException(status_code=401, detail="Active user account required")
+
+    if payload.new_password and not payload.current_password:
+        raise HTTPException(status_code=400, detail="Enter your current password to change it")
+    if payload.current_password and not payload.new_password:
+        raise HTTPException(status_code=400, detail="Enter a new password to complete the change")
+    if payload.new_password and not verify_password(payload.current_password, user.hashed_password):
+        raise HTTPException(status_code=400, detail="Current password is incorrect")
+
+    email = str(payload.email).strip().lower()
+    duplicate_email_result = await session.execute(
+        select(User.id).where(func.lower(User.email) == email, User.id != user.id)
+    )
+    if duplicate_email_result.scalar_one_or_none() is not None:
+        raise HTTPException(status_code=409, detail="That email address is already in use")
+
+    household_result = await session.execute(
+        select(Household).where(Household.user_id == user.id)
+    )
+    household = household_result.scalar_one_or_none()
+    if household is None:
+        household = Household(user_id=user.id)
+        session.add(household)
+        await session.flush()
+
+    existing_members_result = await session.execute(
+        select(HouseholdMember).where(HouseholdMember.household_id == household.id)
+    )
+    for member in existing_members_result.scalars().all():
+        await session.delete(member)
+
+    user.full_name = payload.full_name.strip() if payload.full_name and payload.full_name.strip() else None
+    user.email = email
+    if payload.new_password:
+        user.hashed_password = get_password_hash(payload.new_password)
+    household.household_name = payload.household_name.strip()
+    for member in payload.family_members:
+        session.add(
+            HouseholdMember(
+                household_id=household.id,
+                name=member.name,
+                has_account=member.has_account,
+            )
+        )
+
+    try:
+        await session.commit()
+    except IntegrityError as error:
+        await session.rollback()
+        logger.exception("Could not save account settings for user %s", user.id)
+        raise HTTPException(status_code=409, detail="Account settings conflict with existing data") from error
+
+    await session.refresh(user)
+    await session.refresh(household)
+    saved_members_result = await session.execute(
+        select(HouseholdMember)
+        .where(HouseholdMember.household_id == household.id)
+        .order_by(HouseholdMember.id)
+    )
+    saved_members = saved_members_result.scalars().all()
+    return {
+        "user": UserRead.model_validate(user),
+        "household": {
+            "household_name": household.household_name,
+            "family_members": [
+                {"id": member.id, "name": member.name, "has_account": member.has_account}
+                for member in saved_members
+            ],
+        },
+    }
+
+
+async def _require_coordinator_manager(
+    credentials: dict,
+    session: AsyncSession,
+) -> User:
+    result = await session.execute(
+        select(User).where(User.username == credentials.get("sub"))
+    )
+    user = result.scalar_one_or_none()
+    if not user or not user.is_active:
+        raise HTTPException(status_code=401, detail="Active user account required")
+    if user.role not in {UserRole.ADMIN, UserRole.COORDINATOR}:
+        raise HTTPException(status_code=403, detail="Global coordinator access required")
+    return user
+
+
+@router.get("/coordinator-assignments")
+async def list_coordinator_assignments(
+    credentials: dict = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+):
+    await _require_coordinator_manager(credentials, session)
+    result = await session.execute(
+        select(User, Center.name)
+        .outerjoin(Center, User.assigned_center_id == Center.id)
+        .where(User.is_active.is_(True))
+        .where(User.role.in_([UserRole.COORDINATOR, UserRole.CENTER_COORDINATOR]))
+        .order_by(User.username)
+    )
+    return [
+        {
+            "id": user.id,
+            "username": user.username,
+            "full_name": user.full_name,
+            "email": user.email,
+            "role": user.role.value if hasattr(user.role, "value") else str(user.role),
+            "assigned_center_id": user.assigned_center_id,
+            "center_name": center_name,
+        }
+        for user, center_name in result.all()
+    ]
+
+
+@router.put("/coordinator-assignments/{user_id}")
+async def assign_coordinator_to_center(
+    user_id: int,
+    payload: CenterCoordinatorAssignment,
+    credentials: dict = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+):
+    await _require_coordinator_manager(credentials, session)
+    result = await session.execute(select(User).where(User.id == user_id))
+    user = result.scalar_one_or_none()
+    if not user or user.role not in {UserRole.COORDINATOR, UserRole.CENTER_COORDINATOR}:
+        raise HTTPException(status_code=404, detail="Coordinator account not found")
+    if user.username == credentials.get("sub"):
+        raise HTTPException(status_code=409, detail="You cannot change your own coordinator assignment")
+
+    if payload.center_id is None:
+        user.role = UserRole.COORDINATOR
+        user.assigned_center_id = None
+        center_name = None
+    else:
+        center_result = await session.execute(
+            select(Center).where(Center.id == payload.center_id)
+        )
+        center = center_result.scalar_one_or_none()
+        if not center:
+            raise HTTPException(status_code=404, detail="Evacuation center not found")
+        user.role = UserRole.CENTER_COORDINATOR
+        user.assigned_center_id = center.id
+        center_name = center.name
+
+    await session.commit()
+    await session.refresh(user)
+    return {
+        "id": user.id,
+        "username": user.username,
+        "full_name": user.full_name,
+        "email": user.email,
+        "role": user.role.value if hasattr(user.role, "value") else str(user.role),
+        "assigned_center_id": user.assigned_center_id,
+        "center_name": center_name,
+    }
 
 
 @router.post("/rescuers", response_model=RescuerProfileRead, status_code=status.HTTP_201_CREATED)

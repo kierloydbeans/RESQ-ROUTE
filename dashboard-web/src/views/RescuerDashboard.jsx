@@ -338,7 +338,7 @@ const RescuerDashboard = () => {
       }
     }
     localStorage.removeItem('auth');
-    navigate('/login/rescuer', { replace: true });
+    navigate('/', { replace: true });
   };
 
   const handleRouteToAlert = async () => {
