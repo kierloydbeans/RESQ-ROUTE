@@ -1,287 +1,132 @@
-# RESQ-Route
+# RESQ-ROUTE
 
-A comprehensive disaster response management system for efficient evacuation coordination, shelter management, and real-time incident tracking.
+RESQ-ROUTE is a disaster-response coordination platform for residents and emergency response teams. It combines a React web dashboard, a Flutter mobile app, a FastAPI backend, and a PostgreSQL/Supabase database.
 
-## Overview
+## Project components
 
-RESQ-Route is a multi-platform disaster response system designed to coordinate rescue operations between citizens, rescuers, and central command during emergencies. The system provides real-time tracking, shelter management, hazard reporting, and inventory monitoring.
+| Directory | Purpose |
+| --- | --- |
+| `dashboard-web/` | React + Vite dashboard and public landing page for coordinators, center coordinators, and citizens |
+| `mobile-app/` | Flutter mobile application |
+| `backend-api/` | FastAPI API, WebSocket service, and SQLModel database access |
+| `database/migrations/` | Ordered PostgreSQL schema migrations |
+| `db/` | Database setup and inventory SQL helpers |
 
-## Architecture
+## Main capabilities
 
-The system consists of four main components:
+- Emergency alerts, incident and hazard reporting, shelter discovery, and routing
+- Coordinator dashboards for response operations, center occupancy, inventory, and shipments
+- Center coordinator assignments and center-scoped evacuee/inventory workflows
+- Citizen account settings and household management
+- Citizen evacuation check-in QR codes and coordinator scanning/check-in to the singular `public.evacuee` table
+- Responsive public landing page and authenticated dashboard views
+- JWT-authenticated API endpoints and WebSocket telemetry
 
-- **dashboard-web**: React Admin frontend for central command operations
-- **mobile-app**: Flutter mobile application for citizens and rescuers
-- **backend-api**: FastAPI asynchronous backend for data management
-- **database**: PostgreSQL database with spatial extensions
+## Requirements
 
-## Project Structure
+- Python 3.10 or newer
+- Node.js 18 or newer and npm
+- PostgreSQL compatible with the supplied schema, or a configured Supabase PostgreSQL project
+- Flutter SDK for the mobile app
 
-```
-resq-route/
-├── dashboard-web/                 # React Admin Frontend (Central Command)
-│   ├── public/
-│   ├── src/
-│   │   ├── components/            # Reusable UI components
-│   │   ├── hooks/                 # Custom React hooks
-│   │   ├── views/                 # Main application views
-│   │   ├── App.jsx
-│   │   └── main.jsx
-│   ├── package.json
-│   └── vite.config.js
-│
-├── mobile-app/                    # Flutter Mobile App (Citizen & Rescuer)
-│   ├── lib/
-│   │   ├── models/                # Data models
-│   │   ├── screens/
-│   │   │   ├── citizen/           # Citizen-facing screens
-│   │   │   └── rescuer/           # Rescuer-facing screens
-│   │   ├── services/              # BLE, GPS, WebSocket services
-│   │   └── main.dart
-│   └── pubspec.yaml
-│
-├── backend-api/                   # FastAPI Asynchronous Backend
-│   ├── app/
-│   │   ├── api/                   # API endpoints
-│   │   │   ├── v1/                # Version 1 endpoints
-│   │   │   └── websockets/        # WebSocket handlers
-│   │   ├── core/                  # Core configuration
-│   │   ├── db/                    # Database session management
-│   │   ├── models/                # SQLModel database classes
-│   │   └── main.py                # Application entry point
-│   ├── requirements.txt
-│   └── venv/
-│
-├── database/                      # Database assets
-│   ├── migrations/                # Database migration files
-│   └── seed_data_caloocan.sql     # Sample data for testing
-│
-└── README.md
-```
+Python dependencies are listed in `backend-api/requirements.txt`; the root `requirements.txt` includes that file for convenience. Dashboard dependencies are declared and locked in `dashboard-web/package.json` and `dashboard-web/package-lock.json`.
 
-## Features
+## Setup
 
-### Central Command (Dashboard Web)
-- Real-time shelter capacity monitoring
-- Live incident tracking and triage
-- Inventory management with depletion alerts
-- Interactive map with shelter locations
-- WebSocket-based live telemetry
+### 1. Configure the backend
 
-### Citizen Mobile App
-- Evacuation routing to nearest shelters
-- Structural hazard reporting forms
-- QR code-based evacuee tracking
-- GPS-based location services
-- Real-time shelter availability updates
+Create a virtual environment and install dependencies:
 
-### Rescuer Mobile App
-- BLE-based proximity detection for nearby evacuees
-- Manifest control and evacuee management
-- Ad-Hoc Proximity BLE HUD
-- GPS coordination and navigation
-- Real-time task assignment
-
-### Backend API
-- RESTful API with FastAPI
-- Asynchronous database operations
-- WebSocket support for real-time updates
-- JWT-based authentication
-- Multi-tiered hazard validation filtering
-- Spatial queries with PostGIS
-
-## Prerequisites
-
-- Node.js 18+ (for dashboard-web)
-- Flutter 3.0+ (for mobile-app)
-- Python 3.10+ (for backend-api)
-- PostgreSQL 14+ with PostGIS extension (for database)
-
-## Installation
-
-### Backend API
-
-```bash
+```powershell
 cd backend-api
-
-# Create virtual environment
-python -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
-
-# Install dependencies
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
 pip install -r requirements.txt
+```
 
-# Set up environment variables
-cp .env.example .env
-# Edit .env with your configuration
+Create `backend-api/.env` with the required settings:
 
-# Run database migrations
-psql -U postgres -d resq_route -f database/migrations/001_initial_schema.sql
-psql -U postgres -d resq_route -f database/migrations/002_add_users_table.sql
-# Apply the remaining migrations in numeric order before starting the server.
-# Rescuer duty/recovery also requires migrations 015 and 016 after migrations 003-014.
+```env
+DATABASE_URL=postgresql+asyncpg://USER:PASSWORD@HOST:PORT/DATABASE
+SUPABASE_URL=https://YOUR_PROJECT.supabase.co
+SUPABASE_KEY=YOUR_SERVER_SIDE_SUPABASE_KEY
+SECRET_KEY=GENERATE_A_LONG_RANDOM_SECRET
+BREVO_API_KEY=YOUR_BREVO_API_KEY
+BREVO_API_URL=YOUR_BREVO_API_ENDPOINT
+EMAILS_FROM_EMAIL=YOUR_SENDER_EMAIL
+```
 
-# Load seed data (optional)
-psql -U postgres -d resq_route -f database/seed_data_caloocan.sql
+Optional backend settings include `ALGORITHM`, `ACCESS_TOKEN_EXPIRE_MINUTES`, `CORS_ORIGINS`, `EMAILS_FROM_NAME`, `VALHALLA_URL`, `OSRM_URL`, `GRAPHHOPPER_URL`, and `GRAPHHOPPER_API_KEY`. Keep secrets in local environment files or a secret manager; do not commit them.
 
-# Start the server
+### 2. Apply database migrations
+
+Apply migrations in numeric order from the repository root. For a fresh database, apply every migration from `001_initial_schema.sql` through the latest migration. Existing databases should apply only migrations not yet applied, also in numeric order.
+
+Example using `psql` and a `DATABASE_URL` environment variable:
+
+```powershell
+psql "postgresql://USER:PASSWORD@HOST:PORT/DATABASE" -v ON_ERROR_STOP=1 -f database/migrations/001_initial_schema.sql
+```
+
+Repeat for each migration through `022_add_household_check_in_fields.sql`. Migrations `019`–`022` add shipment, center-coordinator assignment, household, and household check-in support. Ensure the database role used by the API has the expected access; the household and shipment migrations grant table access to Supabase `service_role`.
+
+The API also initializes SQLModel-declared tables at startup. This does not replace applying the SQL migrations, which contain required indexes, constraints, enum changes, and policies/grants.
+
+### 3. Configure and run the dashboard
+
+Create `dashboard-web/.env.local`:
+
+```env
+VITE_API_URL=http://localhost:8000
+VITE_WS_URL=ws://localhost:8000
+VITE_MAP_STYLE_URL=YOUR_MAP_STYLE_URL
+VITE_SUPABASE_URL=https://YOUR_PROJECT.supabase.co
+VITE_SUPABASE_ANON_KEY=YOUR_SUPABASE_ANON_KEY
+```
+
+Install the locked frontend dependencies and run the development server:
+
+```powershell
+cd dashboard-web
+npm ci
+npm run dev
+```
+
+The dashboard is served at `http://localhost:3000`. Build it for production with `npm run build`; preview the production build with `npm run preview`.
+
+### 4. Run the backend
+
+From `backend-api/`, start the API:
+
+```powershell
 uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
-### Dashboard Web
+The interactive API documentation is available at `http://localhost:8000/docs`; the health endpoint is `http://localhost:8000/health`.
 
-```bash
-cd dashboard-web
+### 5. Run the mobile app
 
-# Install dependencies
-npm install
+Install Flutter dependencies and start the app on a connected device or emulator:
 
-# Start development server
-npm run dev
-```
-
-### Mobile App
-
-```bash
+```powershell
 cd mobile-app
-
-# Install dependencies
 flutter pub get
-
-# Run on connected device/emulator
 flutter run
 ```
 
-## Configuration
+## Dependency manifests
 
-### Backend Environment Variables
+- Root `requirements.txt`: convenience include for the backend Python requirements.
+- `backend-api/requirements.txt`: backend runtime dependencies.
+- `dashboard-web/package.json`: frontend runtime and development dependencies.
+- `dashboard-web/package-lock.json`: exact npm dependency resolution; use `npm ci` for reproducible installs.
+- `mobile-app/pubspec.yaml`: Flutter dependencies.
 
-Create a `.env` file in `backend-api/`:
+## Development checks
 
-```env
-DATABASE_URL=postgresql+asyncpg://postgres:password@localhost:5432/resq_route
-SUPABASE_URL=your_supabase_url
-SUPABASE_KEY=your_supabase_key
-SECRET_KEY=your-secret-key
-ALGORITHM=HS256
-ACCESS_TOKEN_EXPIRE_MINUTES=30
-CORS_ORIGINS=http://localhost:3000,http://localhost:8080
-```
-
-### Database Setup
-
-```bash
-# Create database
-createdb resq_route
-
-# Enable PostGIS extension
-psql -U postgres -d resq_route -c "CREATE EXTENSION postgis;"
-```
-
-## API Documentation
-
-Once the backend is running, access the interactive API documentation at:
-- Swagger UI: `http://localhost:8000/docs`
-- ReDoc: `http://localhost:8000/redoc`
-
-## WebSocket Endpoints
-
-- Live Telemetry: `ws://localhost:8000/ws`
-
-## Default Credentials
-
-- **Admin Dashboard**: Username: `admin`, Password: `admin123`
-
-## Development
-
-### Running All Services
-
-For development, run all services:
-
-```bash
-# Terminal 1: Backend
-cd backend-api
-uvicorn app.main:app --reload
-
-# Terminal 2: Dashboard
-cd dashboard-web
-npm run dev
-
-# Terminal 3: Mobile
-cd mobile-app
-flutter run
-```
-
-## Testing
-
-### Backend Tests
-
-```bash
-cd backend-api
-pytest
-```
-
-### Frontend Tests
-
-```bash
-cd dashboard-web
-npm test
-```
-
-### Mobile Tests
-
-```bash
-cd mobile-app
-flutter test
-```
-
-## Deployment
-
-### Backend Deployment
-
-Deploy the FastAPI backend using Docker:
-
-```bash
-docker build -t resq-route-api backend-api/
-docker run -p 8000:8000 resq-route-api
-```
-
-### Frontend Deployment
-
-Build the React frontend for production:
-
-```bash
+```powershell
 cd dashboard-web
 npm run build
 ```
 
-### Mobile Deployment
-
-Build the Flutter app for release:
-
-```bash
-cd mobile-app
-flutter build apk  # Android
-flutter build ios  # iOS
-```
-
-## Contributing
-
-1. Fork the repository
-2. Create a feature branch
-3. Make your changes
-4. Submit a pull request
-
-## License
-
-This project is licensed under the MIT License.
-
-## Support
-
-For support and questions, please open an issue in the repository.
-
-## Acknowledgments
-
-- Built for disaster response coordination in Caloocan City
-- Uses open-source mapping and geospatial technologies
-- Designed with community resilience in mind
+Run API checks with the configured backend virtual environment. Database-dependent behavior requires a reachable PostgreSQL/Supabase instance with all applicable migrations applied.

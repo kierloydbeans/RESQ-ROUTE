@@ -4,8 +4,12 @@ from datetime import datetime
 
 class EvacueeBase(SQLModel):
     name: str
-    qr_code: str
+    qr_code: str = Field(unique=True)
     shelter_id: Optional[int] = None
+    household_id: Optional[int] = None
+    household_name: str = ""
+    household_member_id: Optional[int] = None
+    has_account: bool = False
     needs_medical_attention: bool = False
     medical_notes: Optional[str] = None
     phone_number: Optional[str] = None
@@ -28,6 +32,10 @@ class EvacueeRead(EvacueeBase):
 class EvacueeUpdate(SQLModel):
     name: Optional[str] = None
     shelter_id: Optional[int] = None
+    household_id: Optional[int] = None
+    household_name: Optional[str] = None
+    household_member_id: Optional[int] = None
+    has_account: Optional[bool] = None
     needs_medical_attention: Optional[bool] = None
     medical_notes: Optional[str] = None
     phone_number: Optional[str] = None

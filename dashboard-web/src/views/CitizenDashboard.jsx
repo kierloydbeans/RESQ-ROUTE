@@ -2,7 +2,8 @@ import React, { useEffect, useRef, useState } from 'react'
 import { useWebSocket } from '../hooks/useWebSocket'
 import MapContainer from '../components/MapContainer'
 import Logo from '../components/Logo'
-import { Menu, UploadCloud } from 'lucide-react'
+import { Menu, QrCode, UploadCloud } from 'lucide-react'
+import QRCode from 'qrcode'
 import 'maplibre-gl/dist/maplibre-gl.css'
 import "../styles/citizen-console.css";
 
@@ -22,21 +23,6 @@ const Icons = {
     <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
       <path d="M18.36 6.64a9 9 0 1 1-12.73 0" />
       <line x1="12" y1="2" x2="12" y2="12" />
-    </svg>
-  ),
-  Pet: () => (
-    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <circle cx="11" cy="4" r="2" />
-      <circle cx="18" cy="8" r="2" />
-      <circle cx="4" cy="8" r="2" />
-      <path d="M12 10c-3 0-5 2.5-5 5.5 0 2 1.5 3.5 5 3.5s5-1.5 5-3.5c0-3-2-5.5-5-5.5z" />
-    </svg>
-  ),
-  Accessible: () => (
-    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <circle cx="12" cy="4" r="2" />
-      <path d="M10 8h4l2 6h-3l-1.5 4" />
-      <circle cx="9" cy="18" r="3" />
     </svg>
   ),
   TrendUp: () => (
@@ -180,6 +166,19 @@ const rawApiBase = (import.meta.env.VITE_API_URL || import.meta.env.VITE_API_BAS
 const API_BASE_URL = rawApiBase.endsWith('/api/v1') ? rawApiBase.replace(/\/api\/v1$/, '') : rawApiBase
 const WS_BASE_URL = API_BASE_URL.replace(/^http/, 'ws')
 
+const getApiErrorMessage = (detail, fallback) => {
+  if (typeof detail === 'string') return detail
+  if (Array.isArray(detail)) {
+    return detail
+      .map((issue) => {
+        const field = Array.isArray(issue.loc) ? issue.loc.filter((part) => part !== 'body').join('.') : ''
+        return field ? `${field}: ${issue.msg}` : issue.msg
+      })
+      .join('; ')
+  }
+  return fallback
+}
+
 const isCenterFull = (center) => {
   const capacity = Number(center?.capacity) || 100
   const occupancy = Number(center?.current_occupancy) || 0
@@ -216,6 +215,10 @@ const getReadablePinnedLocation = (location, centers) => {
 
 export const CitizenDashboard = ({ auth, onLogout }) => {
   const [latestGps, setLatestGps] = useState(null)
+  const [isQrDialogOpen, setIsQrDialogOpen] = useState(false)
+  const [evacuationQr, setEvacuationQr] = useState('')
+  const [isQrLoading, setIsQrLoading] = useState(false)
+  const [qrError, setQrError] = useState('')
   const [centers, setCenters] = useState([])
   const [roadHazards, setRoadHazards] = useState([])
   const [selectedCenter, setSelectedCenter] = useState(null)
@@ -231,6 +234,22 @@ export const CitizenDashboard = ({ auth, onLogout }) => {
   const [isShelterPanelCollapsed, setIsShelterPanelCollapsed] = useState(false)
   const [activeTab, setActiveTab] = useState('shelters')
   const [isProfileMenuOpen, setIsProfileMenuOpen] = useState(false)
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false)
+  const [isSettingsLoading, setIsSettingsLoading] = useState(false)
+  const [isSettingsLoaded, setIsSettingsLoaded] = useState(false)
+  const [isSettingsSaving, setIsSettingsSaving] = useState(false)
+  const [settingsError, setSettingsError] = useState('')
+  const [settingsSuccess, setSettingsSuccess] = useState('')
+  const [profileUser, setProfileUser] = useState(auth?.user || {})
+  const [settingsForm, setSettingsForm] = useState({
+    full_name: auth?.user?.full_name || '',
+    email: auth?.user?.email || '',
+    current_password: '',
+    new_password: '',
+    household_name: '',
+    family_members: []
+  })
+  const familyMemberKeyRef = useRef(0)
   const [savedShelterIds, setSavedShelterIds] = useState([])
   const [copyFeedback, setCopyFeedback] = useState('')
   const profileMenuRef = useRef(null)
@@ -254,7 +273,7 @@ export const CitizenDashboard = ({ auth, onLogout }) => {
   const [peopleAffected, setPeopleAffected] = useState(3)
 
   const { isConnected } = useWebSocket(`${WS_BASE_URL}/api/v1/ws`)
-  const displayName = auth?.user?.full_name || auth?.user?.username || 'Resident'
+  const displayName = profileUser?.full_name || profileUser?.username || 'Resident'
   const [currentTime, setCurrentTime] = useState(() => new Date())
 
   useEffect(() => {
@@ -285,6 +304,120 @@ export const CitizenDashboard = ({ auth, onLogout }) => {
     }
   }, [isProfileMenuOpen])
 
+  useEffect(() => {
+    if (!isSettingsOpen) return undefined
+    const closeOnEscape = (event) => {
+      if (event.key === 'Escape') setIsSettingsOpen(false)
+    }
+    document.addEventListener('keydown', closeOnEscape)
+    return () => document.removeEventListener('keydown', closeOnEscape)
+  }, [isSettingsOpen])
+
+  const handleOpenSettings = async () => {
+    setIsProfileMenuOpen(false)
+    setIsSettingsOpen(true)
+    setIsSettingsLoading(true)
+    setIsSettingsLoaded(false)
+    setSettingsError('')
+    setSettingsSuccess('')
+
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/v1/auth/settings`, {
+        headers: { Authorization: `Bearer ${auth?.token}` }
+      })
+      const data = await response.json()
+      if (!response.ok) throw new Error(getApiErrorMessage(data.detail, 'Could not load account settings'))
+
+      setProfileUser(data.user)
+      setSettingsForm({
+        full_name: data.user.full_name || '',
+        email: data.user.email || '',
+        current_password: '',
+        new_password: '',
+        household_name: data.household?.household_name || '',
+        family_members: (data.household?.family_members || []).map((member) => ({
+          ...member,
+          clientKey: `saved-${member.id}`
+        }))
+      })
+      setIsSettingsLoaded(true)
+    } catch (error) {
+      setSettingsError(error.message || 'Could not load account settings')
+    } finally {
+      setIsSettingsLoading(false)
+    }
+  }
+
+  const handleSettingsSubmit = async (event) => {
+    event.preventDefault()
+    if (settingsForm.family_members.some((member) => !member.name.trim())) {
+      setSettingsError('Enter a name for each family member before saving.')
+      setSettingsSuccess('')
+      return
+    }
+    setIsSettingsSaving(true)
+    setSettingsError('')
+    setSettingsSuccess('')
+
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/v1/auth/settings`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${auth?.token}`
+        },
+        body: JSON.stringify({
+          full_name: settingsForm.full_name,
+          email: settingsForm.email,
+          current_password: settingsForm.current_password || null,
+          new_password: settingsForm.new_password || null,
+          household_name: settingsForm.household_name,
+          family_members: settingsForm.family_members.map(({ name, has_account }) => ({
+            name: name.trim(),
+            has_account
+          }))
+        })
+      })
+      const data = await response.json()
+      if (!response.ok) throw new Error(getApiErrorMessage(data.detail, 'Could not save account settings'))
+
+      setProfileUser(data.user)
+      setSettingsForm((current) => ({
+        ...current,
+        current_password: '',
+        new_password: '',
+        family_members: (data.household?.family_members || []).map((member) => ({
+          ...member,
+          clientKey: `saved-${member.id}`
+        }))
+      }))
+      if (auth?.token) {
+        localStorage.setItem('auth', JSON.stringify({ ...auth, user: data.user }))
+      }
+      setSettingsSuccess('Your account and household settings have been saved.')
+    } catch (error) {
+      setSettingsError(error.message || 'Could not save account settings')
+    } finally {
+      setIsSettingsSaving(false)
+    }
+  }
+
+  const updateSettingsField = (event) => {
+    const { name, value } = event.target
+    setSettingsForm((current) => ({ ...current, [name]: value }))
+  }
+
+  const addFamilyMember = () => {
+    familyMemberKeyRef.current += 1
+    setSettingsForm((current) => ({
+      ...current,
+      family_members: [
+        ...current.family_members,
+        { clientKey: `new-${familyMemberKeyRef.current}`, name: '', has_account: false }
+      ]
+    }))
+  }
+
   const handleMapClick = (coords) => {
     setPinnedLocation(coords)
     if (activeTab === 'alert') {
@@ -301,11 +434,34 @@ export const CitizenDashboard = ({ auth, onLogout }) => {
   }).format(currentTime)
 
   const alternativeCenter = centers.find((c) => c.id !== selectedCenter?.id && isCenterAvailable(c)) || null
+  const selectedCenterDistanceMeters = latestGps && selectedCenter
+    ? getDistanceKm(
+      latestGps.latitude,
+      latestGps.longitude,
+      { latitude: selectedCenter.latitude, longitude: selectedCenter.longitude }
+    ) * 1000
+    : Number.POSITIVE_INFINITY
+  const isWithinQrCheckInRange = Number.isFinite(selectedCenterDistanceMeters) &&
+    selectedCenterDistanceMeters < 50 &&
+    Date.now() - latestGps?.timestamp < 30_000
+
+  useEffect(() => {
+    if (isQrDialogOpen && !isWithinQrCheckInRange) {
+      setIsQrDialogOpen(false)
+      setEvacuationQr('')
+      setQrError('')
+    }
+  }, [isQrDialogOpen, isWithinQrCheckInRange])
 
   useEffect(() => {
     if (!('geolocation' in navigator)) return
     const watchId = navigator.geolocation.watchPosition(
-      (pos) => setLatestGps({ latitude: pos.coords.latitude, longitude: pos.coords.longitude }),
+      (pos) => setLatestGps({
+        latitude: pos.coords.latitude,
+        longitude: pos.coords.longitude,
+        accuracy: pos.coords.accuracy,
+        timestamp: Date.now()
+      }),
       () => {},
       { enableHighAccuracy: true, maximumAge: 5000, timeout: 10000 }
     )
@@ -423,6 +579,56 @@ export const CitizenDashboard = ({ auth, onLogout }) => {
       await navigator.clipboard.writeText(text)
       setCopyFeedback('Link copied!')
       setTimeout(() => setCopyFeedback(''), 2500)
+    }
+  }
+
+  const handleShowEvacuationQr = async () => {
+    if (!selectedCenter || !isWithinQrCheckInRange) return
+    setIsQrDialogOpen(true)
+    setIsQrLoading(true)
+    setEvacuationQr('')
+    setQrError('')
+
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/v1/auth/settings`, {
+        headers: { Authorization: `Bearer ${auth?.token}` }
+      })
+      const data = await response.json()
+      if (!response.ok) {
+        throw new Error(getApiErrorMessage(data.detail, 'Could not load household information'))
+      }
+
+      const payload = {
+        type: 'resq-route-evacuation-check-in',
+        version: 1,
+        account_holder: {
+          id: data.user.id,
+          name: data.user.full_name || data.user.username
+        },
+        household: {
+          id: data.household?.id || null,
+          name: data.household?.household_name || '',
+          family_members: (data.household?.family_members || []).map(({ id, name, has_account }) => ({
+            id,
+            name,
+            has_account
+          }))
+        },
+        center: {
+          id: selectedCenter.id,
+          name: selectedCenter.name
+        }
+      }
+      const qrImage = await QRCode.toDataURL(JSON.stringify(payload), {
+        errorCorrectionLevel: 'M',
+        margin: 2,
+        width: 280
+      })
+      setEvacuationQr(qrImage)
+    } catch (error) {
+      setQrError(error.message || 'Could not create your check-in QR code')
+    } finally {
+      setIsQrLoading(false)
     }
   }
 
@@ -585,8 +791,6 @@ export const CitizenDashboard = ({ auth, onLogout }) => {
         c.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
         (c.address && c.address.toLowerCase().includes(searchQuery.toLowerCase()))
       if (!matchesQuery) return false
-      if (filterType === 'accessible') return c.is_accessible || c.accessible
-      if (filterType === 'pet') return c.pet_friendly || c.pets_allowed
       return true
     })
     .map((c) => {
@@ -674,6 +878,13 @@ export const CitizenDashboard = ({ auth, onLogout }) => {
                 <button
                   type="button"
                   role="menuitem"
+                  onClick={handleOpenSettings}
+                >
+                  Settings
+                </button>
+                <button
+                  type="button"
+                  role="menuitem"
                   onClick={() => {
                     setIsProfileMenuOpen(false)
                     onLogout()
@@ -686,6 +897,249 @@ export const CitizenDashboard = ({ auth, onLogout }) => {
           </div>
         )}
       </div>
+
+      {isSettingsOpen && (
+        <div
+          className="citizen-settings-backdrop"
+          onClick={(event) => {
+            if (event.target === event.currentTarget) setIsSettingsOpen(false)
+          }}
+        >
+          <section
+            className="citizen-settings-dialog"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="citizen-settings-title"
+          >
+            <header className="citizen-settings-header">
+              <div>
+                <p className="citizen-settings-eyebrow">Your profile</p>
+                <h2 id="citizen-settings-title">Account settings</h2>
+                <p>Keep your account and household information up to date.</p>
+              </div>
+              <button
+                type="button"
+                className="citizen-settings-close"
+                aria-label="Close account settings"
+                onClick={() => setIsSettingsOpen(false)}
+              >
+                <Icons.Close />
+              </button>
+            </header>
+
+            {isSettingsLoading ? (
+              <div className="citizen-settings-loading" role="status">Loading your settings…</div>
+            ) : !isSettingsLoaded ? (
+              <div className="citizen-settings-feedback citizen-settings-error" role="alert">
+                <p>{settingsError || 'Account settings could not be loaded.'}</p>
+                <button type="button" onClick={handleOpenSettings}>Try again</button>
+              </div>
+            ) : (
+              <form className="citizen-settings-form" onSubmit={handleSettingsSubmit}>
+                <div className="citizen-settings-section">
+                  <h3>Account</h3>
+                  <label className="citizen-settings-field">
+                    <span>Full name</span>
+                    <input
+                      name="full_name"
+                      type="text"
+                      maxLength={255}
+                      value={settingsForm.full_name}
+                      onChange={updateSettingsField}
+                    />
+                  </label>
+                  <label className="citizen-settings-field">
+                    <span>Email address</span>
+                    <input
+                      name="email"
+                      type="email"
+                      autoComplete="email"
+                      required
+                      value={settingsForm.email}
+                      onChange={updateSettingsField}
+                    />
+                  </label>
+                  <p className="citizen-settings-username">
+                    Username: <strong>{profileUser?.username || '—'}</strong>
+                  </p>
+                </div>
+
+                <div className="citizen-settings-section">
+                  <h3>Change password</h3>
+                  <p className="citizen-settings-helper">Leave both password fields blank to keep your current password.</p>
+                  <label className="citizen-settings-field">
+                    <span>Current password</span>
+                    <input
+                      name="current_password"
+                      type="password"
+                      autoComplete="current-password"
+                      value={settingsForm.current_password}
+                      onChange={updateSettingsField}
+                    />
+                  </label>
+                  <label className="citizen-settings-field">
+                    <span>New password</span>
+                    <input
+                      name="new_password"
+                      type="password"
+                      autoComplete="new-password"
+                      minLength={8}
+                      value={settingsForm.new_password}
+                      onChange={updateSettingsField}
+                    />
+                  </label>
+                </div>
+
+                <div className="citizen-settings-section">
+                  <div className="citizen-settings-section-heading">
+                    <div>
+                      <h3>Household</h3>
+                      <p>Add family members who may need help during an emergency.</p>
+                    </div>
+                    <button
+                      type="button"
+                      className="citizen-settings-add-member"
+                      onClick={addFamilyMember}
+                    >
+                      + Add member
+                    </button>
+                  </div>
+                  <label className="citizen-settings-field">
+                    <span>Household name</span>
+                    <input
+                      name="household_name"
+                      type="text"
+                      maxLength={120}
+                      placeholder="e.g. Santos Household"
+                      value={settingsForm.household_name}
+                      onChange={updateSettingsField}
+                    />
+                  </label>
+                  {settingsForm.family_members.length === 0 ? (
+                    <p className="citizen-settings-empty">No family members added yet.</p>
+                  ) : (
+                    <div className="citizen-settings-members">
+                      {settingsForm.family_members.map((member, index) => (
+                        <div className="citizen-settings-member" key={member.clientKey}>
+                          <label className="citizen-settings-field citizen-settings-member-name">
+                            <span>Family member {index + 1}</span>
+                            <input
+                              type="text"
+                              maxLength={120}
+                              required
+                              value={member.name}
+                              onChange={(event) => {
+                                const { value } = event.target
+                                setSettingsForm((current) => ({
+                                  ...current,
+                                  family_members: current.family_members.map((item) =>
+                                    item.clientKey === member.clientKey ? { ...item, name: value } : item
+                                  )
+                                }))
+                              }}
+                            />
+                          </label>
+                          <label className="citizen-settings-account-check">
+                            <input
+                              type="checkbox"
+                              checked={Boolean(member.has_account)}
+                              onChange={(event) => {
+                                const { checked } = event.target
+                                setSettingsForm((current) => ({
+                                  ...current,
+                                  family_members: current.family_members.map((item) =>
+                                    item.clientKey === member.clientKey ? { ...item, has_account: checked } : item
+                                  )
+                                }))
+                              }}
+                            />
+                            <span>Has an account</span>
+                          </label>
+                          <button
+                            type="button"
+                            className="citizen-settings-remove-member"
+                            aria-label={`Remove family member ${index + 1}`}
+                            onClick={() => setSettingsForm((current) => ({
+                              ...current,
+                              family_members: current.family_members.filter(
+                                (item) => item.clientKey !== member.clientKey
+                              )
+                            }))}
+                          >
+                            Remove
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  <p className="citizen-settings-helper">The account checkbox records your selection; it does not verify or link an account.</p>
+                </div>
+
+                {settingsError && (
+                  <p className="citizen-settings-feedback citizen-settings-error" role="alert">{settingsError}</p>
+                )}
+                {settingsSuccess && (
+                  <p className="citizen-settings-feedback citizen-settings-success" role="status">{settingsSuccess}</p>
+                )}
+                <footer className="citizen-settings-actions">
+                  <button
+                    type="button"
+                    className="citizen-settings-cancel"
+                    onClick={() => setIsSettingsOpen(false)}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    className="citizen-settings-save"
+                    disabled={isSettingsSaving}
+                  >
+                    {isSettingsSaving ? 'Saving…' : 'Save changes'}
+                  </button>
+                </footer>
+              </form>
+            )}
+          </section>
+        </div>
+      )}
+
+      {isQrDialogOpen && (
+        <div
+          className="citizen-qr-backdrop"
+          onClick={(event) => {
+            if (event.target === event.currentTarget) setIsQrDialogOpen(false)
+          }}
+        >
+          <section
+            className="citizen-qr-dialog"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="citizen-qr-title"
+          >
+            <button
+              type="button"
+              className="citizen-qr-close"
+              aria-label="Close QR code"
+              onClick={() => setIsQrDialogOpen(false)}
+            >
+              <Icons.Close />
+            </button>
+            <div className="citizen-qr-icon"><QrCode size={22} aria-hidden="true" /></div>
+            <h2 id="citizen-qr-title">Evacuation check-in</h2>
+            <p className="citizen-qr-center-name">{selectedCenter?.name}</p>
+            {isQrLoading ? (
+              <div className="citizen-qr-loading" role="status">Preparing your QR code…</div>
+            ) : qrError ? (
+              <p className="citizen-qr-error" role="alert">{qrError}</p>
+            ) : evacuationQr ? (
+              <>
+                <img className="citizen-qr-image" src={evacuationQr} alt="QR code containing your account and household check-in information" />
+                <p className="citizen-qr-guidance">Show this code to the evacuation center coordinator to help record your household’s arrival.</p>
+              </>
+            ) : null}
+          </section>
+        </div>
+      )}
 
       {/* 4. Left Panel */}
       {activeTab === 'shelters' && (
@@ -924,8 +1378,6 @@ export const CitizenDashboard = ({ auth, onLogout }) => {
                     <span className="amenity-pill"><Icons.Water /> Water</span>
                     <span className="amenity-pill"><Icons.MedicalBag /> Medical</span>
                     <span className="amenity-pill"><Icons.Power /> Power</span>
-                    <span className="amenity-pill"><Icons.Pet /> Pet ok</span>
-                    <span className="amenity-pill"><Icons.Accessible /> Accessible</span>
                   </div>
                 </div>
 
@@ -958,6 +1410,17 @@ export const CitizenDashboard = ({ auth, onLogout }) => {
                     <span>{copyFeedback || 'Share'}</span>
                   </button>
                 </div>
+
+                {isWithinQrCheckInRange && (
+                  <button
+                    type="button"
+                    className="shelter-qr-checkin-btn"
+                    onClick={handleShowEvacuationQr}
+                  >
+                    <QrCode size={18} aria-hidden="true" />
+                    <span>Show QR Code</span>
+                  </button>
+                )}
 
                 <div className="occupancy-metric-box">
                   <div className="occupancy-header-row">
@@ -1061,20 +1524,6 @@ export const CitizenDashboard = ({ auth, onLogout }) => {
                     onClick={() => setFilterType('most_space')}
                   >
                     Most space
-                  </button>
-                  <button
-                    type="button"
-                    className={`shelter-filter-pill ${filterType === 'accessible' ? 'active' : ''}`}
-                    onClick={() => setFilterType('accessible')}
-                  >
-                    <Icons.Accessible /> Accessible
-                  </button>
-                  <button
-                    type="button"
-                    className={`shelter-filter-pill ${filterType === 'pet' ? 'active' : ''}`}
-                    onClick={() => setFilterType('pet')}
-                  >
-                    <Icons.Pet /> Pet ok
                   </button>
                 </div>
               </div>

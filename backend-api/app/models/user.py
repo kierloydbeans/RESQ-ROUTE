@@ -8,6 +8,7 @@ class UserRole(str, Enum):
     ADMIN = "admin"
     RESCUER = "rescuer"
     COORDINATOR = "coordinator"
+    CENTER_COORDINATOR = "center_coordinator"
     DISPATCHER = "dispatcher"
     CITIZEN = "citizen"
 
@@ -23,6 +24,7 @@ class User(UserBase, table=True):
     __table_args__ = {"extend_existing": True}
 
     id: Optional[int] = Field(default=None, primary_key=True)
+    assigned_center_id: Optional[int] = Field(default=None, foreign_key="center.id")
     hashed_password: str
     created_at: datetime = Field(
         default_factory=lambda: datetime.now(timezone.utc),
@@ -40,6 +42,7 @@ class UserCreate(UserBase):
 
 class UserRead(UserBase):
     id: int
+    assigned_center_id: Optional[int] = None
     created_at: datetime
     updated_at: datetime
 
@@ -48,6 +51,7 @@ class UserUpdate(SQLModel):
     email: Optional[str] = None
     full_name: Optional[str] = None
     role: Optional[UserRole] = None
+    assigned_center_id: Optional[int] = None
     is_active: Optional[bool] = None
     password: Optional[str] = None
 

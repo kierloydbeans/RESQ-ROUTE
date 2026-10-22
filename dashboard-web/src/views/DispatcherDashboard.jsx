@@ -1480,7 +1480,7 @@ export const Dashboard = () => {
 
   const handleLogout = () => {
     localStorage.removeItem('auth')
-    window.location.href = '/login'
+    window.location.href = '/'
   }
 
   const accountMenu = (

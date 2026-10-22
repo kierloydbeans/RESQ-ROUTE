@@ -1,11 +1,2 @@
-bcrypt
-fastapi
-httpx
-itsdangerous
-pydantic
-pydantic_settings
-python-jose
-sqlalchemy
-sqlmodel
-starlette
-supabase
+# Convenience entry point for installing the backend dependencies from the repository root.
+-r backend-api/requirements.txt
