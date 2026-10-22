@@ -1,17 +1,12 @@
 import React, { useEffect, useState, useMemo, useRef } from 'react'
 import { useWebSocket } from '../hooks/useWebSocket'
-import {
-  fetchCenters,
-  fetchInventory,
-  fetchCenterInventory,
-  fetchInventoryWithCenters,
-  fetchEvacuees,
-  fetchShelteredEvacueesCount,
-  fetchActiveAlertsCount,
-  createInventoryItem,
-  updateCenterStatus
-} from '../lib/supabase'
 import Logo from '../components/Logo'
+import {
+  createCoordinatorInventoryItem,
+  fetchCoordinatorCenterInventory,
+  fetchCoordinatorDashboard,
+  updateCoordinatorCenterStatus
+} from '../lib/coordinatorDashboard'
 import {
   createInventoryShipment,
   fetchPendingInventoryShipments,
@@ -24,9 +19,6 @@ import {
 import { ChevronDown, FileDown, FileSpreadsheet, LogOut, Plus, X } from 'lucide-react'
 import { WS_URL } from '../dataProvider'
 import '../styles/coordinator-console.css'
-
-const rawApiBase = (import.meta.env.VITE_API_URL || import.meta.env.VITE_API_BASE_URL || 'https://resq-route.onrender.com').replace(/\/$/, '')
-const API_BASE_URL = rawApiBase.endsWith('/api/v1') ? rawApiBase.replace(/\/api\/v1$/, '') : rawApiBase
 
 const getInventoryStatus = (currentStock, targetStock) => {
   const stockRatio = targetStock > 0 ? currentStock / targetStock : 0
@@ -67,6 +59,7 @@ export const CoordinatorDashboard = ({ auth, onLogout }) => {
   const [shelteredEvacueesCount, setShelteredEvacueesCount] = useState(null)
   const [activeAlertsCount, setActiveAlertsCount] = useState(null)
   const [loading, setLoading] = useState(true)
+  const [dashboardDataError, setDashboardDataError] = useState('')
   const [isAddInventoryOpen, setIsAddInventoryOpen] = useState(false)
   const [isSavingInventory, setIsSavingInventory] = useState(false)
   const [inventoryFormError, setInventoryFormError] = useState('')
@@ -135,54 +128,34 @@ export const CoordinatorDashboard = ({ auth, onLogout }) => {
     hour12: false
   }).format(currentTime)
 
-  // Fetch live telemetry from Supabase
+  // Fetch coordinator data through the authenticated API.
   useEffect(() => {
     let isMounted = true
 
     const fetchAllData = async () => {
       try {
         const token = auth?.token || auth?.access_token
-        const [centersData, invData, evacData, shelteredCountData, incData, shipmentsData, assignmentsData] = await Promise.allSettled([
-          fetchCenters(100),
-          fetchInventory(100), // Master inventory with totals
-          fetchEvacuees(500),
-          fetchShelteredEvacueesCount(),
-          fetchActiveAlertsCount(),
+        const [dashboardData, shipmentsData, assignmentsData] = await Promise.allSettled([
+          fetchCoordinatorDashboard(token),
           fetchPendingInventoryShipments(token),
           fetchCoordinatorAssignments(token)
         ])
 
         if (!isMounted) return
 
-        if (centersData.status === 'fulfilled') {
-          setCenters(Array.isArray(centersData.value) ? centersData.value : [])
+        if (dashboardData.status === 'fulfilled') {
+          const data = dashboardData.value
+          setCenters(Array.isArray(data.centers) ? data.centers : [])
           setHasCentersData(true)
-        } else {
-          console.error('[RESQ Coordinator] Failed to refresh centers:', centersData.reason)
-        }
-
-        if (invData.status === 'fulfilled') {
-          setInventory(Array.isArray(invData.value) ? invData.value : [])
+          setInventory(Array.isArray(data.inventory) ? data.inventory : [])
           setHasInventoryData(true)
+          setEvacuees(Array.isArray(data.evacuees) ? data.evacuees : [])
+          setShelteredEvacueesCount(data.sheltered_evacuees_count)
+          setActiveAlertsCount(data.active_alerts_count)
+          setDashboardDataError('')
         } else {
-          console.error('[RESQ Coordinator] Failed to refresh inventory:', invData.reason)
-        }
-
-        if (evacData.status === 'fulfilled') {
-          setEvacuees(Array.isArray(evacData.value) ? evacData.value : [])
-        }
-
-        if (shelteredCountData.status === 'fulfilled') {
-          setShelteredEvacueesCount(shelteredCountData.value)
-        } else {
-          console.error('[RESQ Coordinator] Failed to refresh sheltered evacuee count:', shelteredCountData.reason)
-          setShelteredEvacueesCount(null)
-        }
-
-        if (incData.status === 'fulfilled') {
-          setActiveAlertsCount(incData.value)
-        } else {
-          console.error('[RESQ Coordinator] Failed to refresh active alerts:', incData.reason)
+          console.error('[RESQ Coordinator] Failed to load dashboard data:', dashboardData.reason)
+          setDashboardDataError('Coordinator data could not be loaded. Check your connection or contact an administrator.')
         }
 
         if (shipmentsData.status === 'fulfilled') {
@@ -200,7 +173,7 @@ export const CoordinatorDashboard = ({ auth, onLogout }) => {
           setCoordinatorAssignmentError('Coordinator accounts could not be loaded.')
         }
       } catch (error) {
-        console.error('[RESQ Coordinator] Supabase sync error:', error)
+        console.error('[RESQ Coordinator] Data sync error:', error)
       } finally {
         if (isMounted) setLoading(false)
       }
@@ -301,7 +274,10 @@ useEffect(() => {
   }
 
   let isMounted = true
-  fetchCenterInventory(selectedCenterId, 200)
+  fetchCoordinatorCenterInventory(
+    auth?.token || auth?.access_token,
+    selectedCenterId
+  )
     .then((data) => {
       if (isMounted) {
         setCenterInventory(Array.isArray(data) ? data : [])
@@ -315,7 +291,7 @@ useEffect(() => {
   return () => {
     isMounted = false
   }
-}, [selectedCenterId])
+}, [selectedCenterId, auth?.token, auth?.access_token])
 
 // Derive inventory items for the active center selection
 // Uses centerInventory (fetched from center_inventory_detail view) when center is selected
@@ -414,7 +390,11 @@ const handleToggleCenterStatus = async (center) => {
   setUpdatingCenterId(center.id)
 
   try {
-    await updateCenterStatus(center.id, newActiveState)
+    await updateCoordinatorCenterStatus(
+      auth?.token || auth?.access_token,
+      center.id,
+      newActiveState
+    )
 
     setCenters((prev) =>
       prev.map((c) => (c.id === center.id ? { ...c, is_active: newActiveState } : c))
@@ -442,17 +422,17 @@ const handleAddInventoryItem = async (event) => {
   setIsSavingInventory(true)
 
   try {
-    const createdItems = await createInventoryItem({
+    const createdItem = await createCoordinatorInventoryItem(auth?.token || auth?.access_token, {
       item_description: itemDescription,
       current_stock: currentStock,
       max_stock: maxStock,
       status,
       last_shipment: null
     })
-    if (!Array.isArray(createdItems) || createdItems.length === 0) {
+    if (!createdItem?.id) {
       throw new Error('Inventory insert did not return the created record.')
     }
-    setInventory((items) => [...items, ...createdItems])
+    setInventory((items) => [...items, createdItem])
     setNewInventoryItem({ item_description: '', current_stock: '', max_stock: '' })
     setIsAddInventoryOpen(false)
   } catch (error) {
@@ -964,6 +944,12 @@ const exportCoordinatorReportPdf = async () => {
           RESOURCE INVENTORY
         </button>
       </nav>
+
+      {dashboardDataError && (
+        <div className="coord-dashboard-data-error" role="alert">
+          {dashboardDataError} The dashboard will retry automatically.
+        </div>
+      )}
 
       <section className="coord-report-toolbar" aria-label="Coordinator report exports">
         <div>

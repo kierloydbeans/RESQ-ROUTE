@@ -3,67 +3,38 @@ from typing import List, Optional
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlmodel import Session, select
+from sqlmodel import select
 
 from app.core.security import get_current_user
 from app.db.session import get_session
 from app.models.user import User, UserRole
-from sqlmodel import SQLModel
 
 router = APIRouter()
-
-class InventoryItem(SQLModel):
-    id: str
-    name: str
-    category: str
-    quantity: int
-    threshold: int
-    critical: bool
-
-# Mock inventory data - in production, this would be a proper database model
-mock_inventory = [
-    InventoryItem(
-        id="1",
-        name="Water Bottles",
-        category="Foods & Water",
-        quantity=500,
-        threshold=200,
-        critical=False
-    ),
-    InventoryItem(
-        id="2",
-        name="First Aid Kits",
-        category="Medical",
-        quantity=50,
-        threshold=100,
-        critical=True
-    ),
-    InventoryItem(
-        id="3",
-        name="Blankets",
-        category="Supplies",
-        quantity=300,
-        threshold=150,
-        critical=False
-    ),
-    InventoryItem(
-        id="4",
-        name="Canned Food",
-        category="Food & Water",
-        quantity=200,
-        threshold=300,
-        critical=True
-    ),
-]
 
 
 class InventoryShipmentCreate(BaseModel):
     inventory_id: UUID
     center_id: int = Field(gt=0)
     quantity: int = Field(gt=0)
+
+
+class InventoryItemCreate(BaseModel):
+    item_description: str = Field(min_length=1, max_length=255)
+    current_stock: int = Field(ge=0)
+    max_stock: int = Field(gt=0)
+    status: str = Field(min_length=1, max_length=32)
+    last_shipment: Optional[datetime] = None
+
+    @field_validator("item_description")
+    @classmethod
+    def normalize_description(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("Item description is required")
+        return value
 
 
 class InventoryShipmentRead(BaseModel):
@@ -129,9 +100,47 @@ async def _get_shipment(session: AsyncSession, shipment_id: UUID) -> dict:
     return dict(row)
 
 
-@router.get("/", response_model=List[InventoryItem])
-async def list_inventory(session: Session = Depends(get_session)):
-    return mock_inventory
+@router.get("/")
+async def list_inventory(
+    current_user: dict = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+):
+    await _require_inventory_manager(current_user, session)
+    result = await session.execute(
+        text(
+            """
+            SELECT id, item_description, current_stock, max_stock, status, last_shipment
+            FROM public.inventory
+            ORDER BY item_description
+            LIMIT 100
+            """
+        )
+    )
+    return [dict(row) for row in result.mappings()]
+
+
+@router.post("/", status_code=201)
+async def create_inventory_item(
+    payload: InventoryItemCreate,
+    current_user: dict = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+):
+    await _require_inventory_manager(current_user, session)
+    result = await session.execute(
+        text(
+            """
+            INSERT INTO public.inventory
+                (item_description, current_stock, max_stock, status, last_shipment)
+            VALUES
+                (:item_description, :current_stock, :max_stock, :status, :last_shipment)
+            RETURNING id, item_description, current_stock, max_stock, status, last_shipment
+            """
+        ),
+        payload.model_dump(),
+    )
+    item = dict(result.mappings().one())
+    await session.commit()
+    return item
 
 
 @router.get("/shipments", response_model=List[InventoryShipmentRead])
@@ -283,10 +292,23 @@ async def mark_shipment_arrived(
 
 
 @router.get("/depletion-metrics")
-async def get_depletion_metrics():
-    total_items = len(mock_inventory)
-    critical_items = sum(1 for item in mock_inventory if item.critical)
-    
+async def get_depletion_metrics(
+    current_user: dict = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+):
+    await _require_inventory_manager(current_user, session)
+    result = await session.execute(
+        text(
+            """
+            SELECT COUNT(*) AS total_items,
+                   COUNT(*) FILTER (WHERE UPPER(status::text) = 'CRITICAL') AS critical_items
+            FROM public.inventory
+            """
+        )
+    )
+    metrics = result.mappings().one()
+    total_items = metrics["total_items"]
+    critical_items = metrics["critical_items"]
     return {
         "total_items": total_items,
         "critical_items": critical_items,
