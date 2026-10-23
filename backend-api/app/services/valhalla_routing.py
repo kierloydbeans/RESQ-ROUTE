@@ -202,7 +202,7 @@ async def request_valhalla_route(
     origin_longitude: float,
     destination_latitude: float,
     destination_longitude: float,
-    exclude_polygons: Optional[List[List[Dict[str, float]]]] = None,
+    exclude_polygons: Optional[List[List[List[float]]]] = None,
 ) -> Dict[str, Any]:
     payload: Dict[str, Any] = {
         "locations": [

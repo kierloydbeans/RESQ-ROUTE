@@ -5,6 +5,7 @@ from sqlmodel import Session, SQLModel, select
 
 from app.db.session import get_session
 from app.models.road_hazard import RoadHazardReport
+from app.models.hazard_map_layer import HazardMapLayer
 from app.services.road_hazard_expiration import expire_stale_road_hazards
 from app.services.graphhopper_routing import route_citizen
 
@@ -19,6 +20,7 @@ class WalkingRouteRequest(SQLModel):
 
 
 @router.post("/walk")
+@router.post("/calculate")
 async def create_walking_route(
     request: WalkingRouteRequest,
     session: Session = Depends(get_session),
@@ -31,6 +33,10 @@ async def create_walking_route(
         )
     )
     hazards = result.scalars().all()
+    noah_result = await session.execute(
+        select(HazardMapLayer).where(HazardMapLayer.hazard_level == "high")
+    )
+    noah_layers = noah_result.scalars().all()
 
     try:
         return await route_citizen(
@@ -39,6 +45,7 @@ async def create_walking_route(
             destination_latitude=request.destination_latitude,
             destination_longitude=request.destination_longitude,
             hazards=hazards,
+            noah_layers=noah_layers,
         )
     except Exception as error:
         raise HTTPException(status_code=502, detail=f"Unable to calculate walking route: {error}") from error
