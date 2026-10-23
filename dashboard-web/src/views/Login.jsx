@@ -12,10 +12,12 @@ const API_URL = `${API_BASE_URL}/api/v1`
 const roles = [
   { value: 'citizen', label: 'Citizen' },
   { value: 'dispatcher', label: 'Dispatcher' },
+  { value: 'admin', label: 'Admin' },
   { value: 'rescuer', label: 'Rescuer' },
   { value: 'coordinator', label: 'Coordinator' },
   { value: 'center_coordinator', label: 'Center Coordinator' }
 ]
+
 const BackgroundPin = ({ top, left, delay }) => (
   <svg
     className="pulsing-pin"
@@ -50,11 +52,6 @@ const Login = () => {
   const [resetMessage, setResetMessage] = useState({ type: '', text: '' })
   const [isPageLoading, setIsPageLoading] = useState(true)
   const navigate = useNavigate()
-
-  useEffect(() => {
-    const timer = setTimeout(() => setIsPageLoading(false), 1200)
-    return () => clearTimeout(timer)
-  }, [])
 
   useEffect(() => {
     const timer = setTimeout(() => setIsPageLoading(false), 1200)

@@ -667,3 +667,11 @@
   .maplibregl-marker.citizen-pinned-marker.pin-dropping svg { animation-duration: 0.01ms; }
   .resq-map-marker.is-shelter-highlighted { animation-duration: 0.01ms; animation-iteration-count: 1; }
 }
+
+
+.mapboxgl-marker,
+.mapboxgl-popup,
+.maplibregl-marker,
+.maplibregl-popup {
+  transition: none !important;
+}
