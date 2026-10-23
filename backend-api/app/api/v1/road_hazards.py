@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlmodel import Session, select
 
 from app.db.session import get_session
@@ -18,6 +18,7 @@ from app.services.road_hazard_expiration import (
     calculate_road_hazard_expiration,
     expire_stale_road_hazards,
 )
+from app.services.audit_logging import record_audit_log
 
 router = APIRouter()
 
@@ -71,6 +72,7 @@ async def create_road_hazard(
 async def update_road_hazard(
     hazard_id: int,
     hazard_update: RoadHazardReportUpdate,
+    request: Request,
     credentials: dict = Depends(get_current_user),
     session: Session = Depends(get_session),
 ):
@@ -98,6 +100,7 @@ async def update_road_hazard(
     for key, value in hazard_data.items():
         setattr(db_hazard, key, value)
 
+    record_audit_log(session, credentials, request, f"Road hazard {hazard_id} updated")
     await session.commit()
     await session.refresh(db_hazard)
     await telemetry_manager.broadcast({"type": "road_hazard_updated", "data": road_hazard_feature(db_hazard)})

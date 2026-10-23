@@ -4,7 +4,7 @@ import logging
 from typing import Literal
 from urllib.parse import urlsplit, urlunsplit
 from uuid import uuid4
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status, BackgroundTasks
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status, BackgroundTasks, Request
 from fastapi.security import OAuth2PasswordRequestForm
 from starlette.concurrency import run_in_threadpool
 from sqlmodel import select
@@ -38,6 +38,7 @@ from app.models.vehicle import Vehicle
 from app.core.config import settings
 from app.core.mail import send_reset_password_email, send_otp_email
 from app.api.websockets.telemetry import manager as telemetry_manager
+from app.services.audit_logging import record_audit_log
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -545,6 +546,7 @@ async def list_coordinator_assignments(
 async def assign_coordinator_to_center(
     user_id: int,
     payload: CenterCoordinatorAssignment,
+    request: Request,
     credentials: dict = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
 ):
@@ -571,6 +573,12 @@ async def assign_coordinator_to_center(
         user.assigned_center_id = center.id
         center_name = center.name
 
+    record_audit_log(
+        session,
+        credentials,
+        request,
+        f"Coordinator assignment updated for user {user.id} to {center_name or 'unassigned'}",
+    )
     await session.commit()
     await session.refresh(user)
     return {
@@ -713,6 +721,7 @@ async def get_my_rescuer_status(
 
 @router.post("/rescuers/me/presence")
 async def update_my_rescuer_presence(
+    request: Request,
     current_user: dict = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
 ):
@@ -758,6 +767,13 @@ async def update_my_rescuer_presence(
         status_changed = True
     profile.last_seen_at = now
     profile.updated_at = now
+    if status_changed:
+        record_audit_log(
+            session,
+            current_user,
+            request,
+            f"Rescuer presence changed to {profile.status.value}",
+        )
     await session.commit()
     if status_changed:
         await telemetry_manager.broadcast({
@@ -778,6 +794,7 @@ async def update_my_rescuer_presence(
 @router.patch("/rescuers/me/status")
 async def update_my_rescuer_status(
     payload: RescuerPostAlertStatusUpdate,
+    request: Request,
     current_user: dict = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
 ):
@@ -839,6 +856,12 @@ async def update_my_rescuer_status(
         raise HTTPException(status_code=409, detail="Rescuer availability cannot be changed at this time")
     profile.last_seen_at = now
     profile.updated_at = now
+    record_audit_log(
+        session,
+        current_user,
+        request,
+        f"Rescuer availability changed to {profile.status.value}",
+    )
     await session.commit()
     await session.refresh(profile)
 
@@ -1076,6 +1099,8 @@ async def list_assigned_alerts(
 async def update_alert(
     alert_id: int, 
     payload: dict, 
+    request: Request,
+    current_user: dict = Depends(get_current_user),
     session: AsyncSession = Depends(get_session)
 ):
     statement = select(EmergencyAlert).where(EmergencyAlert.id == alert_id)
@@ -1160,6 +1185,11 @@ async def update_alert(
             alert.updated_at = datetime.utcnow()
             await _release_alert_vehicles(session, alert)
 
+    action = "Incident assignment updated" if assigned_user_id or assigned_vehicle_ids else "Incident alert updated"
+    if requested_status is not None:
+        action = f"{action}; status changed to {str(requested_status)}"
+    record_audit_log(session, current_user, request, action)
+
     await session.commit()
     await session.refresh(alert)
     await telemetry_manager.broadcast({
@@ -1178,6 +1208,7 @@ async def update_alert(
 async def create_alert_status_report(
     alert_id: int,
     payload: EmergencyAlertStatusReportCreate,
+    request: Request,
     current_user: dict = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
 ):
@@ -1229,6 +1260,12 @@ async def create_alert_status_report(
         created_at=datetime.utcnow(),
     )
     session.add(report)
+    record_audit_log(
+        session,
+        current_user,
+        request,
+        f"Rescuer reported incident {report_type} for alert {alert.id}",
+    )
     await session.commit()
     await session.refresh(report)
 
@@ -1328,6 +1365,8 @@ async def list_alert_status_reports(
 async def acknowledge_alert(
     alert_id: int,
     payload: dict,
+    request: Request,
+    current_user: dict = Depends(get_current_user),
     session: AsyncSession = Depends(get_session)
 ):
     statement = select(EmergencyAlert).where(EmergencyAlert.id == alert_id)
@@ -1356,6 +1395,12 @@ async def acknowledge_alert(
         for vehicle in vehicle_result.scalars().all():
             vehicle.status = "in_transit"
     alert.status = AlertStatus.RESOLVING
+    record_audit_log(
+        session,
+        current_user,
+        request,
+        f"Rescuer acknowledged and started incident {alert.id}",
+    )
     await session.commit()
     await session.refresh(alert)
     await telemetry_manager.broadcast({

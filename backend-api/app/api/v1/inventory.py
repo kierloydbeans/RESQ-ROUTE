@@ -2,7 +2,7 @@ from datetime import datetime
 from typing import List, Optional
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -11,6 +11,7 @@ from sqlmodel import select
 from app.core.security import get_current_user
 from app.db.session import get_session
 from app.models.user import User, UserRole
+from app.services.audit_logging import record_audit_log
 
 router = APIRouter()
 
@@ -122,6 +123,7 @@ async def list_inventory(
 @router.post("/", status_code=201)
 async def create_inventory_item(
     payload: InventoryItemCreate,
+    request: Request,
     current_user: dict = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
 ):
@@ -139,6 +141,7 @@ async def create_inventory_item(
         payload.model_dump(),
     )
     item = dict(result.mappings().one())
+    record_audit_log(session, current_user, request, f"Inventory item created: {item['item_description']}")
     await session.commit()
     return item
 
@@ -178,6 +181,7 @@ async def list_pending_shipments(
 @router.post("/shipments", response_model=InventoryShipmentRead, status_code=201)
 async def create_inventory_shipment(
     payload: InventoryShipmentCreate,
+    request: Request,
     current_user: dict = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
 ):
@@ -224,6 +228,12 @@ async def create_inventory_shipment(
             "created_at": shipment["created_at"],
         },
     )
+    record_audit_log(
+        session,
+        current_user,
+        request,
+        f"Resource allocation created: shipment {shipment['id']} quantity {payload.quantity}",
+    )
     await session.commit()
     return await _get_shipment(session, shipment["id"])
 
@@ -231,6 +241,7 @@ async def create_inventory_shipment(
 @router.post("/shipments/{shipment_id}/arrive")
 async def mark_shipment_arrived(
     shipment_id: UUID,
+    request: Request,
     current_user: dict = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
 ):
@@ -287,6 +298,7 @@ async def mark_shipment_arrived(
         ),
         {"shipment_id": shipment_id},
     )
+    record_audit_log(session, current_user, request, f"Inventory shipment received: {shipment_id}")
     await session.commit()
     return {"id": shipment_id, "status": "arrived"}
 

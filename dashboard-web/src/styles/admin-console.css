@@ -1,15 +1,36 @@
 :root {
-  --bg: #060910;
-  --panel: #0d1220;
-  --panel2: #121a2c;
-  --line: #1d2740;
-  --cyan: #12b9d6;
-  --text: #e6ebf5;
-  --mute: #94a3b8;
-  --mute-strong: #cbd5e1;
-  --ok: #10d9a0;
-  --warn: #f5a524;
-  --bad: #ef4444;
+  --bg: var(--ops-bg);
+  --panel: var(--ops-surface);
+  --panel2: var(--ops-surface-2);
+  --line: var(--ops-border);
+  --cyan: var(--ops-blue);
+  --text: var(--ops-text);
+  --mute: var(--ops-muted);
+  --mute-strong: var(--ops-text);
+  --ok: var(--ops-green);
+  --warn: var(--ops-amber);
+  --bad: var(--ops-red);
+}
+
+/* The coordinator stylesheet is shared by multiple dashboards and contains
+   fixed dark header text. Keep the Admin header on the shared theme tokens. */
+.resilience-root .admin-coord-header,
+.resilience-root .admin-coord-header.coord-header {
+  background-color: var(--panel) !important;
+  border-bottom-color: var(--line) !important;
+  color: var(--text);
+}
+
+.resilience-root .admin-coord-header .coord-system-title,
+.resilience-root .admin-coord-header .coord-header-right,
+.resilience-root .admin-coord-header .coord-clock,
+.resilience-root .admin-coord-header .coord-profile-badge,
+.resilience-root .admin-coord-header .coord-profile-name {
+  color: var(--text) !important;
+}
+
+.resilience-root .admin-coord-header .coord-profile-role {
+  color: var(--mute) !important;
 }
 
 .resilience-root .demo-banner {
@@ -294,6 +315,13 @@
   display: flex;
   flex-direction: column;
   gap: 4px;
+}
+
+.resilience-root .rate-item .kpi-source-note {
+  color: var(--mute);
+  font: 9px/1.3 ui-monospace, "SF Mono", Consolas, monospace;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
 }
 
 .resilience-root .rate-label-row {
@@ -595,6 +623,9 @@
 .resilience-root .ub-onscene { color: #ef4444; background: rgba(239, 68, 68, 0.15); border: 1px solid rgba(239, 68, 68, 0.4); }
 .resilience-root .ub-staging { color: #12b9d6; background: rgba(18, 185, 214, 0.15); border: 1px solid rgba(18, 185, 214, 0.4); }
 .resilience-root .ub-avail   { color: #10d9a0; background: rgba(16, 217, 160, 0.15); border: 1px solid rgba(16, 217, 160, 0.4); }
+.resilience-root .ub-dispatched { color: #f5a524; background: rgba(245, 165, 36, 0.15); border: 1px solid rgba(245, 165, 36, 0.4); }
+.resilience-root .ub-recovering { color: #a78bfa; background: rgba(167, 139, 250, 0.15); border: 1px solid rgba(167, 139, 250, 0.4); }
+.resilience-root .ub-offline { color: var(--mute); background: rgba(148, 163, 184, 0.12); border: 1px solid rgba(148, 163, 184, 0.3); }
 
 .resilience-root .unit-inc {
   color: var(--mute);
@@ -894,6 +925,149 @@
   justify-content: center;
 }
 
+/* Responsive dashboard layout */
+.resilience-root {
+  width: 100%;
+  min-width: 0;
+  min-height: 100dvh;
+  height: auto;
+  overflow-x: hidden;
+  overflow-y: auto;
+}
+
+.resilience-root > main {
+  width: 100%;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.resilience-root .view.on,
+.resilience-root .col,
+.resilience-root .analytics-main-col,
+.resilience-root .side {
+  min-width: 0;
+}
+
+.resilience-root .analytics-main-col {
+  flex: 1 1 min(100%, 900px);
+  width: auto;
+}
+
+.resilience-root .side {
+  flex: 0 1 clamp(300px, 32vw, 520px);
+  width: clamp(300px, 32vw, 520px);
+}
+
+.resilience-root .chart-panel {
+  flex: 1 1 auto;
+  min-height: clamp(260px, 34vh, 420px);
+}
+
+.resilience-root #chart {
+  flex: 1 1 auto;
+  height: clamp(180px, 30vh, 340px);
+  min-height: 180px;
+}
+
+.resilience-root .rate {
+  display: grid;
+  grid-template-columns: minmax(180px, 1.35fr) repeat(3, minmax(140px, 1fr));
+  align-items: stretch;
+  gap: 0;
+  width: 100%;
+}
+
+.resilience-root .rate-item {
+  min-width: 0;
+  padding: 0 14px;
+}
+
+.resilience-root .rate-item:first-child { padding-left: 0; }
+.resilience-root .rate-item:last-child { padding-right: 0; }
+.resilience-root .rate-label-row { min-width: 0; flex-wrap: wrap; }
+.resilience-root .rate-label-row small { min-width: 0; overflow-wrap: anywhere; }
+.resilience-root .status-chip { max-width: 100%; white-space: normal; text-align: center; }
+
+.resilience-root .mini {
+  padding-left: 14px;
+  border-left: 1px solid var(--line);
+}
+
+/* Keep secondary KPIs available at tablet widths; they reflow below. */
+.resilience-root .rate .mini { display: flex; }
+
+.resilience-root .map-stage {
+  width: 100%;
+  min-width: 0;
+  min-height: 260px;
+}
+
+.resilience-root .map-legend-static {
+  max-width: min(250px, calc(100% - 20px));
+  max-height: calc(100% - 20px);
+  overflow: auto;
+}
+
+.resilience-root .noah-chart-context {
+  min-width: 0;
+  flex-wrap: wrap;
+}
+
+@media (max-width: 1180px) {
+  .resilience-root .view.on { flex-direction: column; }
+  .resilience-root .side { width: 100%; flex-basis: auto; }
+  .resilience-root .analytics-main-col { width: 100%; flex-basis: auto; }
+  .resilience-root .map-panel {
+    flex: 0 1 auto;
+    min-height: 0;
+  }
+  .resilience-root .resilience-live-map {
+    flex: 0 0 auto;
+    height: clamp(280px, 42vw, 520px);
+    min-height: 280px;
+  }
+  .resilience-root .resilience-live-map > .map-container,
+  .resilience-root .resilience-live-map > .map-container > div:first-child {
+    height: 100% !important;
+  }
+}
+
+@media (max-width: 760px) {
+  .resilience-root > main { padding: 8px 10px 12px; }
+  .resilience-root .view { gap: 8px; }
+  .resilience-root .col { gap: 8px; }
+  .resilience-root .rate {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px 0;
+  }
+  .resilience-root .rate-item,
+  .resilience-root .rate-item:first-child,
+  .resilience-root .rate-item:last-child { padding: 0 10px; }
+  .resilience-root .rate-item:nth-child(odd) { padding-left: 0; }
+  .resilience-root .rate-item:nth-child(even) { border-left: 1px solid var(--line); }
+  .resilience-root .rate-item:nth-child(n + 3) { padding-top: 10px; border-top: 1px solid var(--line); }
+  .resilience-root .chart-panel { min-height: 300px; }
+  .resilience-root #chart { height: 210px; min-height: 180px; }
+  .resilience-root .map-panel { min-height: 300px; }
+  .resilience-root .map-legend-static { font-size: 7px; }
+}
+
+@media (max-width: 480px) {
+  .resilience-root .rate { grid-template-columns: 1fr; gap: 10px; }
+  .resilience-root .rate-item,
+  .resilience-root .rate-item:first-child,
+  .resilience-root .rate-item:last-child,
+  .resilience-root .rate-item:nth-child(odd),
+  .resilience-root .rate-item:nth-child(even) {
+    padding: 0;
+    border-left: 0;
+  }
+  .resilience-root .rate-item + .rate-item { padding-top: 10px; border-top: 1px solid var(--line); }
+  .resilience-root .chart-panel { min-height: 270px; }
+  .resilience-root #chart { height: 190px; }
+  .resilience-root .map-legend-static { left: 8px; top: 8px; max-width: calc(100% - 16px); }
+}
+
 /* Modal Backdrops & Dialogs */
 .rbac-modal-backdrop {
   position: fixed;
@@ -991,13 +1165,156 @@
 
 .resilience-root .analytics-main-col { flex: 1; }
 .resilience-root .chart-panel { flex: 1; min-height: 220px; }
+.resilience-root .noah-chart-context {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 5px 12px 8px;
+  color: var(--muted);
+  font: 10px/1.35 var(--ops-mono);
+}
+.resilience-root .noah-chart-context b { color: var(--accent); font-weight: 700; }
+.resilience-root .noah-chart-context small { color: var(--muted); text-align: right; }
+@media (max-width: 720px) {
+  .resilience-root .noah-chart-context { align-items: flex-start; flex-direction: column; gap: 3px; }
+  .resilience-root .noah-chart-context small { text-align: left; }
+}
 .resilience-root .audit-mini-panel { flex: 0 0 clamp(190px, 32vh, 360px); }
 .resilience-root .map-panel { flex: 1; }
+.resilience-root .resilience-live-map { position: relative; min-height: 260px; flex: 1; overflow: hidden; }
+.resilience-root .resilience-live-map > .map-container { min-height: 260px; }
+.resilience-root .resilience-map-status { position: absolute; left: 10px; bottom: 10px; z-index: 3; max-width: calc(100% - 20px); padding: 5px 8px; border: 1px solid var(--line); border-radius: 3px; background: color-mix(in srgb, var(--panel) 92%, transparent); color: var(--mute); font: 10px var(--ops-mono); pointer-events: none; }
+
+/* Keep the stacked live map measurable after the legacy flex rules below this
+   section are applied, and give MapLibre a stable viewport at every width. */
+@media (max-width: 1180px) {
+  .resilience-root .side {
+    width: 100%;
+    flex: 0 0 auto;
+  }
+
+  .resilience-root .side .map-panel {
+    flex: 0 0 auto;
+    height: clamp(340px, 48vw, 560px);
+    min-height: 340px;
+  }
+
+  .resilience-root .side .resilience-live-map {
+    flex: 1 1 auto;
+    height: auto;
+    min-height: 0;
+  }
+
+  .resilience-root .side .resilience-live-map > .map-container,
+  .resilience-root .side .resilience-live-map > .map-container > div:first-child {
+    height: 100% !important;
+    min-height: 0;
+  }
+}
+
+@media (max-width: 760px) {
+  .resilience-root .side .map-panel { height: min(92vw, 500px); min-height: 300px; }
+}
+
+@media (max-width: 480px) {
+  .resilience-root .side .map-panel { height: min(110vw, 420px); min-height: 280px; }
+}
 .resilience-root .full-panel,
 .resilience-root .rbac-panel { flex: 1; }
 .resilience-root .header-user-name { font-size: 12px; font-weight: 600; }
 .resilience-root .audit-feed-label { color: var(--cyan); font-weight: 400; }
 .resilience-root .integrity-count { color: var(--ok); font-weight: 400; }
+
+/* Admin header follows the coordinator shell hierarchy while retaining the
+   admin navigation and account controls. */
+.resilience-root .admin-coord-header {
+  min-height: 52px;
+  height: auto;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 0 16px;
+  overflow: visible;
+}
+.resilience-root .admin-coord-header .coord-header-left,
+.resilience-root .admin-coord-header .coord-header-right { min-width: 0; }
+.resilience-root .admin-coord-header .coord-header-left { display: flex; align-items: center; gap: 12px; flex: 0 1 auto; }
+.resilience-root .admin-coord-header .coord-header-left > img { width: 32px; height: 32px; object-fit: contain; flex: 0 0 auto; }
+.resilience-root .admin-coord-header .coord-system-title { margin: 0; color: #f1f5f9; font-size: 13px; font-weight: 700; letter-spacing: .05em; white-space: nowrap; }
+.resilience-root .admin-coord-header .nav-compact { flex: 0 1 auto; margin: 0; }
+.resilience-root .admin-coord-header .coord-header-right { display: flex; align-items: center; gap: 16px; flex: 0 1 auto; }
+.resilience-root .admin-coord-header .coord-telemetry-status { display: flex; align-items: center; gap: 6px; color: #ef4444; font: 11px monospace; white-space: nowrap; }
+.resilience-root .admin-coord-header .coord-telemetry-status.online { color: #10b981; }
+.resilience-root .admin-coord-header .coord-telemetry-status.reconnecting { color: #ef4444; }
+.resilience-root .admin-coord-header .coord-status-indicator { width: 6px; height: 6px; border-radius: 50%; flex: 0 0 auto; }
+.resilience-root .admin-coord-header .coord-status-indicator.online { background: #10b981; }
+.resilience-root .admin-coord-header .coord-status-indicator.reconnecting { background: #ef4444; }
+.resilience-root .admin-coord-header .coord-incident-pill { padding: 4px 10px; border: 1px solid #dc2626; border-radius: 4px; color: #f87171; font-size: 11px; font-weight: 700; letter-spacing: .04em; white-space: nowrap; }
+.resilience-root .admin-coord-header .coord-clock { color: #e2e8f0; font: 600 13px monospace; white-space: nowrap; }
+.resilience-root .admin-coord-header .coordinator-profile-menu { position: relative; flex: 0 0 auto; }
+.resilience-root .admin-coord-header .coord-profile-badge { display: flex; align-items: center; gap: 8px; padding: 2px 6px; border: 0; border-radius: 6px; background: transparent; color: #e2e8f0; cursor: pointer; }
+.resilience-root .admin-coord-header .coord-profile-badge:hover { background: rgba(255, 255, 255, .05); }
+.resilience-root .admin-coord-header .coord-avatar-circle { display: flex; align-items: center; justify-content: center; width: 28px; height: 28px; border-radius: 50%; background: #1e3a8a; color: #60a5fa; font-size: 12px; font-weight: 700; }
+.resilience-root .admin-coord-header .coord-profile-meta { display: flex; flex-direction: column; line-height: 1.1; text-align: left; }
+.resilience-root .admin-coord-header .coord-profile-name { color: #f8fafc; font-size: 11px; font-weight: 700; }
+.resilience-root .admin-coord-header .coord-profile-role { color: #64748b; font-size: 9px; letter-spacing: .04em; }
+.resilience-root .admin-coord-header .coordinator-profile-dropdown { position: absolute; top: calc(100% + 8px); right: 0; z-index: 20; display: flex; flex-direction: column; min-width: 150px; padding: 8px; border: 1px solid #1e293b; border-radius: 6px; background: rgba(8, 13, 22, .96); box-shadow: 0 12px 30px rgba(0, 0, 0, .35); }
+.resilience-root .admin-coord-header .coordinator-dropdown-name { padding: 5px 7px 8px; color: #94a3b8; font-size: 10px; }
+.resilience-root .admin-coord-header .coordinator-profile-dropdown button { display: flex; align-items: center; gap: 7px; padding: 7px; border: 0; background: transparent; color: #e2e8f0; font-size: 11px; text-align: left; cursor: pointer; }
+.resilience-root .admin-coord-header .coordinator-profile-dropdown button:hover { background: rgba(255, 255, 255, .06); }
+
+@media (max-width: 1180px) {
+  .resilience-root .admin-coord-header { flex-wrap: wrap; padding: 8px 12px; }
+  .resilience-root .admin-coord-header .nav-compact { order: 3; max-width: 100%; overflow-x: auto; }
+  .resilience-root .admin-coord-header .coord-header-right { margin-left: auto; }
+}
+@media (max-width: 700px) {
+  .resilience-root .admin-coord-header .coord-system-title { max-width: 34vw; overflow: hidden; text-overflow: ellipsis; }
+  .resilience-root .admin-coord-header .coord-telemetry-status { display: none; }
+  .resilience-root .admin-coord-header .coord-header-right { gap: 8px; }
+}
+@media (max-width: 480px) {
+  .resilience-root .admin-coord-header .coord-system-title { display: none; }
+  .resilience-root .admin-coord-header .coord-incident-pill { display: none; }
+  .resilience-root .admin-coord-header .nav-compact { width: 100%; }
+}
+
+/* Keep the admin header to two intentional rows at tablet widths. The prior
+   flex-wrap layout could create a third row when the tabs and status controls
+   competed for the same line. */
+@media (min-width: 701px) and (max-width: 1180px) {
+  .resilience-root .admin-coord-header {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-areas:
+      "brand actions"
+      "tabs tabs";
+    align-items: center;
+    column-gap: 12px;
+    row-gap: 8px;
+    padding: 8px 12px;
+  }
+  .resilience-root .admin-coord-header .coord-header-left { grid-area: brand; min-width: 0; }
+  .resilience-root .admin-coord-header .coord-header-right { grid-area: actions; margin-left: 0; min-width: 0; }
+  .resilience-root .admin-coord-header .nav-compact { grid-area: tabs; width: max-content; max-width: 100%; overflow-x: auto; }
+}
+
+@media (max-width: 700px) {
+  .resilience-root .admin-coord-header {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-areas:
+      "brand actions"
+      "tabs tabs";
+    align-items: center;
+    column-gap: 8px;
+    row-gap: 7px;
+    padding: 8px 10px;
+  }
+  .resilience-root .admin-coord-header .coord-header-left { grid-area: brand; }
+  .resilience-root .admin-coord-header .coord-header-right { grid-area: actions; margin-left: 0; }
+  .resilience-root .admin-coord-header .nav-compact { grid-area: tabs; width: 100%; max-width: 100%; overflow-x: auto; }
+}
 
 .resilience-root .panel-state,
 .resilience-root .empty-state {
@@ -1022,6 +1339,16 @@
 .resilience-root .unit-rate {
   color: var(--rate-color, var(--mute));
   font-weight: 700;
+}
+
+.resilience-root .rescuer-deployment-row { min-width: 0; }
+.resilience-root .rescuer-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  margin-top: 4px;
+  color: var(--mute);
+  font: 10px/1.3 var(--ops-mono);
 }
 
 .resilience-root .unit-progress {
@@ -1186,7 +1513,7 @@
   .resilience-root .audit-detail-row span + span { margin: 4px 0 0; }
 }
 
-@media (max-width: 900px) {
+@media (max-width: 1100px) {
   .resilience-root { overflow: auto; }
   .resilience-root main { display: block; }
   .resilience-root .view.on { display: flex; flex-direction: column; }

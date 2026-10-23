@@ -12,16 +12,9 @@ maplibregl.setWorkerUrl(maplibreWorkerUrl)
 console.info('[RESQ map] MapLibre worker configured', { workerUrl: maplibreWorkerUrl })
 
 const resolveDirectTileSources = (style) => {
-  const sources = Object.fromEntries(Object.entries(style.sources || {}).map(([sourceId, source]) => {
-    if (source.type !== 'vector' || !source.url?.includes('/tiles/v3/tiles.json')) {
-      return [sourceId, source]
-    }
-
-    const tileUrl = source.url.replace('/tiles/v3/tiles.json', '/tiles/v3/{z}/{x}/{y}.pbf')
-    const { url, ...sourceWithoutTileJsonUrl } = source
-    console.info('[RESQ map] Replacing TileJSON source with direct PBF template', { sourceId, tileUrl })
-    return [sourceId, { ...sourceWithoutTileJsonUrl, tiles: [tileUrl] }]
-  }))
+  // Preserve the provider TileJSON source so MapLibre uses the provider's
+  // metadata and tile template instead of a guessed direct PBF URL.
+  const sources = style.sources || {}
 
   const rasterUrl = VECTOR_STYLE_URL.replace(/\/style\.json(\?.*)?$/, '/{z}/{x}/{y}.png$1')
   const backgroundIndex = style.layers.findIndex((layer) => layer.type === 'background')
@@ -335,9 +328,7 @@ const MapContainer = ({
     if (!source) return
     source.setData({
       type: 'FeatureCollection',
-      features: nextLayers
-        .filter((layer) => ['medium', 'high'].includes(String(layer.hazard_level).toLowerCase()))
-        .map((layer) => ({
+      features: nextLayers.map((layer) => ({
         type: 'Feature',
         id: layer.id,
         geometry: splashHazardGeometry(layer.geometry, layer.source_grid_id || layer.id),
@@ -638,8 +629,9 @@ const MapContainer = ({
         })
 
         map.on('idle', () => {
-          const loadedSources = Object.keys(map.getStyle().sources || {}).filter((sourceId) => map.isSourceLoaded(sourceId))
-          if (!loadedSources.includes('maptiler_planet')) enableRasterFallback('vector source is not loaded')
+          const vectorSourceLoaded = Object.entries(map.getStyle().sources || {})
+            .some(([sourceId, source]) => source.type === 'vector' && map.isSourceLoaded(sourceId))
+          if (!vectorSourceLoaded) enableRasterFallback('vector source is not loaded')
         })
 
         map.on('error', (event) => {
@@ -650,7 +642,9 @@ const MapContainer = ({
         map.on('webglcontextlost', (event) => console.error('[RESQ map] WebGL context lost', event))
 
         fallbackTimer = window.setTimeout(() => {
-          if (!map.isSourceLoaded('maptiler_planet')) enableRasterFallback('vector source startup timeout')
+          const vectorSourceLoaded = Object.entries(map.getStyle().sources || {})
+            .some(([sourceId, source]) => source.type === 'vector' && map.isSourceLoaded(sourceId))
+          if (!vectorSourceLoaded) enableRasterFallback('vector source startup timeout')
         }, 5000)
 
         if (trackDeviceLocation && 'geolocation' in navigator) {

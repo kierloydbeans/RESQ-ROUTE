@@ -2,7 +2,7 @@ import csv
 from datetime import datetime, timezone
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.dialects.postgresql import insert as pg_insert
@@ -17,6 +17,7 @@ from app.api.websockets.telemetry import manager as telemetry_manager
 from app.models.road_hazard import RoadHazardReport, RoadHazardType
 from app.services.graphhopper_routing import exclusion_polygon
 from app.services.road_hazard_expiration import calculate_road_hazard_expiration, expire_stale_road_hazards
+from app.services.audit_logging import record_audit_log
 
 router = APIRouter()
 FEATURES_PATH = Path(__file__).resolve().parents[4] / "data-science" / "data" / "derived" / "south_caloocan_real_hazard_features.csv"
@@ -116,6 +117,7 @@ class RoadHazardReview(BaseModel):
 async def review_road_hazard(
     hazard_id: int,
     payload: RoadHazardReview,
+    request: Request,
     credentials: dict = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
 ) -> dict:
@@ -133,6 +135,12 @@ async def review_road_hazard(
     hazard.reviewed_at = now
     if payload.approved:
         hazard.expires_at = calculate_road_hazard_expiration(hazard.hazard_type, now)
+    record_audit_log(
+        session,
+        credentials,
+        request,
+        f"Road hazard {hazard_id} {'approved' if payload.approved else 'rejected'}",
+    )
     await session.commit()
     await session.refresh(hazard)
     feature = road_hazard_feature(hazard)
@@ -213,6 +221,7 @@ async def list_hazard_map_layers(
 async def publish_hazard_map_layer(
     hazard_id: int,
     payload: HazardLayerPublish,
+    request: Request,
     credentials: dict = Depends(get_current_user),
     session: Session = Depends(get_session),
 ):
@@ -223,6 +232,12 @@ async def publish_hazard_map_layer(
         raise HTTPException(status_code=404, detail="Hazard map layer not found")
     layer.is_published = payload.is_published
     layer.updated_at = datetime.now(timezone.utc).replace(tzinfo=None)
+    record_audit_log(
+        session,
+        credentials,
+        request,
+        f"UP NOAH hazard layer {hazard_id} {'published' if payload.is_published else 'unpublished'}",
+    )
     await session.commit()
     await session.refresh(layer)
     return layer

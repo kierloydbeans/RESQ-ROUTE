@@ -1,6 +1,6 @@
 from typing import Literal
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -10,6 +10,7 @@ from app.core.security import get_current_user
 from app.db.session import get_session
 from app.models.center import Center
 from app.models.user import User, UserRole
+from app.services.audit_logging import record_audit_log
 
 router = APIRouter()
 
@@ -121,6 +122,7 @@ async def list_assigned_center_evacuees(
 @router.post("/evacuees/check-in")
 async def check_in_household(
     payload: EvacuationCheckIn,
+    request: Request,
     credentials: dict = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
 ):
@@ -263,6 +265,12 @@ async def check_in_household(
             """
         ),
         {"center_id": center_id},
+    )
+    record_audit_log(
+        session,
+        credentials,
+        request,
+        f"Evacuee household checked in at center {center_id}: {payload.household.name.strip()}",
     )
     await session.commit()
     return {

@@ -1,10 +1,11 @@
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlmodel import Session, select
 from typing import List
 from app.core.security import get_current_user
 from app.models.center import Center, CenterCreate, CenterRead, CenterUpdate
 from app.db.session import get_session
 from app.models.user import User, UserRole
+from app.services.audit_logging import record_audit_log
 
 router = APIRouter()
 
@@ -41,6 +42,7 @@ async def create_shelter(
 async def update_shelter(
     center_id: int,
     center_update: CenterUpdate,
+    request: Request,
     current_user: dict = Depends(get_current_user),
     session: Session = Depends(get_session),
 ):
@@ -62,6 +64,7 @@ async def update_shelter(
     for key, value in center_data.items():
         setattr(db_center, key, value)
     
+    record_audit_log(session, current_user, request, f"Evacuation center {center_id} updated")
     await session.commit()
     await session.refresh(db_center)
     return db_center

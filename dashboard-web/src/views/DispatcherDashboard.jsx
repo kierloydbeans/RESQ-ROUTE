@@ -199,6 +199,7 @@ export const Dashboard = ({ onLogout }) => {
   const pendingStatusReportIds = useRef(new Set())
   const statusReportsInitialized = useRef(false)
   const [alertRecords, setAlertRecords] = useState([])
+  const [operationMetrics, setOperationMetrics] = useState(null)
   const [centers, setCenters] = useState([])
   const [evacuationRecommendation, setEvacuationRecommendation] = useState(null)
   const [evacuationLoading, setEvacuationLoading] = useState(false)
@@ -345,12 +346,6 @@ export const Dashboard = ({ onLogout }) => {
     ? alertRecords
     : alertRecords.filter((alert) => normalizeDisasterType(alert.disaster_type) === selectedMapAlertCategory)
   const closedAlerts = categoryFilteredAlertRecords.filter(isClosedAlert)
-  const closedAlertResponseTimes = closedAlerts
-    .map(getAlertResponseMinutes)
-    .filter((minutes) => minutes !== null)
-  const averageResponseMinutes = closedAlertResponseTimes.length
-    ? closedAlertResponseTimes.reduce((total, minutes) => total + minutes, 0) / closedAlertResponseTimes.length
-    : null
   const isReportDateRangeValid = Boolean(reportStartDate && reportEndDate && reportStartDate <= reportEndDate)
   const reportAlerts = isReportDateRangeValid
     ? alertRecords.filter((alert) => {
@@ -1060,6 +1055,30 @@ export const Dashboard = ({ onLogout }) => {
   }, [API_BASE_URL, role])
 
   useEffect(() => {
+    let disposed = false
+    const loadOperationMetrics = async () => {
+      try {
+        const response = await fetch(`${API_BASE_URL}/api/v1/operations/metrics?window_days=7`, { headers: getAuthHeaders() })
+        if (!response.ok) throw new Error(`Unable to load operation metrics (${response.status}).`)
+        const payload = await response.json()
+        if (!disposed) setOperationMetrics(payload)
+      } catch (error) {
+        if (!disposed) {
+          setOperationMetrics(null)
+          console.error('Failed to load operation metrics', error)
+        }
+      }
+    }
+
+    loadOperationMetrics()
+    const intervalId = window.setInterval(loadOperationMetrics, 30_000)
+    return () => {
+      disposed = true
+      window.clearInterval(intervalId)
+    }
+  }, [API_BASE_URL])
+
+  useEffect(() => {
     const loadAlerts = async () => {
       try {
         const response = await fetch(`${API_BASE_URL}/api/v1/auth/alerts`, { headers: getAuthHeaders() })
@@ -1126,6 +1145,7 @@ export const Dashboard = ({ onLogout }) => {
 
   const mediumHazardLayers = hazardLayers.filter((layer) => String(layer.hazard_level).toLowerCase() === 'medium')
   const highHazardLayers = hazardLayers.filter((layer) => String(layer.hazard_level).toLowerCase() === 'high')
+  const visibleHazardLayers = hazardLayers.filter((layer) => ['medium', 'high'].includes(String(layer.hazard_level).toLowerCase()))
   const allMediumHazardsPublished = mediumHazardLayers.length > 0 && mediumHazardLayers.every((layer) => layer.is_published)
   const allHighHazardsPublished = highHazardLayers.length > 0 && highHazardLayers.every((layer) => layer.is_published)
 
@@ -1502,9 +1522,9 @@ export const Dashboard = ({ onLogout }) => {
     }
 
     const onPointerUp = (upEvent) => {
-      handle.releasePointerCapture(upEvent.pointerId)
-      handle.removeEventListener('pointermove', onPointerMove)
-      handle.removeEventListener('pointerup', onPointerUp)
+      if (handle.hasPointerCapture?.(upEvent.pointerId)) handle.releasePointerCapture(upEvent.pointerId)
+      handle?.removeEventListener('pointermove', onPointerMove)
+      handle?.removeEventListener('pointerup', onPointerUp)
       window.dispatchEvent(new Event('resize'))
     }
 
@@ -1767,11 +1787,7 @@ export const Dashboard = ({ onLogout }) => {
                 value={`${rescueUnits.dispatched_count || 0} / ${rescueUnits.rescuer_count || 0}`}
                 color="red"
               />
-              <Metric
-                label="RESCUED"
-                value={rescueUnits.closed_alert_count || 0}
-                color="green"
-              />
+              <Metric label="RESCUED (7D)" value={operationMetrics ? operationMetrics.people_rescued : '—'} color="green" />
             </div>
           </section>}
 
@@ -2007,31 +2023,24 @@ export const Dashboard = ({ onLogout }) => {
               ))}
             </div>
             <div className="map-stage" style={{ height: `${mapHeight}px` }}>
-              <DraggableMapOverlay className="map-coordinate" label="Map center coordinates" defaultPosition={{ left: 12, top: 12 }}>
-                {primaryCenter ? <>CENTER: {Number(primaryCenter.latitude).toFixed(5)}° N<br />LONG: {Number(primaryCenter.longitude).toFixed(5)}° E</> : 'CENTER: NO ACTIVE CENTER'}
-              </DraggableMapOverlay>
-              <DraggableMapOverlay className="map-legend" label="Map legend" defaultPosition={{ right: 12, top: 12 }}>
-                <span><i className="dot red" /> ACTIVE ALERT</span>
-                <span><i className="dot amber" /> ASSIGNED / RECOVERING</span>
-                <span><i className="dot green" /> AVAILABLE / CENTER</span>
-                <span><i className="dot blue" /> RESOLVING / IN TRANSIT</span>
-              </DraggableMapOverlay>
-              <MapContainer hazardLayers={hazardLayers} roadHazardZones={roadHazardZones} pendingRoadHazardZones={pendingRoadHazards} markers={[...mapMarkers, ...activeRouteMarkers]} center={focusedAlertLocation} focusMarkerId={focusedAlertId} selectedAlertCategory={selectedMapAlertCategory} centerRequestKey={focusRequestKey} route={activeEvacuationRoute?.geometry} trackDeviceLocation={false} />
-              {activeEvacuationRoute && (
-                <DraggableMapOverlay className="evac-label evac-label-list" label="Active citizen evacuation route" defaultPosition={{ left: 280, top: 12 }}>
-                  <b>ACTIVE EVACUATION ROUTE</b>
-                  <span>{activeEvacuationRoute.citizenName} → {activeEvacuationRoute.centerName}</span>
-                </DraggableMapOverlay>
-              )}
-              {centers.length > 0 && (
-                <DraggableMapOverlay className="evac-label evac-label-list" label="Evacuation center list" defaultPosition={{ left: 580, top: 164 }}>
-                  <b>EVACUATION CENTERS</b>
-                  {centers.filter((center) => center.is_active !== false).map((center) => {
-                    const occupancy = center.capacity > 0 ? Math.round((center.current_occupancy / center.capacity) * 100) : 0
-                    return <span key={center.id}>{center.name} ({occupancy}%)</span>
-                  })}
-                </DraggableMapOverlay>
-              )}
+              <div className="map-legend-static" role="group" aria-label="Map legend">
+                <b>MAP LEGEND</b>
+                <span><i className="legend-swatch marker-alert-flood" /> ALERT · FLOOD</span>
+                <span><i className="legend-swatch marker-alert-earthquake" /> ALERT · EARTHQUAKE</span>
+                <span><i className="legend-swatch marker-alert-fire" /> ALERT · FIRE</span>
+                <span><i className="legend-swatch marker-alert-medical" /> ALERT · MEDICAL</span>
+                <span><i className="legend-swatch marker-alert-rescue" /> ALERT · RESCUE</span>
+                <span><i className="legend-swatch marker-alert-other" /> ALERT · OTHER</span>
+                <span><i className="legend-swatch marker-available" /> AVAILABLE / CENTER</span>
+                <span><i className="legend-swatch marker-recovering" /> RECOVERING</span>
+                <span><i className="legend-swatch marker-transit" /> IN TRANSIT</span>
+                <span><i className="legend-swatch marker-full" /> FULL CENTER / MAINTENANCE</span>
+                <span><i className="legend-swatch hazard-high" /> NOAH HIGH HAZARD</span>
+                <span><i className="legend-swatch hazard-medium" /> NOAH MEDIUM HAZARD</span>
+                <span><i className="legend-swatch road-hazard" /> ACTIVE ROAD HAZARD</span>
+                <span><i className="legend-swatch pending-road-hazard" /> PENDING ROAD HAZARD</span>
+              </div>
+              <MapContainer hazardLayers={visibleHazardLayers} roadHazardZones={roadHazardZones} pendingRoadHazardZones={pendingRoadHazards} markers={[...mapMarkers, ...activeRouteMarkers]} center={focusedAlertLocation} focusMarkerId={focusedAlertId} selectedAlertCategory={selectedMapAlertCategory} centerRequestKey={focusRequestKey} route={activeEvacuationRoute?.geometry} trackDeviceLocation={false} />
               <button className="map-resize-handle" onPointerDown={startMapResize} aria-label="Drag to resize map" title="Drag to resize map">↕</button>
             </div>
           </section>
@@ -2042,11 +2051,11 @@ export const Dashboard = ({ onLogout }) => {
           {/* 1. TOP: Average Response */}
           {renderedPanels.averageResponse && <section className={`metric-card response-card ${getPanelAnimationClass('averageResponse')}`}>
             <small>AVERAGE RESPONSE</small>
-            <strong>{averageResponseMinutes === null ? '—' : `${averageResponseMinutes.toFixed(1)} min`}</strong>
+            <strong>{operationMetrics?.average_response_minutes == null ? '—' : `${Number(operationMetrics.average_response_minutes).toFixed(1)} min`}</strong>
             <span>
-              {averageResponseMinutes === null
-                ? 'No closed alerts to calculate'
-                : `Mean from ${closedAlertResponseTimes.length} closed alert${closedAlertResponseTimes.length === 1 ? '' : 's'}`}
+              {operationMetrics?.average_response_minutes == null
+                ? 'No resolved operations in the 7-day window'
+                : `Database mean from ${operationMetrics.response_samples} resolved operation${operationMetrics.response_samples === 1 ? '' : 's'}`}
             </span>
           </section>}
 
@@ -2335,74 +2344,6 @@ export const Dashboard = ({ onLogout }) => {
         />
       )}
     </main>
-  )
-}
-
-const DraggableMapOverlay = ({ className, label, defaultPosition, children }) => {
-  const [position, setPosition] = useState(defaultPosition)
-  const [minimized, setMinimized] = useState(false)
-  const dragRef = useRef(null)
-
-  const moveOverlay = (clientX, clientY) => {
-    const mapBounds = dragRef.current?.parentElement?.getBoundingClientRect()
-    if (!mapBounds) return
-    const overlayBounds = dragRef.current.getBoundingClientRect()
-    const left = Math.max(0, Math.min(mapBounds.width - overlayBounds.width, clientX - mapBounds.left))
-    const top = Math.max(0, Math.min(mapBounds.height - overlayBounds.height, clientY - mapBounds.top))
-    setPosition({ left, top })
-  }
-
-  const handlePointerDown = (event) => {
-    event.currentTarget.setPointerCapture(event.pointerId)
-    const move = (moveEvent) => moveOverlay(moveEvent.clientX, moveEvent.clientY)
-    const stop = () => {
-      event.currentTarget.removeEventListener('pointermove', move)
-      event.currentTarget.removeEventListener('pointerup', stop)
-    }
-    event.currentTarget.addEventListener('pointermove', move)
-    event.currentTarget.addEventListener('pointerup', stop)
-  }
-
-  const handleKeyDown = (event) => {
-    const distance = event.shiftKey ? 20 : 5
-    const nextPosition = { ...position }
-    if (event.key === 'ArrowLeft') nextPosition.left -= distance
-    if (event.key === 'ArrowRight') nextPosition.left += distance
-    if (event.key === 'ArrowUp') nextPosition.top -= distance
-    if (event.key === 'ArrowDown') nextPosition.top += distance
-    if (nextPosition.left !== position.left || nextPosition.top !== position.top) {
-      event.preventDefault()
-      setPosition({ left: Math.max(0, nextPosition.left), top: Math.max(0, nextPosition.top) })
-    }
-  }
-
-  return (
-    <div
-      ref={dragRef}
-      className={`map-overlay-draggable ${className} ${minimized ? 'minimized' : ''}`}
-      style={{
-        left: position.left ?? 'auto',
-        top: position.top ?? 'auto',
-        right: position.right ?? 'auto',
-        bottom: position.bottom ?? 'auto'
-      }}
-      onPointerDown={handlePointerDown}
-      onKeyDown={handleKeyDown}
-      role="group"
-      tabIndex="0"
-      aria-label={`${label}. Use arrow keys to move.`}
-    >
-      <button
-        className="map-overlay-toggle"
-        onPointerDown={(event) => event.stopPropagation()}
-        onClick={() => setMinimized((value) => !value)}
-        aria-label={`${minimized ? 'Expand' : 'Minimize'} ${label}`}
-        title={minimized ? 'Expand' : 'Minimize'}
-      >
-        {minimized ? '+' : '-'}
-      </button>
-      {!minimized && children}
-    </div>
   )
 }
 

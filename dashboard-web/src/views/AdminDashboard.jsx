@@ -1,5 +1,12 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState, useReducer } from 'react'
 import '../styles/admin-console.css'
+import LiveHazardMap from '../components/LiveHazardMap'
+import Logo from '../components/Logo'
+import { ChevronDown, LogOut } from 'lucide-react'
+import { WS_URL } from '../dataProvider'
+
+const rawApiBase = (import.meta.env.VITE_API_URL || import.meta.env.VITE_API_BASE_URL || 'https://resq-route.onrender.com').replace(/\/$/, '')
+const API_BASE_URL = rawApiBase.endsWith('/api/v1') ? rawApiBase.replace(/\/api\/v1$/, '') : rawApiBase
 
 /*
  * API contract used by this screen:
@@ -35,49 +42,48 @@ const TAB_DEFS = [
   { id: 'si', label: 'INTEGRITY', panelId: 'integrity-panel' }
 ]
 
-const SAMPLE_MAP_DATA = {
-  isSample: true,
-  source: 'Illustrative data only',
-  pings: [
-    { id: 'sample-creek-crossing', name: 'Sample creek crossing', x: -420, y: 260, level: 'h', depth: 120, timestamp: '2026-10-23T06:02:00Z' },
-    { id: 'sample-school-frontage', name: 'Sample school frontage', x: -380, y: -180, level: 'h', depth: 95, timestamp: '2026-10-23T05:40:00Z' },
-    { id: 'sample-market-underpass', name: 'Sample market underpass', x: 260, y: -340, level: 'm', depth: 60, timestamp: '2026-10-23T05:15:00Z' },
-    { id: 'sample-riverside-lane', name: 'Sample riverside lane', x: 520, y: 210, level: 'm', depth: 45, timestamp: '2026-10-23T04:50:00Z' },
-    { id: 'sample-main-road-dip', name: 'Sample main-road dip', x: 40, y: 40, level: 'h', depth: 110, timestamp: '2026-10-23T06:10:00Z' },
-    { id: 'sample-barangay-corner', name: 'Sample barangay-hall corner', x: -760, y: -420, level: 'l', depth: 25, timestamp: '2026-10-23T03:30:00Z' },
-    { id: 'sample-foot-bridge', name: 'Sample foot bridge', x: 700, y: -120, level: 'l', depth: 20, timestamp: '2026-10-23T03:05:00Z' },
-    { id: 'sample-chapel-street', name: 'Sample chapel street', x: -120, y: 520, level: 'm', depth: 50, timestamp: '2026-10-23T04:20:00Z' }
-  ],
-  arterialRoads: [
-    [[-1500, 200], [1500, 200]],
-    [[-1400, -250], [1400, -250]],
-    [[-300, -900], [-300, 900]],
-    [[450, -900], [450, 900]],
-    [[-1200, 800], [800, -700]]
-  ],
-  secondaryRoads: [
-    [[-1200, -600], [1200, -600]],
-    [[-1200, 600], [1200, 600]],
-    [[-800, -900], [-800, 900]],
-    [[900, -900], [900, 900]]
-  ],
-  creekPath: [
-    [-1800, 520], [-1100, 280], [-450, 140], [30, 20], [520, -140], [1100, -380], [1800, -560]
-  ],
-  labels: {
-    northRoad: 'SAMPLE NORTH BYPASS RD',
-    centralRoad: 'SAMPLE CENTRAL HIGHWAY',
-    creek: 'SAMPLE CREEK BASIN'
-  }
-}
-
 const EMPTY_DASHBOARD = {
   incidents: [],
   units: [],
   services: [],
   analytics: null,
   kpis: {},
-  map: SAMPLE_MAP_DATA
+  map: null
+}
+
+function buildNoahAdjustedAnalytics(analytics, payload) {
+  const predictions = Array.isArray(payload?.predictions) ? payload.predictions : []
+  const scores = predictions
+    .map((prediction) => Number(prediction.flood_susceptibility_score))
+    .filter(Number.isFinite)
+
+  if (!analytics || !scores.length) return null
+
+  const meanScore = scores.reduce((sum, score) => sum + score, 0) / scores.length
+  const highRiskCount = scores.filter((score) => score >= 0.67).length
+  const severeRiskCount = scores.filter((score) => score >= 0.85).length
+  const highRiskShare = highRiskCount / scores.length
+  const severeRiskShare = severeRiskCount / scores.length
+  const riskIndex = Math.min(1, Math.max(0, (meanScore * 0.55) + (highRiskShare * 0.3) + (severeRiskShare * 0.15)))
+  const incidentPressure = 0.7 + (riskIndex * 0.8)
+  const projected = (analytics.projected || []).map((point, index) => {
+    const day = Number(point.day ?? point[0] ?? index)
+    const value = Number(point.value ?? point[1] ?? 0)
+    return [day, index === 0 ? value : Math.max(0, Math.round(value * incidentPressure))]
+  })
+
+  return {
+    ...analytics,
+    projected,
+    projectionSource: 'UP NOAH',
+    noahSummary: {
+      gridCount: scores.length,
+      meanScore,
+      highRiskCount,
+      riskIndex
+    },
+    disclaimer: payload?.disclaimer || 'Static NOAH susceptibility estimate; not a real-time flood forecast or emergency alert.'
+  }
 }
 
 // Explicit demonstration fixtures. Never use these as operational records.
@@ -87,12 +93,6 @@ const DEMO_DATA = {
       id: String(1084 + index), status: 'ACTIVE',
       severity: index < 3 ? 'CRITICAL' : index < 12 ? 'MODERATE' : 'MINOR'
     })),
-    units: [
-      { id: 'alpha', name: 'Unit Alpha', rate: 99.2, status: 'ON SCENE', incident: 'INC#1084' },
-      { id: 'bravo', name: 'Unit Bravo', rate: 98.5, status: 'EN ROUTE', incident: 'INC#1088' },
-      { id: 'charlie', name: 'Unit Charlie', rate: 94.1, status: 'STAGING', assignment: 'SECTOR-3' },
-      { id: 'delta', name: 'Unit Delta', rate: 96.8, status: 'AVAILABLE', assignment: 'STANDBY' }
-    ],
     services: [
       { name: 'API Gateway', status: 'ok', latency: 42, uptime: 99.99 },
       { name: 'WebSocket Hub', status: 'ok', latency: 18, uptime: 99.95 },
@@ -108,17 +108,8 @@ const DEMO_DATA = {
       historical: [[0, 5], [1, 63], [2, 133], [3, 42], [4, 22]],
       projected: [[4, 22], [5, 14], [6, 8]]
     },
-    kpis: { rescueSuccessRate: 98.7, rescueSuccessComparison: '+0.2%', peopleRescued7d: 1284, peopleRescuedComparison: '+8%', avgResponseMinutes: 6.4, responseTargetMinutes: 8 },
-    map: SAMPLE_MAP_DATA
+    kpis: { rescueSuccessRate: 98.7, rescueSuccessComparison: '+0.2%' },
   },
-  audit: [
-    { id: 'demo-a1', action: 'Dispatch assigned Unit Alpha to Incident #1084', user: 'Operator-03', role: 'Dispatcher', timestamp: '2026-10-23T06:30:12Z', ip: '192.0.2.44' },
-    { id: 'demo-a2', action: 'Inventory adjusted: -50 Food Packs at Center A', user: 'Logistics-A', role: 'Warehouse Mgr', timestamp: '2026-10-23T06:28:45Z', ip: '192.0.2.92' },
-    { id: 'demo-a3', action: 'Incident #1072 marked RESOLVED', user: 'Field-Lead', role: 'Field Commander', timestamp: '2026-10-23T06:25:11Z', ip: '192.0.2.19' },
-    { id: 'demo-a4', action: 'Evacuee check-in: 14 households at Sports Arena', user: 'Registrar-02', role: 'Center Staff', timestamp: '2026-10-23T06:21:38Z', ip: '192.0.2.7' },
-    { id: 'demo-a5', action: 'Failed login attempt (3x)', user: 'Logistics-C', role: 'Warehouse Mgr', timestamp: '2026-10-23T06:03:57Z', ip: '192.0.2.88', urgent: true },
-    { id: 'demo-a6', action: 'Unit Charlie status changed: STAGING', user: 'Charlie-Lead', role: 'Field Commander', timestamp: '2026-10-23T05:41:26Z', ip: '192.0.2.23' }
-  ],
   rbac: {
     version: 1,
     roles: Object.fromEntries([
@@ -146,7 +137,7 @@ const PHT_DATE_FORMATTER = new Intl.DateTimeFormat('en-GB', {
   timeStyle: 'medium'
 })
 
-const levelColor = { h: '#ef4444', m: '#f5a524', l: '#12b9d6' }
+const levelColor = { h: 'var(--bad)', m: 'var(--warn)', l: 'var(--cyan)' }
 const levelText = { h: 'SEVERE', m: 'MODERATE', l: 'MINOR' }
 
 class ApiRequestError extends Error {
@@ -192,11 +183,11 @@ function normalizeAuditLog(raw, index = 0) {
   const timestamp = source.timestamp || source.createdAt || source.occurredAt || null
   return {
     id: String(source.id || source.auditId || makeClientId(`audit-${index}`)),
-    action: source.action || source.message || 'Unknown audit action',
-    user: source.user || source.actor || source.userId || '—',
-    role: source.role || source.authorityRole || '—',
+    action: source.action || source.action_entry || source.message || 'Unknown audit action',
+    user: source.user || source.actor || source.userId || source.user_id || '—',
+    role: source.role || source.authorityRole || source.authority_role || '—',
     timestamp,
-    ip: source.ip || source.ipAddress || source.networkAddress || '—',
+    ip: source.ip || source.ipAddress || source.networkAddress || source.net_address || '—',
     urgent: Boolean(source.urgent || source.severity === 'critical' || source.priority === 1)
   }
 }
@@ -227,23 +218,32 @@ function normalizeIncident(raw, index) {
   }
 }
 
-function normalizeUnit(raw, index) {
+function normalizeRescuer(raw, index) {
   const source = raw || {}
-  const status = String(source.status || 'UNKNOWN').toUpperCase()
-  const statusClass = {
-    'ON SCENE': 'ub-onscene',
-    'EN ROUTE': 'ub-enroute',
-    STAGING: 'ub-staging',
-    AVAILABLE: 'ub-avail'
-  }[status] || 'ub-unknown'
-
+  const rawStatus = String(source.status || 'offline').toLowerCase()
+  const statusMap = {
+    available: ['AVAILABLE', 'ub-avail'],
+    assigned: ['DISPATCHED', 'ub-dispatched'],
+    in_transit: ['DISPATCHED', 'ub-dispatched'],
+    recovering: ['RECOVERING', 'ub-recovering'],
+    off_duty: ['OFFLINE', 'ub-offline']
+  }
+  const [status, className] = statusMap[rawStatus] || ['OFFLINE', 'ub-offline']
+  const responseRate = source.response_rate == null ? null : Number(source.response_rate)
   return {
-    id: String(source.id || source.unitId || makeClientId(`unit-${index}`)),
-    name: source.name || source.unitName || 'Unnamed unit',
-    rate: Number.isFinite(Number(source.rate)) ? Number(source.rate) : null,
+    id: String(source.id || source.user_id || makeClientId(`rescuer-${index}`)),
+    name: source.rescuer_name || source.username || 'Unnamed rescuer',
+    station: source.station_name || 'Station not assigned',
     status,
-    className: statusClass,
-    incident: source.incident || source.incidentId || source.assignment || '—'
+    className,
+    phone: source.phone || 'No phone recorded',
+    latitude: Number.isFinite(Number(source.current_latitude)) && Number(source.current_latitude) !== 0 ? Number(source.current_latitude) : null,
+    longitude: Number.isFinite(Number(source.current_longitude)) && Number(source.current_longitude) !== 0 ? Number(source.current_longitude) : null,
+    completedCases: Number(source.completed_cases || 0),
+    responseRate: Number.isFinite(responseRate) ? responseRate : null,
+    assignedCases: Number(source.assigned_cases || 0),
+    lastSeenAt: source.last_seen_at || null,
+    recoveringUntil: source.recovering_until || null
   }
 }
 
@@ -260,27 +260,15 @@ function normalizeService(raw, index) {
 }
 
 function normalizeMapData(raw) {
-  if (!raw) return SAMPLE_MAP_DATA
-
-  const pings = raw.pings || raw.floodPings || []
-  return {
-    ...SAMPLE_MAP_DATA,
-    ...raw,
-    // A map is considered real only when the server explicitly says so.
-    isSample: raw.isSample !== false,
-    pings: pings.map((ping, index) => ({
-      ...ping,
-      id: String(ping.id || makeClientId(`ping-${index}`)),
-      level: ping.level || 'l'
-    }))
-  }
+  if (!raw || typeof raw !== 'object') return null
+  return raw
 }
 
 function normalizeDashboardPayload(payload) {
   const source = payload?.dashboard || payload || {}
   return {
     incidents: (source.incidents || []).map(normalizeIncident),
-    units: (source.units || []).map(normalizeUnit),
+    units: [],
     services: (source.services || []).map(normalizeService),
     analytics: source.analytics || null,
     kpis: source.kpis || {},
@@ -542,7 +530,7 @@ function isPermissionLocked(role, permissionId) {
   return role === 'System Admin' && LOCKED_SYSTEM_ADMIN_PERMISSION_IDS.has(permissionId)
 }
 
-function PhtClock() {
+function PhtClock({ className = 'clock' }) {
   const [time, setTime] = useState(() => formatPhtClock())
 
   useEffect(() => {
@@ -552,7 +540,7 @@ function PhtClock() {
     return () => window.clearInterval(timer)
   }, [])
 
-  return <span className="clock mono">{time}</span>
+return <span className={`${className} mono`}>{time}</span>
 }
 
 function useWebSocketStatus(url, onAudit) {
@@ -683,24 +671,24 @@ function IncidentChart({ analytics, active }) {
 
   return (
     <div id="chart" ref={setChartNode} aria-busy={!analytics}>
-      <svg viewBox={`0 0 ${W} ${H}`} role="img" aria-label="Incident frequency trend with forecast">
+      <svg viewBox={`0 0 ${W} ${H}`} role="img" aria-label="Historical incident frequency with a NOAH-adjusted risk scenario">
         <defs>
           <linearGradient id="gHist" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0" stopColor="#12b9d6" stopOpacity="0.35" />
-            <stop offset="1" stopColor="#12b9d6" stopOpacity="0" />
+            <stop offset="0" stopColor="var(--cyan)" stopOpacity="0.35" />
+            <stop offset="1" stopColor="var(--cyan)" stopOpacity="0" />
           </linearGradient>
           <linearGradient id="gProj" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0" stopColor="#f5a524" stopOpacity="0.20" />
-            <stop offset="1" stopColor="#f5a524" stopOpacity="0" />
+            <stop offset="0" stopColor="var(--warn)" stopOpacity="0.20" />
+            <stop offset="1" stopColor="var(--warn)" stopOpacity="0" />
           </linearGradient>
         </defs>
 
         {projected.length > 0 && (
           <>
-            <rect x={x(projectionStart)} y={t} width={Math.max(0, x(maxDay) - x(projectionStart))} height={plotH} fill="rgba(245,165,36,0.04)" />
-            <line x1={x(projectionStart)} x2={x(projectionStart)} y1={t} y2={t + plotH} stroke="#f5a524" strokeDasharray="3,3" strokeOpacity="0.45" />
-            <text x={x(projectionStart) + 6} y={t + 12} fill="#f5a524" fontSize="11" fontWeight="600" fontFamily="ui-monospace, monospace">
-              PROJECTED
+            <rect x={x(projectionStart)} y={t} width={Math.max(0, x(maxDay) - x(projectionStart))} height={plotH} fill="var(--warn)" fillOpacity="0.04" />
+            <line x1={x(projectionStart)} x2={x(projectionStart)} y1={t} y2={t + plotH} stroke="var(--warn)" strokeDasharray="3,3" strokeOpacity="0.45" />
+            <text x={x(projectionStart) + 6} y={t + 12} fill="var(--warn)" fontSize="11" fontWeight="600" fontFamily="ui-monospace, monospace">
+              NOAH RISK SCENARIO
             </text>
           </>
         )}
@@ -709,8 +697,8 @@ function IncidentChart({ analytics, active }) {
           const value = Math.round(maxValue * ratio)
           return (
             <g key={ratio}>
-              <line x1={l} x2={W - r} y1={y(value)} y2={y(value)} stroke="#1e293b" />
-              <text x={l - 10} y={y(value) + 4} fill="#94a3b8" fontSize="11" fontWeight="600" textAnchor="end" fontFamily="ui-monospace, monospace">
+              <line x1={l} x2={W - r} y1={y(value)} y2={y(value)} stroke="var(--line)" />
+              <text x={l - 10} y={y(value) + 4} fill="var(--mute)" fontSize="11" fontWeight="600" textAnchor="end" fontFamily="ui-monospace, monospace">
                 {value}
               </text>
             </g>
@@ -718,7 +706,7 @@ function IncidentChart({ analytics, active }) {
         })}
 
         {labels.map((label, index) => (
-          <text key={`${label}-${index}`} x={x(index)} y={H - 8} fill={index >= projectionStart ? '#cbd5e1' : '#94a3b8'} fontSize="11" fontWeight={index === projectionStart ? '700' : '500'} textAnchor="middle" fontFamily="ui-monospace, monospace">
+          <text key={`${label}-${index}`} x={x(index)} y={H - 8} fill={index >= projectionStart ? 'var(--mute-strong)' : 'var(--mute)'} fontSize="11" fontWeight={index === projectionStart ? '700' : '500'} textAnchor="middle" fontFamily="ui-monospace, monospace">
             {String(label).replace(/\s*\(.*?\)/, '')}
           </text>
         ))}
@@ -726,24 +714,24 @@ function IncidentChart({ analytics, active }) {
         {historical.length > 0 && (
           <>
             <polygon points={`${x(historical[0].day)},${y(0)} ${historicalPoints.join(' ')} ${x(historical[historical.length - 1].day)},${y(0)}`} fill="url(#gHist)" />
-            <polyline points={historicalPoints.join(' ')} fill="none" stroke="#12b9d6" strokeWidth="2.5" strokeLinejoin="round" />
+            <polyline points={historicalPoints.join(' ')} fill="none" stroke="var(--cyan)" strokeWidth="2.5" strokeLinejoin="round" />
           </>
         )}
         {projected.length > 0 && (
           <>
             <polygon points={`${x(projected[0].day)},${y(0)} ${projectedPoints.join(' ')} ${x(projected[projected.length - 1].day)},${y(0)}`} fill="url(#gProj)" />
-            <polyline points={projectedPoints.join(' ')} fill="none" stroke="#f5a524" strokeWidth="2" strokeDasharray="5,4" strokeLinejoin="round" />
+            <polyline points={projectedPoints.join(' ')} fill="none" stroke="var(--warn)" strokeWidth="2" strokeDasharray="5,4" strokeLinejoin="round" />
           </>
         )}
 
         {historical.map((point) => (
-          <circle key={`hist-${point.day}`} cx={x(point.day)} cy={y(point.value)} r="4" fill="#0d1220" stroke="#12b9d6" strokeWidth="2">
+          <circle key={`hist-${point.day}`} cx={x(point.day)} cy={y(point.value)} r="4" fill="var(--panel)" stroke="var(--cyan)" strokeWidth="2">
             <title>{`${labels[point.day] || 'Day'}: ${point.value} incidents`}</title>
           </circle>
         ))}
         {projected.map((point) => (
-          <circle key={`proj-${point.day}`} cx={x(point.day)} cy={y(point.value)} r="3.5" fill="#0d1220" stroke="#f5a524" strokeWidth="2" strokeDasharray="2,2">
-            <title>{`${labels[point.day] || 'Day'}: projected ${point.value} incidents`}</title>
+          <circle key={`proj-${point.day}`} cx={x(point.day)} cy={y(point.value)} r="3.5" fill="var(--panel)" stroke="var(--warn)" strokeWidth="2" strokeDasharray="2,2">
+            <title>{`${labels[point.day] || 'Day'}: NOAH-adjusted scenario value ${point.value}; not a forecast`}</title>
           </circle>
         ))}
       </svg>
@@ -784,7 +772,7 @@ function AuditTable({ logs, compact = false, urgentLogId, expandedLogId, onToggl
                   <td className="mono">{log.user}</td>
                   <td className="r">{log.role}</td>
                   <td className="mono m">{formatPhtDateTime(log.timestamp)}</td>
-                  <td className="mono m">{log.ip}</td>
+                  <td className="mono m">{expanded ? log.ip : 'HIDDEN'}</td>
                 </tr>
                 {expanded && (
                   <tr className="audit-detail-row">
@@ -833,56 +821,61 @@ function FloodMap({ mapData, active, isGridMode }) {
     canvas.width = W * dpr
     canvas.height = H * dpr
     const context = canvas.getContext('2d')
+    const themeStyles = getComputedStyle(boxNode.closest('.resilience-root') || boxNode)
+    const themeColor = (name, fallback) => themeStyles.getPropertyValue(name).trim() || fallback
+    const canvasColors = {
+      background: themeColor('--bg', '#060910'),
+      panel2: themeColor('--panel2', '#121a2c'),
+      line: themeColor('--line', '#1d2740'),
+      text: themeColor('--text', '#e6ebf5'),
+      mute: themeColor('--mute', '#94a3b8'),
+      cyan: themeColor('--cyan', '#12b9d6')
+    }
     context.setTransform(dpr, 0, 0, dpr, 0, 0)
     context.clearRect(0, 0, W, H)
 
     if (isGridMode) {
-      context.fillStyle = '#080d1a'
+      context.fillStyle = canvasColors.background
       context.fillRect(0, 0, W, H)
       const cols = 5
       const rows = 4
       const pad = 12
       const cellW = (W - (cols + 1) * pad) / cols
       const cellH = (H - (rows + 1) * pad) / rows
-      const gridMatrix = mapData.gridMatrix || [
-        ['#12b9d6', '#ef4444', '#0e1726', '#f5a524', '#0e1726'],
-        ['#f5a524', '#0e1726', '#12b9d6', '#ef4444', '#f5a524'],
-        ['#0e1726', '#f5a524', '#0e1726', '#12b9d6', '#ef4444'],
-        ['#ef4444', '#0e1726', '#f5a524', '#12b9d6', '#ef4444']
-      ]
+      const gridMatrix = mapData.gridMatrix || []
       const gridZones = mapData.gridZones || []
       for (let row = 0; row < rows; row += 1) {
         for (let col = 0; col < cols; col += 1) {
           const x = pad + col * (cellW + pad)
           const y = pad + row * (cellH + pad)
-          context.fillStyle = gridMatrix[row][col]
+          context.fillStyle = gridMatrix[row]?.[col] || canvasColors.panel2
           context.beginPath()
           context.roundRect ? context.roundRect(x, y, cellW, cellH, 4) : context.rect(x, y, cellW, cellH)
           context.fill()
-          context.strokeStyle = '#1d2740'
+          context.strokeStyle = canvasColors.line
           context.lineWidth = 1
           context.stroke()
-          context.fillStyle = '#e6ebf5'
+          context.fillStyle = canvasColors.text
           context.font = '600 10px ui-monospace,monospace'
           context.textAlign = 'center'
           context.fillText(gridZones[row]?.[col] || `ZONE ${row + 1}-${col + 1}`, x + cellW / 2, y + cellH / 2)
         }
       }
       context.textAlign = 'start'
-      context.fillStyle = '#94a3b8'
+      context.fillStyle = canvasColors.mute
       context.font = '600 11px ui-monospace,monospace'
-      context.fillText(mapData.isSample ? 'SAMPLE HISTORICAL DENSITY MATRIX' : 'HISTORICAL DENSITY MATRIX', 14, H - 12)
+      context.fillText('HISTORICAL DENSITY MATRIX', 14, H - 12)
       return
     }
 
     const mpp = spanM / W
     const px = (east) => W / 2 + east / mpp
     const py = (north) => H / 2 - north / mpp
-    context.fillStyle = '#080d19'
+    context.fillStyle = canvasColors.background
     context.fillRect(0, 0, W, H)
 
     // Explicit styles are required because a canvas defaults to black strokes.
-    context.strokeStyle = '#1a2640'
+    context.strokeStyle = canvasColors.line
     context.lineWidth = 1
     ;(mapData.secondaryRoads || []).forEach((line) => {
       context.beginPath()
@@ -891,7 +884,7 @@ function FloodMap({ mapData, active, isGridMode }) {
       context.stroke()
     })
 
-    context.strokeStyle = '#2a3a62'
+    context.strokeStyle = canvasColors.panel2
     context.lineWidth = 2.25
     ;(mapData.arterialRoads || []).forEach((line) => {
       context.beginPath()
@@ -910,11 +903,11 @@ function FloodMap({ mapData, active, isGridMode }) {
     context.strokeStyle = 'rgba(18,120,160,0.30)'
     context.lineWidth = 14
     context.stroke()
-    context.strokeStyle = 'rgba(18,185,214,0.55)'
+    context.strokeStyle = canvasColors.cyan
     context.lineWidth = 2
     context.stroke()
 
-    context.fillStyle = '#94a3b8'
+    context.fillStyle = canvasColors.mute
     context.font = '600 11px ui-monospace,monospace'
     context.fillText(mapData.labels?.northRoad || '', px(-1400), py(220) - 6)
     context.fillText(mapData.labels?.centralRoad || '', px(-280), py(800))
@@ -932,7 +925,7 @@ function FloodMap({ mapData, active, isGridMode }) {
 
     const step = spanM > 2500 ? 500 : 250
     const scaleLength = step / mpp
-    context.strokeStyle = '#94a3b8'
+    context.strokeStyle = canvasColors.mute
     context.lineWidth = 2
     context.beginPath()
     context.moveTo(W - 14 - scaleLength, H - 18)
@@ -959,10 +952,8 @@ function FloodMap({ mapData, active, isGridMode }) {
   return (
     <>
       <div id="dens" ref={setBoxNode}>
-        <canvas ref={canvasRef} role="img" aria-label={`${mapData.isSample ? 'Sample ' : ''}flood density map`} />
-        <div className="map-disclaimer" role="note">
-          {mapData.isSample ? 'SAMPLE MAP — NOT FOR DISPATCH' : `GIS source: ${mapData.source || 'server'}`}
-        </div>
+        <canvas ref={canvasRef} role="img" aria-label="Flood density map" />
+        <div className="map-disclaimer" role="note">GIS source: {mapData.source || 'server'}</div>
         <div className="zb">
           <button type="button" onClick={() => setSpanM((previous) => Math.max(800, previous / 1.5))} aria-label="Zoom in">+</button>
           <button type="button" onClick={() => setSpanM(3000)} title="Reset view" aria-label="Reset view">⟲</button>
@@ -1009,7 +1000,6 @@ function FloodMap({ mapData, active, isGridMode }) {
         {isGridMode ? (
           <>
             <span className="grid-legend-note">Grid mode shows historical density zones.</span>
-            {mapData.isSample && <span className="grid-legend-note">Sample values only.</span>}
           </>
         ) : (
           <>
@@ -1255,9 +1245,13 @@ export function AdminDashboard({
   onLogout,
   apiBaseUrl = '',
   dashboardEndpoint = '/api/dashboard',
-  auditEndpoint = '/api/audit',
+  auditEndpoint = `${API_BASE_URL}/api/v1/audit-logs`,
   rbacEndpoint = '/api/rbac',
   reauthEndpoint = '/api/auth/reauth',
+  noahPredictionEndpoint = `${API_BASE_URL}/api/v1/predictions/flood`,
+  metricsEndpoint = `${API_BASE_URL}/api/v1/admin-dashboard/metrics`,
+  operationsMetricsEndpoint = `${API_BASE_URL}/api/v1/operations/metrics?window_days=7`,
+  deploymentEndpoint = `${API_BASE_URL}/api/v1/rescuers/deployment`,
   socketUrl,
   demoMode = true,
   initialData = demoMode ? DEMO_DATA : undefined,
@@ -1265,18 +1259,28 @@ export function AdminDashboard({
 }) {
   const authToken = auth?.token || auth?.accessToken || ''
   const suppliedDashboard = initialData?.dashboard || (initialData && (initialData.incidents || initialData.units || initialData.services) ? initialData : null)
-  const suppliedAudit = initialData?.audit || initialData?.logs
   const suppliedRbac = initialData?.rbac
   const initialDashboard = useMemo(() => normalizeDashboardPayload(suppliedDashboard), [suppliedDashboard])
   const initialRbac = useMemo(() => normalizeRbacPayload(suppliedRbac), [suppliedRbac])
 
   const [activeTab, setActiveTab] = useState('an')
-  const [isGridMode, setIsGridMode] = useState(false)
+  const [isProfileMenuOpen, setIsProfileMenuOpen] = useState(false)
+  const profileMenuRef = useRef(null)
   const [dashboard, setDashboard] = useState(initialDashboard)
   const [dashboardStatus, setDashboardStatus] = useState(suppliedDashboard ? 'ready' : 'loading')
   const [dashboardError, setDashboardError] = useState('')
-  const [logs, setLogs] = useState(() => normalizeAuditLogs(suppliedAudit))
-  const [auditLoading, setAuditLoading] = useState(!suppliedAudit)
+  const [databaseMetrics, setDatabaseMetrics] = useState(null)
+  const [metricsStatus, setMetricsStatus] = useState('loading')
+  const [metricsError, setMetricsError] = useState('')
+  const [operationsMetrics, setOperationsMetrics] = useState(null)
+  const [operationsMetricsStatus, setOperationsMetricsStatus] = useState('loading')
+  const [rescuers, setRescuers] = useState([])
+  const [rescuersStatus, setRescuersStatus] = useState('loading')
+  const [rescuersError, setRescuersError] = useState('')
+  const [noahAnalytics, setNoahAnalytics] = useState(null)
+  const [noahStatus, setNoahStatus] = useState('loading')
+  const [logs, setLogs] = useState([])
+  const [auditLoading, setAuditLoading] = useState(true)
   const [auditError, setAuditError] = useState('')
   const [selectedRole, setSelectedRole] = useState('')
   const [searchQuery, setSearchQuery] = useState('')
@@ -1309,7 +1313,7 @@ export function AdminDashboard({
   }, [apiBaseUrl, authToken, dashboardEndpoint, suppliedDashboard])
 
   const loadAudit = useCallback(async () => {
-    if (suppliedAudit || !auditEndpoint) {
+    if (!auditEndpoint) {
       setAuditLoading(false)
       return
     }
@@ -1323,7 +1327,7 @@ export function AdminDashboard({
     } finally {
       setAuditLoading(false)
     }
-  }, [apiBaseUrl, authToken, auditEndpoint, suppliedAudit])
+  }, [apiBaseUrl, authToken, auditEndpoint])
 
   const loadRbac = useCallback(async () => {
     if (suppliedRbac || !rbacEndpoint) {
@@ -1346,6 +1350,111 @@ export function AdminDashboard({
   useEffect(() => { loadAudit() }, [loadAudit])
   useEffect(() => { loadRbac() }, [loadRbac])
 
+  useEffect(() => {
+    if (!isProfileMenuOpen) return undefined
+    const closeProfileMenu = (event) => {
+      if (!profileMenuRef.current?.contains(event.target)) setIsProfileMenuOpen(false)
+    }
+    document.addEventListener('mousedown', closeProfileMenu)
+    return () => document.removeEventListener('mousedown', closeProfileMenu)
+  }, [isProfileMenuOpen])
+
+  useEffect(() => {
+    let cancelled = false
+    async function loadRescuerDeployment() {
+      setRescuersStatus('loading')
+      setRescuersError('')
+      try {
+        const payload = await apiRequest(deploymentEndpoint, authToken)
+        if (cancelled) return
+        const rows = Array.isArray(payload) ? payload : payload?.rescuers || payload?.deployment || []
+        setRescuers(rows.map(normalizeRescuer))
+        setRescuersStatus('ready')
+      } catch (error) {
+        if (cancelled) return
+        setRescuers([])
+        setRescuersStatus('error')
+        setRescuersError(error.message || 'Rescuer deployment could not be loaded.')
+      }
+    }
+    loadRescuerDeployment()
+    return () => { cancelled = true }
+  }, [authToken, deploymentEndpoint])
+
+  useEffect(() => {
+    let cancelled = false
+
+    async function loadDatabaseMetrics() {
+      setMetricsStatus('loading')
+      setMetricsError('')
+      try {
+        const payload = await apiRequest(metricsEndpoint, authToken)
+        if (cancelled) return
+        setDatabaseMetrics(payload)
+        setMetricsStatus('ready')
+      } catch (error) {
+        if (cancelled) return
+        setDatabaseMetrics(null)
+        setMetricsStatus(error.status === 401 ? 'auth-error' : 'error')
+        setMetricsError(error.status === 401 ? 'SESSION EXPIRED' : 'DATABASE UNAVAILABLE')
+      }
+    }
+
+    if (metricsEndpoint) loadDatabaseMetrics()
+    else setMetricsStatus('error')
+    return () => { cancelled = true }
+  }, [authToken, metricsEndpoint])
+
+  useEffect(() => {
+    let cancelled = false
+
+    async function loadOperationsMetrics() {
+      setOperationsMetricsStatus('loading')
+      try {
+        const payload = await apiRequest(operationsMetricsEndpoint, authToken)
+        if (cancelled) return
+        setOperationsMetrics(payload)
+        setOperationsMetricsStatus('ready')
+      } catch (error) {
+        if (cancelled) return
+        setOperationsMetrics(null)
+        setOperationsMetricsStatus(error.status === 401 ? 'auth-error' : 'error')
+      }
+    }
+
+    if (operationsMetricsEndpoint) loadOperationsMetrics()
+    else setOperationsMetricsStatus('error')
+    return () => { cancelled = true }
+  }, [authToken, operationsMetricsEndpoint])
+
+  useEffect(() => {
+    const controller = new AbortController()
+
+    async function loadNoahAnalytics() {
+      setNoahStatus('loading')
+      try {
+        const response = await fetch(noahPredictionEndpoint, { signal: controller.signal })
+        if (!response.ok) throw new Error(`NOAH data request failed (${response.status})`)
+        const payload = await response.json()
+        setNoahAnalytics(payload)
+        setNoahStatus('ready')
+      } catch (error) {
+        if (error.name === 'AbortError') return
+        setNoahAnalytics(null)
+        setNoahStatus('error')
+      }
+    }
+
+    if (noahPredictionEndpoint) loadNoahAnalytics()
+    else setNoahStatus('error')
+    return () => controller.abort()
+  }, [noahPredictionEndpoint])
+
+  const adjustedAnalytics = useMemo(
+    () => buildNoahAdjustedAnalytics(dashboard.analytics, noahAnalytics) || dashboard.analytics,
+    [dashboard.analytics, noahAnalytics]
+  )
+
   const handleIncomingAudit = useCallback((entry) => {
     const normalized = normalizeAuditLog(entry)
     setLogs((previous) => normalizeAuditLogs([normalized, ...previous]))
@@ -1358,13 +1467,13 @@ export function AdminDashboard({
 
   useEffect(() => () => window.clearTimeout(urgentTimerRef.current), [])
 
-  const websocketStatus = useWebSocketStatus(demoMode ? null : socketUrl || auth?.socketUrl, handleIncomingAudit)
+  const websocketStatus = useWebSocketStatus(socketUrl || auth?.socketUrl || WS_URL, handleIncomingAudit)
   const handleIdleTimeout = useCallback(() => onLogout?.({ reason: 'idle-timeout' }), [onLogout])
   useIdleTimeout({ enabled: Boolean(onLogout), minutes: idleTimeoutMinutes, onTimeout: handleIdleTimeout })
 
   const handleFinalSave = useCallback(async (password) => {
     if (demoMode) {
-      setSaveError('Demo data is for preview only. Connect your backend to save role changes.')
+      setSaveError('Role changes are not persisted in preview mode. Connect the authorization service to save changes.')
       return
     }
     setSaveBusy(true)
@@ -1444,7 +1553,6 @@ export function AdminDashboard({
   }, [rbacEditor.isEditing, rbacEditor.unsavedCount])
 
   const incidents = dashboard.incidents
-  const units = dashboard.units
   const services = dashboard.services
   const incidentStats = useMemo(() => {
     const active = incidents.filter((incident) => !['RESOLVED', 'CLOSED'].includes(incident.status))
@@ -1457,9 +1565,9 @@ export function AdminDashboard({
   }, [incidents])
 
   const unitStats = useMemo(() => {
-    const total = units.length
-    const available = units.filter((unit) => unit.status === 'AVAILABLE').length
-    const engaged = total - available
+    const total = rescuers.length
+    const available = rescuers.filter((rescuer) => rescuer.status === 'AVAILABLE').length
+    const engaged = rescuers.filter((rescuer) => rescuer.status === 'DISPATCHED').length
     return {
       total,
       available,
@@ -1467,7 +1575,7 @@ export function AdminDashboard({
       availabilityPct: total ? Math.round((available / total) * 100) : null,
       utilizedPct: total ? Math.round((engaged / total) * 100) : null
     }
-  }, [units])
+  }, [rescuers])
 
   const healthyCount = services.filter((service) => service.status === 'ok').length
   const uniqueRoles = [...new Set(logs.map((log) => log.role))].filter(Boolean)
@@ -1491,14 +1599,28 @@ export function AdminDashboard({
     window.setTimeout(() => document.getElementById(`tab-${TAB_DEFS[nextIndex].id}`)?.focus(), 0)
   }
 
-  const kpis = dashboard.kpis || {}
+  const kpis = {
+    ...(dashboard.kpis || {}),
+    ...(databaseMetrics ? {
+      rescueSuccessRate: databaseMetrics.rescue_success_rate,
+      rescueSuccessComparison: databaseMetrics.rescue_success_change
+    } : {})
+  }
+  const rescueComparison = kpis.rescueSuccessComparison == null
+    ? null
+    : `${Number(kpis.rescueSuccessComparison) >= 0 ? '+' : ''}${Number(kpis.rescueSuccessComparison).toFixed(1)}%`
   const statusLabel = { online: 'Connected', connecting: 'Connecting…', reconnecting: 'Reconnecting…', offline: 'Offline' }[websocketStatus]
+  const websocketConnected = websocketStatus === 'online'
+  const websocketIndicatorState = websocketConnected ? 'online' : 'reconnecting'
+  const websocketIndicatorLabel = websocketConnected ? 'Websocket: Connected' : 'Websocket: Reconnecting'
 
   return (
     <div className="resilience-root">
-      {demoMode && <div className="demo-banner" role="note">DEMO MODE — Dummy data for preview. No live operations or saved changes.</div>}
-      <header>
-        <div className="brand"><span className="dot" />RESILIENCE</div>
+      <header className="coord-header admin-coord-header">
+        <div className="coord-header-left">
+          <Logo size="small" />
+          <h1 className="coord-system-title">RESQ-ROUTE ADMINISTRATION</h1>
+        </div>
         <nav className="nav-compact" role="tablist" aria-label="Sections">
           {TAB_DEFS.map((tab) => (
             <button key={tab.id} id={`tab-${tab.id}`} type="button" role="tab" aria-selected={activeTab === tab.id} aria-controls={tab.panelId} tabIndex={activeTab === tab.id ? 0 : -1} onClick={() => setActiveTab(tab.id)} onKeyDown={(event) => handleTabKeyDown(event, tab.id)}>
@@ -1506,16 +1628,24 @@ export function AdminDashboard({
             </button>
           ))}
         </nav>
-        <span className="sp" />
-        <span className={`ws mono ws-${websocketStatus}`}><span className="dot" />{demoMode ? 'Demo: no live connection' : `WebSocket: ${statusLabel}`}</span>
-        <div className="pill-breakdown mono">
-          <span><b>{incidentStats.active}</b> ACTIVE</span><span className="sev-dot">·</span><span className="sev-crit">{incidentStats.critical} CRIT</span><span className="sev-dot">·</span><span className="sev-mod">{incidentStats.moderate} MOD</span><span className="sev-dot">·</span><span className="sev-min">{incidentStats.minor} MIN</span>
-        </div>
-        <PhtClock />
-        <div className="user">
-          <div className="av">{(auth?.user?.name || 'AD').slice(0, 2).toUpperCase()}</div>
-          <div><div className="header-user-name">{auth?.user?.name || 'Administrator'}</div><small>{auth?.user?.title || 'ADMIN'}</small></div>
-          <button type="button" className="logout-btn mono" onClick={onLogout}>EXIT</button>
+        <div className="coord-header-right">
+          <div className={`coord-telemetry-status ${websocketIndicatorState}`} aria-label={websocketIndicatorLabel}>
+            <span className={`coord-status-indicator ${websocketIndicatorState}`} />
+            <span>{websocketIndicatorLabel}</span>
+          </div>
+          <div className="coord-incident-pill" aria-label={`Active alerts: ${incidentStats.active}`} title={`Active alerts: ${incidentStats.active}`}>
+            <span className="coord-incident-label">ACTIVE ALERTS:</span>
+            <span>{incidentStats.active}</span>
+          </div>
+          <PhtClock className="coord-clock" />
+          <div className="coordinator-profile-menu" ref={profileMenuRef}>
+            <button type="button" className="coord-profile-badge" onClick={() => setIsProfileMenuOpen((open) => !open)} aria-label="Account menu for System Admin" aria-haspopup="menu" aria-expanded={isProfileMenuOpen}>
+              <span className="coord-avatar-circle">AD</span>
+              <span className="coord-profile-meta"><span className="coord-profile-name">{auth?.user?.full_name || auth?.user?.username || 'Administrator'}</span><span className="coord-profile-role">System Admin</span></span>
+              <ChevronDown size={14} aria-hidden="true" />
+            </button>
+            {isProfileMenuOpen && <div className="coordinator-profile-dropdown" role="menu"><span className="coordinator-dropdown-name">System Admin</span><button type="button" role="menuitem" onClick={() => { setIsProfileMenuOpen(false); onLogout() }}><LogOut size={15} aria-hidden="true" />Sign out</button></div>}
+          </div>
         </div>
       </header>
 
@@ -1524,17 +1654,38 @@ export function AdminDashboard({
           <section id="analytics-panel" className="view on" role="tabpanel" aria-labelledby="tab-an" tabIndex="0">
             <div className="col analytics-main-col">
               <div className="panel chart-panel">
-                <div className="pt"><span>INCIDENT FREQUENCY TREND (7-DAY ANALYSIS)</span><em>{demoMode ? 'SAMPLE DATA' : dashboardStatus === 'error' ? 'LIVE DATA UNAVAILABLE' : 'SERVER DATA'}</em></div>
-                <IncidentChart analytics={dashboard.analytics} active={activeTab === 'an'} />
+                <div className="pt"><span>INCIDENT FREQUENCY &amp; NOAH-ADJUSTED RISK SCENARIO</span><em>{noahStatus === 'ready' ? 'SCENARIO · NOT FORECAST' : demoMode ? 'LIVE DATA · LIMITED PREVIEW' : dashboardStatus === 'error' ? 'LIVE DATA UNAVAILABLE' : 'SERVER DATA'}</em></div>
+                <IncidentChart analytics={adjustedAnalytics} active={activeTab === 'an'} />
+                <div className="noah-chart-context" aria-live="polite">
+                  {adjustedAnalytics?.noahSummary ? (
+                    <>
+                      <span><b>UP NOAH susceptibility input</b> · {adjustedAnalytics.noahSummary.gridCount} grids · {adjustedAnalytics.noahSummary.highRiskCount} high-risk · mean score {(adjustedAnalytics.noahSummary.meanScore * 100).toFixed(1)}%</span>
+                      <small>Dashed values are a susceptibility-adjusted risk scenario—not predicted incidents, live flooding, or a weather forecast.</small>
+                    </>
+                  ) : (
+                    <small>{noahStatus === 'loading' ? 'Loading UP NOAH susceptibility data…' : 'UP NOAH data unavailable; showing the existing incident projection.'}</small>
+                  )}
+                </div>
               </div>
               <div className="panel rate">
-                <div className="rate-item"><div className="rate-label-row"><small>RESCUE SUCCESS RATE</small>{kpis.rescueSuccessComparison != null && <span className="status-chip chip-ok">{kpis.rescueSuccessComparison} vs prior period</span>}</div><div className="big mono">{formatNumber(kpis.rescueSuccessRate, '%')}</div></div>
-                <div className="mini rate-item"><div className="rate-label-row"><small>PEOPLE RESCUED (7D)</small>{kpis.peopleRescuedComparison != null && <span className="status-chip chip-ok">{kpis.peopleRescuedComparison} vs last week</span>}</div><b className="mono">{formatNumber(kpis.peopleRescued7d)}</b></div>
-                <div className="mini rate-item"><div className="rate-label-row"><small>AVG RESPONSE TIME</small>{kpis.responseTargetMinutes != null && <span className="status-chip chip-ok">TARGET &lt;{kpis.responseTargetMinutes}m</span>}</div><b className="mono">{kpis.avgResponseMinutes == null ? '—' : `${kpis.avgResponseMinutes} min`}</b></div>
+                <div className="rate-item" title={databaseMetrics?.definition}>
+                  <div className="rate-label-row">
+                    <small>RESCUE SUCCESS RATE (7D)</small>
+                    {metricsStatus === 'ready' && databaseMetrics ? (
+                      <span className={`status-chip ${Number(databaseMetrics.rescue_success_change) < 0 ? 'chip-warn' : 'chip-ok'}`}>
+                        {rescueComparison == null ? 'NO PRIOR COHORT' : `${rescueComparison} vs prior period`}
+                      </span>
+                    ) : <span className="status-chip chip-warn">{metricsStatus === 'loading' ? 'QUERYING DATABASE' : metricsError || 'DATABASE UNAVAILABLE'}</span>}
+                  </div>
+                  <div className="big mono">{metricsStatus === 'ready' ? formatNumber(kpis.rescueSuccessRate, '%') : '—'}</div>
+                  {databaseMetrics && <small className="kpi-source-note">{databaseMetrics.rescue_successful} resolved / {databaseMetrics.rescue_total} assigned · database</small>}
+                </div>
+                <div className="mini rate-item" title={operationsMetrics?.definition}><div className="rate-label-row"><small>PEOPLE RESCUED (7D)</small><span className={`status-chip ${operationsMetricsStatus === 'ready' ? 'chip-ok' : 'chip-warn'}`}>{operationsMetricsStatus === 'ready' ? 'DATABASE' : 'DATABASE UNAVAILABLE'}</span></div><b className="mono">{operationsMetricsStatus === 'ready' ? formatNumber(operationsMetrics.people_rescued) : '—'}</b></div>
+                <div className="mini rate-item" title={operationsMetrics?.definition}><div className="rate-label-row"><small>AVG RESPONSE TIME</small><span className={`status-chip ${operationsMetricsStatus === 'ready' ? 'chip-ok' : 'chip-warn'}`}>{operationsMetricsStatus === 'ready' ? `${operationsMetrics.response_samples} SAMPLES` : 'DATABASE UNAVAILABLE'}</span></div><b className="mono">{operationsMetricsStatus === 'ready' && operationsMetrics.average_response_minutes != null ? `${operationsMetrics.average_response_minutes} min` : '—'}</b></div>
                 <div className="mini rate-item"><div className="rate-label-row"><small>UNITS DEPLOYED</small><span className={`status-chip ${unitStats.total && unitStats.availabilityPct < 20 ? 'chip-warn' : 'chip-ok'}`}>{unitStats.total ? `${unitStats.engaged} / ${unitStats.total} DEPLOYED · ${unitStats.availabilityPct}% AVAIL` : 'NO DATA'}</span></div><b className="mono">{unitStats.utilizedPct == null ? '—' : `${unitStats.utilizedPct}% UTILIZED`}</b></div>
               </div>
               <div className="panel audit-mini-panel">
-                <div className="bandh"><span>RECENT SECURITY &amp; ACTIVITY AUDIT TRAIL</span><span className="mono audit-feed-label">{demoMode ? 'SAMPLE RECORDS' : 'LIVE FEED'} (SELECT ROW FOR IP)</span></div>
+                <div className="bandh"><span>RECENT SECURITY &amp; ACTIVITY AUDIT TRAIL</span><span className="mono audit-feed-label">DATABASE FEED (SELECT ROW FOR IP)</span></div>
                 {auditError && <div className="panel-state panel-error" role="alert">{auditError}</div>}
                 {auditLoading ? <div className="panel-state">Loading audit entries…</div> : <AuditTable logs={logs} compact urgentLogId={urgentLogId} expandedLogId={expandedLogId} onToggleLog={(id) => setExpandedLogId((current) => current === id ? null : id)} />}
               </div>
@@ -1542,12 +1693,12 @@ export function AdminDashboard({
 
             <div className="col side">
               <div className="panel map-panel">
-                <div className="pt"><span>FLOOD SECTOR SITUATIONAL MAP</span><div className="map-tools"><button type="button" className={`btn-toggle-grid ${isGridMode ? 'active' : ''}`} onClick={() => setIsGridMode((previous) => !previous)}>{isGridMode ? 'VECTOR MAP' : 'GRID MODE'}</button></div></div>
-                <FloodMap mapData={dashboard.map} active={activeTab === 'an'} isGridMode={isGridMode} />
+                <div className="pt"><span>LIVE FLOOD HAZARD MAP</span><em>MAPLIBRE · UP NOAH</em></div>
+                <LiveHazardMap apiBaseUrl={API_BASE_URL} active={activeTab === 'an'} />
               </div>
               <div className="panel units-panel">
-                <div className="pt"><span>ACTIVE UNIT DEPLOYMENT &amp; RESPONSE</span><em>{unitStats.total ? `${unitStats.engaged}/${unitStats.total} ENGAGED` : 'NO DATA'}</em></div>
-                {units.length ? <div className="unit">{units.map((unit) => { const color = unit.rate == null ? 'var(--mute)' : unit.rate >= 98 ? 'var(--ok)' : unit.rate >= 95 ? 'var(--cyan)' : 'var(--warn)'; return <div key={unit.id}><div className="unit-head"><div className="unit-info-left"><b>{unit.name}</b><span className={`unit-badge ${unit.className}`}>{unit.status}</span><span className="unit-inc">{unit.incident}</span></div><span className="mono unit-rate" style={{ '--rate-color': color }}>{unit.rate == null ? '—' : `${unit.rate}% rate`}</span></div><div className="bar unit-progress"><i style={{ '--bar-width': `${unit.rate == null ? 0 : unit.rate}%`, '--bar-color': color }} /></div></div> })}</div> : <div className="panel-state">No unit data returned by the server.</div>}
+                <div className="pt"><span>RESCUER DEPLOYMENT</span><em>{unitStats.total ? `${unitStats.engaged}/${unitStats.total} DISPATCHED` : 'NO DATA'}</em></div>
+                {rescuersStatus === 'loading' ? <div className="panel-state">Loading rescuer deployment…</div> : rescuersError ? <div className="panel-state panel-error" role="alert">{rescuersError}</div> : rescuers.length ? <div className="unit">{rescuers.map((rescuer) => <div key={rescuer.id} className="rescuer-deployment-row"><div className="unit-head"><div className="unit-info-left"><b>{rescuer.name}</b><span className={`unit-badge ${rescuer.className}`}>{rescuer.status}</span><span className="unit-inc">{rescuer.station}</span></div><span className="mono unit-rate">{rescuer.responseRate == null ? '—' : `${rescuer.responseRate}% response`}</span></div><div className="rescuer-meta"><span>{rescuer.completedCases} completed cases</span><span>{rescuer.phone}</span><span>{rescuer.latitude != null && rescuer.longitude != null ? `${rescuer.latitude.toFixed(5)}, ${rescuer.longitude.toFixed(5)}` : 'Location unavailable'}</span></div></div>)}</div> : <div className="panel-state">No rescuer profiles returned by the server.</div>}
               </div>
             </div>
           </section>

@@ -902,6 +902,57 @@
 .ops-console .map-overlay-draggable.minimized { min-width: 34px; min-height: 34px; padding: 3px; }
 .ops-console .map-overlay-draggable.minimized .map-overlay-toggle { position: static; }
 
+.ops-console .map-legend-static {
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  z-index: 4;
+  display: grid;
+  gap: 4px;
+  min-width: 176px;
+  padding: 8px 10px;
+  border: 1px solid color-mix(in srgb, var(--ops-border) 85%, transparent);
+  border-radius: 4px;
+  background: rgba(7, 10, 16, .68);
+  color: var(--ops-text);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, .24);
+  backdrop-filter: blur(4px);
+  font: 8px/1.35 var(--ops-mono);
+  pointer-events: none;
+}
+
+.ops-console .map-legend-static b {
+  padding-bottom: 3px;
+  border-bottom: 1px solid color-mix(in srgb, var(--ops-border) 85%, transparent);
+  color: var(--ops-text);
+  font-size: 9px;
+  letter-spacing: .08em;
+}
+
+.ops-console .map-legend-static span { display: flex; align-items: center; gap: 5px; white-space: nowrap; }
+.ops-console .map-legend-static .dot,
+.ops-console .map-legend-static .legend-swatch { flex: 0 0 auto; margin: 0; }
+.ops-console .map-legend-static .legend-swatch { width: 9px; height: 7px; border: 1px solid rgba(255, 255, 255, .55); border-radius: 1px; }
+.ops-console .map-legend-static .marker-alert-flood { background: #3298df; }
+.ops-console .map-legend-static .marker-alert-earthquake { background: #d18c48; }
+.ops-console .map-legend-static .marker-alert-fire { background: #f04444; }
+.ops-console .map-legend-static .marker-alert-medical { background: #dd5ca8; }
+.ops-console .map-legend-static .marker-alert-rescue { background: #a56ee7; }
+.ops-console .map-legend-static .marker-alert-other { background: #dc2626; }
+.ops-console .map-legend-static .marker-available { background: #00d6a0; }
+.ops-console .map-legend-static .marker-recovering { background: #f59e0b; }
+.ops-console .map-legend-static .marker-transit { background: #2563eb; }
+.ops-console .map-legend-static .marker-full { background: #dc2626; }
+.ops-console .map-legend-static .hazard-high { background: rgba(239, 68, 68, .8); }
+.ops-console .map-legend-static .hazard-medium { background: rgba(233, 101, 76, .8); }
+.ops-console .map-legend-static .road-hazard { background: rgba(234, 88, 12, .8); }
+.ops-console .map-legend-static .pending-road-hazard { background: rgba(245, 158, 11, .8); }
+
+:root[data-theme='light'] .ops-console .map-legend-static {
+  background: rgba(248, 250, 251, .68);
+  box-shadow: 0 6px 18px rgba(23, 33, 43, .14);
+}
+
 .ops-console .panel-visibility-entering {
   animation: panel-visibility-enter 220ms cubic-bezier(.2, .8, .2, 1) both;
 }
