@@ -5,6 +5,7 @@ import 'maplibre-gl/dist/maplibre-gl.css'
 
 const DEFAULT_LOCATION = [120.98, 14.65]
 const VECTOR_STYLE_URL = import.meta.env.VITE_MAP_STYLE_URL || 'https://api.maptiler.com/maps/base-v4/style.json?key=mt7k9rWpGBUe5lFcSLZ1'
+const NOAH_DATASET_URL = 'https://huggingface.co/datasets/bettergovph/project-noah-hazard-maps'
 
 maplibregl.setWorkerUrl(maplibreWorkerUrl)
 console.info('[RESQ map] MapLibre worker configured', { workerUrl: maplibreWorkerUrl })
@@ -120,6 +121,7 @@ const MapContainer = ({
   focusMarkerId = null,
   highlightMarkerId = null,
   selectedAlertCategory = 'all',
+  hazardLayers = [],
   centerRequestKey = 0,
   pinnedLocation = null, 
   onMapClick, 
@@ -138,9 +140,67 @@ const MapContainer = ({
   const focusMarkerIdRef = useRef(focusMarkerId)
   const highlightMarkerIdRef = useRef(highlightMarkerId)
   const selectedAlertCategoryRef = useRef(selectedAlertCategory)
+  const hazardLayersRef = useRef(hazardLayers)
   const onMapClickRef = useRef(onMapClick)
   const markersSignature = JSON.stringify(markers)
   const centerSignature = JSON.stringify(center)
+  const hazardLayersSignature = JSON.stringify(hazardLayers)
+
+  const splashHazardGeometry = (geometry, seedText = '') => {
+    if (geometry?.type !== 'Polygon' || geometry.coordinates?.length !== 1) return geometry
+    const ring = geometry.coordinates[0]
+    if (ring.length !== 5) return geometry
+
+    const longitudes = ring.map(([longitude]) => longitude)
+    const latitudes = ring.map(([, latitude]) => latitude)
+    const minLongitude = Math.min(...longitudes)
+    const maxLongitude = Math.max(...longitudes)
+    const minLatitude = Math.min(...latitudes)
+    const maxLatitude = Math.max(...latitudes)
+    const width = maxLongitude - minLongitude
+    const height = maxLatitude - minLatitude
+    const centerLongitude = (minLongitude + maxLongitude) / 2
+    const centerLatitude = (minLatitude + maxLatitude) / 2
+    let seed = [...String(seedText)].reduce((value, character) => value + character.charCodeAt(0), 0)
+    const pointCount = 16
+    const points = Array.from({ length: pointCount }, (_, index) => {
+      seed = (seed * 9301 + 49297) % 233280
+      const variation = 0.88 + (seed / 233280) * 0.22
+      const angle = (Math.PI * 2 * index) / pointCount
+      return [
+        centerLongitude + Math.cos(angle) * width * 0.58 * variation,
+        centerLatitude + Math.sin(angle) * height * 0.58 * variation,
+      ]
+    })
+    points.push(points[0])
+
+    return {
+      ...geometry,
+      coordinates: [points],
+    }
+  }
+
+  const updateHazardLayers = (map, nextLayers) => {
+    const source = map.getSource('resq-hazard-layers')
+    if (!source) return
+    source.setData({
+      type: 'FeatureCollection',
+      features: nextLayers
+        .filter((layer) => ['medium', 'high'].includes(String(layer.hazard_level).toLowerCase()))
+        .map((layer) => ({
+        type: 'Feature',
+        id: layer.id,
+        geometry: splashHazardGeometry(layer.geometry, layer.source_grid_id || layer.id),
+        properties: {
+          hazard_level: layer.hazard_level,
+          hazard_score: layer.hazard_score,
+          hazard_label: `${String(layer.hazard_level || 'unknown').toUpperCase()}\n${(Number(layer.hazard_score || 0) * 100).toFixed(0)}%`,
+          source: layer.source,
+          is_published: layer.is_published,
+        },
+        })),
+    })
+  }
 
   useEffect(() => {
     onMapClickRef.current = onMapClick
@@ -328,6 +388,75 @@ const MapContainer = ({
           map.resize()
           map.addSource('citizen-route', { type: 'geojson', data: normalizeRouteData(routeRef.current) })
           map.addLayer({ id: 'citizen-route-line', type: 'line', source: 'citizen-route', paint: { 'line-color': '#50a8ff', 'line-width': 5, 'line-opacity': 0.9 } })
+          map.addSource('resq-hazard-layers', {
+            type: 'geojson',
+            data: { type: 'FeatureCollection', features: [] },
+          })
+          map.addLayer({
+            id: 'resq-hazard-fill',
+            type: 'fill',
+            source: 'resq-hazard-layers',
+            paint: {
+              'fill-color': [
+                'match',
+                ['get', 'hazard_level'],
+                'high', '#ef4444',
+                'medium', '#fb923c',
+                'low', '#facc15',
+                '#94a3b8',
+              ],
+              'fill-opacity': 0.22,
+            },
+          })
+          map.addLayer({
+            id: 'resq-high-hazard-fill',
+            type: 'fill',
+            source: 'resq-hazard-layers',
+            filter: ['==', ['get', 'hazard_level'], 'high'],
+            paint: { 'fill-color': '#ef4444', 'fill-opacity': 0.32 },
+          })
+          map.addLayer({
+            id: 'resq-high-hazard-outline',
+            type: 'line',
+            source: 'resq-hazard-layers',
+            filter: ['==', ['get', 'hazard_level'], 'high'],
+            paint: { 'line-color': '#b91c1c', 'line-width': 1.5, 'line-opacity': 0.8 },
+          })
+          map.addLayer({
+            id: 'resq-hazard-labels',
+            type: 'symbol',
+            source: 'resq-hazard-layers',
+            layout: {
+              'text-field': ['get', 'hazard_label'],
+              'text-size': ['interpolate', ['linear'], ['zoom'], 11, 8, 14, 11, 17, 14],
+              'text-font': ['Open Sans Bold'],
+              'text-anchor': 'center',
+              'text-allow-overlap': true,
+              'text-ignore-placement': true,
+            },
+            paint: {
+              'text-opacity': 0.65,
+              'text-color': [
+                'match',
+                ['get', 'hazard_level'],
+                'high', '#991b1b',
+                'medium', '#9a3412',
+                'low', '#854d0e',
+                '#334155',
+              ],
+              'text-halo-color': [
+                'match',
+                ['get', 'hazard_level'],
+                'high', '#fecaca',
+                'medium', '#fed7aa',
+                'low', '#fef08a',
+                '#e2e8f0',
+              ],
+              'text-halo-width': 0.8,
+              'text-halo-blur': 0.35,
+            },
+          })
+          updateHazardLayers(map, hazardLayersRef.current)
           renderMarkers(map, markersRef.current)
           if (routeRef.current) updateRoute(map, routeRef.current)
         })
@@ -454,9 +583,17 @@ const MapContainer = ({
     }
   }, [route])
 
+  useEffect(() => {
+    hazardLayersRef.current = hazardLayers
+    if (mapRef.current?.isStyleLoaded()) updateHazardLayers(mapRef.current, hazardLayers)
+  }, [hazardLayersSignature])
+
   return (
     <div className="map-container" style={{ height: '100%', width: '100%', position: 'relative', zIndex: 1 }}>
       <div ref={mapContainerRef} style={{ height: '100%', width: '100%' }} />
+      <div className="map-source-credit" aria-label="Hazard data attribution">
+        Hazard data: <a href={NOAH_DATASET_URL} target="_blank" rel="noreferrer" title="University of the Philippines Nationwide Operational Assessment of Hazards">UP NOAH</a>
+      </div>
     </div>
   )
 }

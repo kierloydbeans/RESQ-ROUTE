@@ -70,7 +70,7 @@ Example using `psql` and a `DATABASE_URL` environment variable:
 psql "postgresql://USER:PASSWORD@HOST:PORT/DATABASE" -v ON_ERROR_STOP=1 -f database/migrations/001_initial_schema.sql
 ```
 
-Repeat for each migration through `022_add_household_check_in_fields.sql`. Migrations `019`–`022` add shipment, center-coordinator assignment, household, and household check-in support. Ensure the database role used by the API has the expected access; the household and shipment migrations grant table access to Supabase `service_role`.
+Repeat for each migration through `023_create_hazard_map_layers.sql`. Migrations `019`–`022` add shipment, center-coordinator assignment, household, and household check-in support; migration `023` adds dispatcher-managed hazard map layers. Ensure the database role used by the API has the expected access; the household, shipment, and hazard-layer migrations grant table access to Supabase `service_role`.
 
 The API also initializes SQLModel-declared tables at startup. This does not replace applying the SQL migrations, which contain required indexes, constraints, enum changes, and policies/grants.
 

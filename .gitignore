@@ -4,6 +4,10 @@
 .env.*.local
 *.env
 
+# Data-science raw downloads and generated inspection artifacts
+data-science/data/raw/
+data-science/data/metadata/phivolcs_kmz_inspection/
+
 # Python / FastAPI specifics
 __pycache__/
 *.py[cod]

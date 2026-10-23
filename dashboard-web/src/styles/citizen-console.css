@@ -662,13 +662,11 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .report-sidebar,
-  .report-sidebar .report-panel-padding { scroll-behavior: auto; }
-  .maplibregl-marker.citizen-pinned-marker.pin-dropping svg { animation-duration: 0.01ms; }
-  .resq-map-marker.is-shelter-highlighted { animation-duration: 0.01ms; animation-iteration-count: 1; }
+  .rescuer-sidebar,
+  .rescuer-sidebar-nav > button {
+    transition: none !important;
+  }
 }
-
-
 .mapboxgl-marker,
 .mapboxgl-popup,
 .maplibregl-marker,

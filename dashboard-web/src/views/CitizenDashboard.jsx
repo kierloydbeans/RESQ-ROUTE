@@ -221,6 +221,7 @@ export const CitizenDashboard = ({ auth, onLogout }) => {
   const [qrError, setQrError] = useState('')
   const [centers, setCenters] = useState([])
   const [roadHazards, setRoadHazards] = useState([])
+  const [publishedHazardLayers, setPublishedHazardLayers] = useState([])
   const [selectedCenter, setSelectedCenter] = useState(null)
   const [centerRequestKey, setCenterRequestKey] = useState(0)
   const [isDetailClosing, setIsDetailClosing] = useState(false)
@@ -483,9 +484,21 @@ export const CitizenDashboard = ({ auth, onLogout }) => {
       } catch {}
     }
 
+    const loadPublishedHazardLayers = async () => {
+      try {
+        const response = await fetch(`${API_BASE_URL}/api/v1/hazards/map-layers?status=published`)
+        if (response.ok) setPublishedHazardLayers(await response.json())
+      } catch {}
+    }
+
     loadRoadHazards()
+    loadPublishedHazardLayers()
     const roadHazardRefresh = window.setInterval(loadRoadHazards, 60_000)
-    return () => window.clearInterval(roadHazardRefresh)
+    const hazardLayerRefresh = window.setInterval(loadPublishedHazardLayers, 60_000)
+    return () => {
+      window.clearInterval(roadHazardRefresh)
+      window.clearInterval(hazardLayerRefresh)
+    }
   }, [])
 
   const handleRouteToCenter = async (center) => {
@@ -815,6 +828,7 @@ export const CitizenDashboard = ({ auth, onLogout }) => {
       {/* 1. Background Map */}
       <div className="citizen-map-canvas">
         <MapContainer
+          hazardLayers={publishedHazardLayers}
           markers={[...centerMarkers, ...hazardMarkers]}
           route={evacuationRoute}
           center={selectedCenter ? [selectedCenter.longitude, selectedCenter.latitude] : null}
