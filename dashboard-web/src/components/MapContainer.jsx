@@ -151,6 +151,8 @@ const MapContainer = ({
   highlightMarkerId = null,
   selectedAlertCategory = 'all',
   hazardLayers = [],
+  roadHazardZones = { type: 'FeatureCollection', features: [] },
+  pendingRoadHazardZones = { type: 'FeatureCollection', features: [] },
   centerRequestKey = 0,
   pinnedLocation = null, 
   onMapClick, 
@@ -175,10 +177,14 @@ const MapContainer = ({
   const highlightMarkerIdRef = useRef(highlightMarkerId)
   const selectedAlertCategoryRef = useRef(selectedAlertCategory)
   const hazardLayersRef = useRef(hazardLayers)
+  const roadHazardZonesRef = useRef(roadHazardZones)
+  const pendingRoadHazardZonesRef = useRef(pendingRoadHazardZones)
   const onMapClickRef = useRef(onMapClick)
   const markersSignature = JSON.stringify(markers)
   const centerSignature = JSON.stringify(center)
   const hazardLayersSignature = JSON.stringify(hazardLayers)
+  const roadHazardZonesSignature = JSON.stringify(roadHazardZones)
+  const pendingRoadHazardZonesSignature = JSON.stringify(pendingRoadHazardZones)
   pinnedLocationRef.current = pinnedLocation
 
   const showDeviceLocation = (map, longitude, latitude) => {
@@ -516,6 +522,41 @@ const MapContainer = ({
           map.resize()
           map.addSource('citizen-route', { type: 'geojson', data: normalizeRouteData(routeRef.current) })
           map.addLayer({ id: 'citizen-route-line', type: 'line', source: 'citizen-route', paint: { 'line-color': '#50a8ff', 'line-width': 5, 'line-opacity': 0.9 } })
+          map.addSource('resq-road-hazard-zones', {
+            type: 'geojson',
+            data: roadHazardZonesRef.current,
+          })
+          map.addLayer({
+            id: 'resq-road-hazard-fill',
+            type: 'fill',
+            source: 'resq-road-hazard-zones',
+            paint: {
+              'fill-color': ['match', ['get', 'severity'], 'critical', '#b91c1c', 'high', '#ef4444', 'medium', '#f97316', '#fbbf24'],
+              'fill-opacity': 0.23,
+            },
+          }, 'citizen-route-line')
+          map.addLayer({
+            id: 'resq-road-hazard-outline',
+            type: 'line',
+            source: 'resq-road-hazard-zones',
+            paint: { 'line-color': '#ea580c', 'line-width': 2, 'line-opacity': 0.85 },
+          }, 'citizen-route-line')
+          map.addSource('resq-pending-road-hazards', {
+            type: 'geojson',
+            data: pendingRoadHazardZonesRef.current,
+          })
+          map.addLayer({
+            id: 'resq-pending-road-hazard-fill',
+            type: 'fill',
+            source: 'resq-pending-road-hazards',
+            paint: { 'fill-color': '#f59e0b', 'fill-opacity': 0.16 },
+          }, 'citizen-route-line')
+          map.addLayer({
+            id: 'resq-pending-road-hazard-outline',
+            type: 'line',
+            source: 'resq-pending-road-hazards',
+            paint: { 'line-color': '#f59e0b', 'line-width': 2, 'line-dasharray': [2, 2] },
+          }, 'citizen-route-line')
           map.addSource('resq-hazard-layers', {
             type: 'geojson',
             data: { type: 'FeatureCollection', features: [] },
@@ -585,6 +626,11 @@ const MapContainer = ({
             },
           })
           updateHazardLayers(map, hazardLayersRef.current)
+          map.moveLayer('resq-pending-road-hazard-fill')
+          map.moveLayer('resq-pending-road-hazard-outline')
+          map.moveLayer('resq-road-hazard-fill')
+          map.moveLayer('resq-road-hazard-outline')
+          map.moveLayer('citizen-route-line')
           renderMarkers(map, markersRef.current)
           syncPinnedMarker(map, pinnedLocationRef.current)
           syncDeviceMarker(map, devicePositionRef.current)
@@ -721,6 +767,16 @@ const MapContainer = ({
     hazardLayersRef.current = hazardLayers
     if (mapRef.current?.isStyleLoaded()) updateHazardLayers(mapRef.current, hazardLayers)
   }, [hazardLayersSignature])
+
+  useEffect(() => {
+    roadHazardZonesRef.current = roadHazardZones
+    mapRef.current?.getSource('resq-road-hazard-zones')?.setData(roadHazardZones)
+  }, [roadHazardZonesSignature])
+
+  useEffect(() => {
+    pendingRoadHazardZonesRef.current = pendingRoadHazardZones
+    mapRef.current?.getSource('resq-pending-road-hazards')?.setData(pendingRoadHazardZones)
+  }, [pendingRoadHazardZonesSignature])
 
   return (
     <div className="map-container" style={{ height: '100%', width: '100%', position: 'relative', zIndex: 1 }}>

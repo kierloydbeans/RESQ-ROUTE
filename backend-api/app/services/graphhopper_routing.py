@@ -449,5 +449,6 @@ async def route_citizen(
             "duration_seconds": float(summary.get("time") or 0),
             "geometry": {"type": "LineString", "coordinates": coordinates},
             "avoided_hazards": avoided,
+            "original_route_hazard": bool(blocking_roads),
             "message": "Road route calculated with active hazard polygons excluded.",
         }

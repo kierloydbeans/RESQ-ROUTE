@@ -1,0 +1,66 @@
+.dashboard-session { min-height: 100dvh; }
+.dashboard-session.is-logging-out > :not(.logout-overlay),
+.rescuer-app-shell.is-logging-out > :not(.logout-overlay),
+.login-page.is-signing-in > :not(.logout-overlay) {
+  pointer-events: none;
+  animation: logout-view-exit 520ms cubic-bezier(.4, 0, .2, 1) forwards;
+}
+.logout-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 5000;
+  display: grid;
+  place-items: center;
+  visibility: hidden;
+  opacity: 0;
+  background: color-mix(in srgb, var(--ops-bg) 82%, transparent);
+  backdrop-filter: blur(0);
+  pointer-events: none;
+  transition: opacity 260ms ease, visibility 0s linear 260ms, backdrop-filter 420ms ease;
+}
+.logout-overlay.is-visible {
+  visibility: visible;
+  opacity: 1;
+  backdrop-filter: blur(8px);
+  pointer-events: auto;
+  transition-delay: 0s;
+}
+.logout-overlay-card {
+  display: grid;
+  justify-items: center;
+  gap: 8px;
+  min-width: 210px;
+  padding: 24px 28px;
+  border: 1px solid var(--ops-border);
+  border-radius: 16px;
+  background: var(--ops-surface);
+  color: var(--ops-text);
+  box-shadow: 0 20px 55px rgba(0, 0, 0, .28);
+  opacity: 0;
+  transform: translateY(18px) scale(.96);
+}
+.logout-overlay.is-visible .logout-overlay-card { animation: logout-card-enter 420ms cubic-bezier(.2,.8,.2,1) 70ms forwards; }
+.logout-overlay-icon {
+  display: grid;
+  width: 44px;
+  height: 44px;
+  place-items: center;
+  margin-bottom: 2px;
+  border-radius: 50%;
+  background: var(--auth-role-active-bg);
+  color: var(--ops-red);
+}
+.logout-overlay-card strong { font-size: 15px; }
+.logout-overlay-card > span:not(.logout-overlay-icon) { color: var(--ops-muted); font-size: 12px; }
+.logout-overlay-progress { width: 100%; height: 3px; margin-top: 8px; overflow: hidden; border-radius: 999px; background: var(--ops-border); }
+.logout-overlay-progress::after { display: block; width: 45%; height: 100%; border-radius: inherit; background: var(--ops-red); content: ''; animation: logout-progress 720ms ease-in-out infinite; }
+@keyframes logout-view-exit { to { opacity: 0; transform: translateY(-10px) scale(.985); filter: blur(3px); } }
+@keyframes logout-card-enter { to { opacity: 1; transform: translateY(0) scale(1); } }
+@keyframes logout-progress { from { transform: translateX(-110%); } to { transform: translateX(240%); } }
+@media (prefers-reduced-motion: reduce) {
+  .dashboard-session.is-logging-out > :not(.logout-overlay),
+  .rescuer-app-shell.is-logging-out > :not(.logout-overlay),
+  .login-page.is-signing-in > :not(.logout-overlay),
+  .logout-overlay.is-visible .logout-overlay-card,
+  .logout-overlay-progress::after { animation-duration: .01ms; }
+}

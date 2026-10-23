@@ -3,6 +3,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import BaseModel, Field
+from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import OperationalError, ProgrammingError
 from sqlmodel import Session, select
@@ -11,15 +13,131 @@ from app.models.report import Report, ReportCreate, ReportRead, ReportUpdate, Se
 from app.models.hazard_map_layer import HazardLayerPublish, HazardMapLayer, HazardMapLayerRead
 from app.core.security import get_current_user
 from app.db.session import get_session
+from app.api.websockets.telemetry import manager as telemetry_manager
+from app.models.road_hazard import RoadHazardReport, RoadHazardType
+from app.services.graphhopper_routing import exclusion_polygon
+from app.services.road_hazard_expiration import calculate_road_hazard_expiration, expire_stale_road_hazards
 
 router = APIRouter()
 FEATURES_PATH = Path(__file__).resolve().parents[4] / "data-science" / "data" / "derived" / "south_caloocan_real_hazard_features.csv"
+
+
+class RoadHazardSubmission(BaseModel):
+    hazard_type: RoadHazardType
+    description: str = Field(min_length=1)
+    latitude: float = Field(ge=-90, le=90)
+    longitude: float = Field(ge=-180, le=180)
+    radius_meters: int = Field(default=75, ge=10, le=2000)
+    severity: SeverityLevel = SeverityLevel.HIGH
+    road_name: Optional[str] = None
+    reporter_name: Optional[str] = None
+
+
+def road_hazard_feature(hazard: RoadHazardReport) -> dict:
+    ring = exclusion_polygon(hazard.latitude, hazard.longitude, hazard.radius_meters)
+    ring.append(ring[0])
+    return {
+        "type": "Feature",
+        "id": hazard.id,
+        "geometry": {"type": "Polygon", "coordinates": [ring]},
+        "properties": {
+            "id": hazard.id,
+            "hazard_type": hazard.hazard_type,
+            "description": hazard.description,
+            "latitude": hazard.latitude,
+            "longitude": hazard.longitude,
+            "radius_meters": hazard.radius_meters,
+            "severity": hazard.severity,
+            "road_name": hazard.road_name,
+            "reporter_name": hazard.reporter_name,
+            "reported_at": hazard.reported_at.isoformat(),
+            "is_active": hazard.is_active,
+            "is_resolved": hazard.is_resolved,
+            "review_status": hazard.review_status,
+        },
+    }
+
+
+@router.get("/active")
+async def active_road_hazards(session: AsyncSession = Depends(get_session)) -> dict:
+    await expire_stale_road_hazards(session)
+    result = await session.execute(select(RoadHazardReport).where(
+        RoadHazardReport.is_active.is_(True),
+        RoadHazardReport.is_resolved.is_(False),
+        RoadHazardReport.review_status == "approved",
+    ))
+    return {"type": "FeatureCollection", "features": [road_hazard_feature(hazard) for hazard in result.scalars()]}
+
+
+@router.post("", status_code=201)
+async def report_road_hazard(
+    payload: RoadHazardSubmission,
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    hazard = RoadHazardReport(
+        **payload.model_dump(),
+        is_active=False,
+        is_resolved=False,
+        review_status="pending",
+    )
+    hazard.expires_at = calculate_road_hazard_expiration(hazard.hazard_type, hazard.reported_at)
+    session.add(hazard)
+    await session.commit()
+    await session.refresh(hazard)
+    feature = road_hazard_feature(hazard)
+    await telemetry_manager.broadcast({"type": "road_hazard_submitted", "id": hazard.id})
+    return feature
 
 
 def _require_dispatcher(credentials: dict) -> None:
     role = str(credentials.get("role", "")).lower().split(".")[-1]
     if role not in {"dispatcher", "admin"}:
         raise HTTPException(status_code=403, detail="Dispatcher account required")
+
+
+@router.get("/pending")
+async def pending_road_hazards(
+    credentials: dict = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    _require_dispatcher(credentials)
+    result = await session.execute(select(RoadHazardReport).where(
+        RoadHazardReport.review_status == "pending",
+        RoadHazardReport.is_resolved.is_(False),
+    ).order_by(RoadHazardReport.reported_at.desc()))
+    return {"type": "FeatureCollection", "features": [road_hazard_feature(hazard) for hazard in result.scalars()]}
+
+
+class RoadHazardReview(BaseModel):
+    approved: bool
+
+
+@router.patch("/road-reports/{hazard_id}/review")
+async def review_road_hazard(
+    hazard_id: int,
+    payload: RoadHazardReview,
+    credentials: dict = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    _require_dispatcher(credentials)
+    result = await session.execute(select(RoadHazardReport).where(RoadHazardReport.id == hazard_id))
+    hazard = result.scalar_one_or_none()
+    if hazard is None:
+        raise HTTPException(status_code=404, detail="Road hazard report not found")
+    if hazard.review_status != "pending":
+        raise HTTPException(status_code=409, detail="This road hazard has already been reviewed")
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    hazard.review_status = "approved" if payload.approved else "rejected"
+    hazard.is_active = payload.approved
+    hazard.reviewed_by = str(credentials.get("sub") or "dispatcher")
+    hazard.reviewed_at = now
+    if payload.approved:
+        hazard.expires_at = calculate_road_hazard_expiration(hazard.hazard_type, now)
+    await session.commit()
+    await session.refresh(hazard)
+    feature = road_hazard_feature(hazard)
+    await telemetry_manager.broadcast({"type": "road_hazard_updated", "data": feature})
+    return feature
 
 
 async def _sync_feature_layers(session: Session) -> None:

@@ -82,6 +82,75 @@
 .rescuer-new-assignment-banner p,
 .rescuer-alert-info-grid p,
 .rescuer-alert-location-grid p { overflow-wrap: anywhere; }
+
+/* Bridge legacy inline rescuer styles onto the shared application theme. */
+:root[data-theme='light'] .rescuer-app-shell,
+:root[data-theme='light'] .rescuer-sidebar,
+:root[data-theme='light'] .rescuer-main,
+:root[data-theme='light'] .rescuer-viewport {
+  background: var(--ops-bg) !important;
+  color: var(--ops-text) !important;
+}
+:root[data-theme='light'] .rescuer-main-header,
+:root[data-theme='light'] .rescuer-sidebar-brand {
+  border-color: var(--ops-border) !important;
+  background: var(--ops-surface) !important;
+}
+:root[data-theme='light'] .rescuer-sidebar-footer,
+:root[data-theme='light'] .rescuer-profile-menu {
+  border-color: var(--ops-border) !important;
+  background: var(--ops-surface) !important;
+}
+:root[data-theme='light'] .rescuer-app-shell [style*='background-color: rgb(7, 11, 20)'],
+:root[data-theme='light'] .rescuer-app-shell [style*='background: rgb(7, 11, 20)'] {
+  background-color: var(--ops-bg) !important;
+  background: var(--ops-bg) !important;
+}
+:root[data-theme='light'] .rescuer-app-shell [style*='background-color: rgb(11, 17, 32)'],
+:root[data-theme='light'] .rescuer-app-shell [style*='background: rgb(11, 17, 32)'],
+:root[data-theme='light'] .rescuer-app-shell [style*='background-color: rgb(31, 41, 55)'],
+:root[data-theme='light'] .rescuer-app-shell [style*='background: rgb(31, 41, 55)'] {
+  background-color: var(--ops-surface-2) !important;
+  background: var(--ops-surface-2) !important;
+}
+:root[data-theme='light'] .rescuer-app-shell [style*='border'][style*='rgb(30, 41, 59)'],
+:root[data-theme='light'] .rescuer-app-shell [style*='border'][style*='rgb(51, 65, 85)'] {
+  border-color: var(--ops-border) !important;
+}
+:root[data-theme='light'] .rescuer-app-shell [style*='color: rgb(241, 245, 249)'],
+:root[data-theme='light'] .rescuer-app-shell [style*='color: rgb(226, 232, 240)'],
+:root[data-theme='light'] .rescuer-app-shell [style*='color: rgb(203, 213, 225)'] {
+  color: var(--ops-text) !important;
+}
+:root[data-theme='light'] .rescuer-app-shell [style*='color: rgb(148, 163, 184)'],
+:root[data-theme='light'] .rescuer-app-shell [style*='color: rgb(100, 116, 139)'],
+:root[data-theme='light'] .rescuer-app-shell [style*='color: rgb(71, 85, 105)'] {
+  color: var(--ops-muted) !important;
+}
+:root[data-theme='light'] .rescuer-app-shell input,
+:root[data-theme='light'] .rescuer-app-shell textarea,
+:root[data-theme='light'] .rescuer-app-shell select {
+  border-color: var(--ops-border) !important;
+  background: var(--ops-surface-2) !important;
+  color: var(--ops-text) !important;
+}
+:root[data-theme='light'] .rescuer-app-shell,
+:root[data-theme='light'] .rescuer-sidebar,
+:root[data-theme='light'] .rescuer-main,
+:root[data-theme='light'] .rescuer-viewport {
+  background-color: var(--ops-bg) !important;
+}
+:root[data-theme='light'] .rescuer-sidebar-footer {
+  background-color: var(--ops-surface) !important;
+}
+:root[data-theme='light'] .rescuer-sidebar-nav > button[style*='rgba(30, 41, 59, 0.7)'] {
+  background-color: rgba(245, 158, 11, .12) !important;
+}
+:root[data-theme='light'] .rescuer-main-header button[aria-label='Open profile menu'] {
+  border-color: var(--ops-border) !important;
+  background-color: var(--ops-surface-2) !important;
+  color: var(--ops-text) !important;
+}
 .rescuer-incoming-call {
   position: fixed;
   top: 76px;
@@ -226,16 +295,6 @@
     gap: 12px !important;
   }
 
-  .global-theme-controls {
-    right: 12px;
-    bottom: calc(64px + env(safe-area-inset-bottom) + 12px);
-    z-index: 25;
-    pointer-events: none;
-  }
-
-  .global-theme-controls > button {
-    pointer-events: auto;
-  }
 }
 
 @media (max-width: 520px) {

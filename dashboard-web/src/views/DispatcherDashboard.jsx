@@ -1,7 +1,9 @@
-import React, { useEffect, useLayoutEffect, useState, useRef } from 'react'
+import React, { useCallback, useEffect, useLayoutEffect, useState, useRef } from 'react'
 import { useWebSocket } from '../hooks/useWebSocket'
+import { useActiveRoadHazards } from '../hooks/useActiveRoadHazards'
 import { useVoiceConference } from '../hooks/useVoiceConference'
 import MapContainer from '../components/MapContainer'
+import RoadHazardReportForm from '../components/RoadHazardReportForm'
 import Logo from '../components/Logo'
 import { useTheme } from '../ThemeContext'
 import HazardTicker from '../components/HazardTicker'
@@ -184,7 +186,7 @@ const SosFeedItem = ({ alert, now, onAssign, onView, isClosed = false }) => {
   )
 }
 
-export const Dashboard = () => {
+export const Dashboard = ({ onLogout }) => {
   const auth = getStoredAuth()
   const role = normalizeRole(auth?.user?.role) || 'citizen'
   const [latestGps, setLatestGps] = useState(null)
@@ -202,7 +204,10 @@ export const Dashboard = () => {
   const [evacuationLoading, setEvacuationLoading] = useState(false)
   const [evacuationRoute, setEvacuationRoute] = useState(null)
   const [activeEvacuationRoute, setActiveEvacuationRoute] = useState(null)
-  const [roadHazards, setRoadHazards] = useState([])
+  const [isRoadHazardFormOpen, setIsRoadHazardFormOpen] = useState(false)
+  const [pendingRoadHazards, setPendingRoadHazards] = useState({ type: 'FeatureCollection', features: [] })
+  const [roadHazardReviewing, setRoadHazardReviewing] = useState(null)
+  const [roadHazardReviewError, setRoadHazardReviewError] = useState('')
   const [hazardLayers, setHazardLayers] = useState([])
   const [hazardLayerPublishing, setHazardLayerPublishing] = useState(null)
   const [routeRerouted, setRouteRerouted] = useState(false)
@@ -796,6 +801,49 @@ export const Dashboard = () => {
   const verifiedAlert = verifiedAlertState
   const setVerifiedAlert = (alert) => setVerifiedAlertState((current) => current?.id === alert?.id ? null : alert)
   const { socket, isConnected, lastMessage } = useWebSocket(WS_URL)
+  const { collection: roadHazardZones, hazards: roadHazards, applyFeature: applyRoadHazard } = useActiveRoadHazards(lastMessage, isConnected)
+
+  const refreshPendingRoadHazards = useCallback(async () => {
+    if (!['dispatcher', 'admin'].includes(role)) return
+    const response = await fetch(`${API_BASE_URL}/api/v1/hazards/pending`, { headers: getAuthHeaders() })
+    if (!response.ok) throw new Error(`Pending road hazards could not be loaded (${response.status}).`)
+    setPendingRoadHazards(await response.json())
+  }, [role])
+
+  useEffect(() => {
+    void refreshPendingRoadHazards().catch(() => {})
+    const timer = window.setInterval(() => void refreshPendingRoadHazards().catch(() => {}), 30_000)
+    return () => window.clearInterval(timer)
+  }, [refreshPendingRoadHazards])
+
+  useEffect(() => {
+    if (lastMessage?.type === 'road_hazard_submitted') {
+      void refreshPendingRoadHazards().catch(() => {})
+    }
+  }, [lastMessage, refreshPendingRoadHazards])
+
+  const reviewRoadHazard = async (id, approved) => {
+    setRoadHazardReviewing(id)
+    setRoadHazardReviewError('')
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/v1/hazards/road-reports/${id}/review`, {
+        method: 'PATCH',
+        headers: { ...getAuthHeaders(), 'Content-Type': 'application/json' },
+        body: JSON.stringify({ approved }),
+      })
+      if (!response.ok) throw new Error(`Review failed (${response.status}).`)
+      const feature = await response.json()
+      setPendingRoadHazards((current) => ({
+        ...current,
+        features: current.features.filter((item) => String(item.id) !== String(id)),
+      }))
+      applyRoadHazard(feature)
+    } catch (error) {
+      setRoadHazardReviewError(error.message || 'Unable to review road hazard.')
+    } finally {
+      setRoadHazardReviewing(null)
+    }
+  }
 
   useEffect(() => {
     const clock = window.setInterval(() => setCurrentTime(new Date()), 1000)
@@ -1053,15 +1101,6 @@ export const Dashboard = () => {
       }
     }
 
-    const loadRoadHazards = async () => {
-      try {
-        const response = await fetch(`${API_BASE_URL}/api/v1/road-hazards/?limit=100`, { headers: getAuthHeaders() })
-        if (response.ok) setRoadHazards(await response.json())
-      } catch (error) {
-        console.error('Failed to load road hazards', error)
-      }
-    }
-
     const loadHazardLayers = async () => {
       try {
         const response = await fetch(`${API_BASE_URL}/api/v1/hazards/map-layers?status=all`, { headers: getAuthHeaders() })
@@ -1075,15 +1114,12 @@ export const Dashboard = () => {
     loadRescuers()
     loadRescueUnits()
     loadCenters()
-    loadRoadHazards()
     loadHazardLayers()
-    const roadHazardRefresh = window.setInterval(loadRoadHazards, 60_000)
     const rescuerStatusRefresh = window.setInterval(() => {
       loadRescuers()
       loadRescueUnits()
     }, 30_000)
     return () => {
-      window.clearInterval(roadHazardRefresh)
       window.clearInterval(rescuerStatusRefresh)
     }
   }, [API_BASE_URL])
@@ -1403,6 +1439,15 @@ export const Dashboard = () => {
     details: { type: String(hazard.hazard_type).replace(/_/g, ' '), severity: hazard.severity, status: hazard.is_resolved ? 'Resolved' : hazard.is_active === false ? 'Inactive' : 'Active', road: hazard.road_name || 'Unspecified road', time: formatTime(hazard.reported_at || hazard.created_at), location: `${hazard.latitude}, ${hazard.longitude}`, description: hazard.description }
   }))
 
+  const pendingHazardMarkers = pendingRoadHazards.features.map(({ id, properties }) => ({
+    id: `pending-road-${id}`,
+    position: [properties.longitude, properties.latitude],
+    label: `${properties.road_name || 'Road hazard'} · Pending review`,
+    color: '#f59e0b',
+    icon: '!',
+    details: { type: properties.hazard_type, severity: properties.severity, status: 'Pending dispatcher review', description: properties.description },
+  }))
+
   const activeRouteMarkers = activeEvacuationRoute ? [
     {
       position: [activeEvacuationRoute.origin.longitude, activeEvacuationRoute.origin.latitude],
@@ -1420,7 +1465,7 @@ export const Dashboard = () => {
     }
   ] : []
 
-  const mapMarkers = [...centerMarkers, ...alertMarkers, ...rescuerMarkers, ...liveRescuerMarkers, ...vehicleMarkers, ...hazardMarkers]
+  const mapMarkers = [...centerMarkers, ...alertMarkers, ...rescuerMarkers, ...liveRescuerMarkers, ...vehicleMarkers, ...hazardMarkers, ...pendingHazardMarkers]
   const primaryCenter = centers.find((center) => center.is_active !== false) || centers[0]
   const displayName = auth?.user?.full_name || auth?.user?.username || 'Cmdr. Reyes'
   const visibleAlerts = role === 'rescuer' ? alerts.filter((alert) => alert.assigned_rescuer_id === rescuerId) : alerts
@@ -1513,10 +1558,7 @@ export const Dashboard = () => {
     return (first.status || '').localeCompare(second.status || '')
   })
 
-  const handleLogout = () => {
-    localStorage.removeItem('auth')
-    window.location.href = '/'
-  }
+  const handleLogout = () => onLogout?.()
 
   const accountMenu = (
     <div className="account-menu">
@@ -1898,6 +1940,35 @@ export const Dashboard = () => {
         {renderedPanels.tacticalMap && <main className={`center-column map-only-column ${getPanelAnimationClass('tacticalMap')}`}>
           <section className="map-panel">
             <PanelTitle title="CDRRMO TACTICAL MAP AREA" badge="TRACKING MAP" />
+            <button className="map-hazard-publish-button" type="button" onClick={() => setIsRoadHazardFormOpen((open) => !open)}>
+              Report Road Hazard
+            </button>
+            {pendingRoadHazards.features.length > 0 && (
+              <section className="road-hazard-review-queue" aria-label="Pending road hazard reports">
+                <h3>Road hazards awaiting review ({pendingRoadHazards.features.length})</h3>
+                {pendingRoadHazards.features.map(({ id, properties }) => (
+                  <article key={id} className="road-hazard-review-item">
+                    <strong>{String(properties.hazard_type).replace(/_/g, ' ')} · {properties.severity}</strong>
+                    <span>{properties.road_name || 'Unnamed road'} · {properties.radius_meters} m radius</span>
+                    <p>{properties.description}</p>
+                    <small>{Number(properties.latitude).toFixed(5)}, {Number(properties.longitude).toFixed(5)} · Reported by {properties.reporter_name || 'Anonymous'}</small>
+                    <div>
+                      <button type="button" disabled={roadHazardReviewing !== null} onClick={() => reviewRoadHazard(id, true)}>Approve & publish</button>
+                      <button type="button" disabled={roadHazardReviewing !== null} onClick={() => reviewRoadHazard(id, false)}>Reject</button>
+                    </div>
+                  </article>
+                ))}
+              </section>
+            )}
+            {roadHazardReviewError && <p className="road-hazard-review-error" role="alert">{roadHazardReviewError}</p>}
+            {isRoadHazardFormOpen && (
+              <RoadHazardReportForm
+                initialLocation={latestGps || primaryCenter}
+                reporterName={auth?.user?.full_name || ''}
+                onReported={() => void refreshPendingRoadHazards()}
+                onClose={() => setIsRoadHazardFormOpen(false)}
+              />
+            )}
             <div className="map-category-filter" role="group" aria-label="Filter alert markers by category">
               {alertCategoryOptions.map((category) => (
                 <button
@@ -1945,7 +2016,7 @@ export const Dashboard = () => {
                 <span><i className="dot green" /> AVAILABLE / CENTER</span>
                 <span><i className="dot blue" /> RESOLVING / IN TRANSIT</span>
               </DraggableMapOverlay>
-              <MapContainer hazardLayers={hazardLayers} markers={[...mapMarkers, ...activeRouteMarkers]} center={focusedAlertLocation} focusMarkerId={focusedAlertId} selectedAlertCategory={selectedMapAlertCategory} centerRequestKey={focusRequestKey} route={activeEvacuationRoute?.geometry} trackDeviceLocation={false} />
+              <MapContainer hazardLayers={hazardLayers} roadHazardZones={roadHazardZones} pendingRoadHazardZones={pendingRoadHazards} markers={[...mapMarkers, ...activeRouteMarkers]} center={focusedAlertLocation} focusMarkerId={focusedAlertId} selectedAlertCategory={selectedMapAlertCategory} centerRequestKey={focusRequestKey} route={activeEvacuationRoute?.geometry} trackDeviceLocation={false} />
               {activeEvacuationRoute && (
                 <DraggableMapOverlay className="evac-label evac-label-list" label="Active citizen evacuation route" defaultPosition={{ left: 280, top: 12 }}>
                   <b>ACTIVE EVACUATION ROUTE</b>

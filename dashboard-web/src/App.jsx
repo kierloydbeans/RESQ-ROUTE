@@ -1,4 +1,4 @@
-import React from 'react'
+import React, { useRef, useState } from 'react'
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom'
 import { Admin, Resource, Layout } from 'react-admin'
 import { dataProvider } from './dataProvider'
@@ -14,7 +14,7 @@ import RescuerDashboard from './views/RescuerDashboard'
 import ResetPassword from './views/ResetPassword'
 import { theme } from './theme'
 import { ThemeProvider, useTheme } from './ThemeContext'
-import { Sparkles } from 'lucide-react'
+import { SlidersHorizontal, Sparkles } from 'lucide-react'
 import RescueErrorScreen from './components/RescueErrorScreen'
 
 const GlobalThemeToggle = () => {
@@ -34,6 +34,61 @@ const GlobalGradientToggle = () => {
     <button className={`global-theme-toggle ${isShaderGradient ? 'is-active' : ''}`} onClick={toggleShaderGradient} aria-label="Toggle moving shader gradient" title={isShaderGradient ? 'Use fixed gradient to save resources' : 'Enable moving shader gradient'}>
       <Sparkles size={17} strokeWidth={2} />
     </button>
+  )
+}
+
+const GlobalThemeControls = () => {
+  const [isOpen, setIsOpen] = useState(false)
+  const swipeStartXRef = useRef(null)
+  const handledSwipeRef = useRef(false)
+
+  const handlePointerDown = (event) => {
+    if (window.innerWidth > 768) return
+    swipeStartXRef.current = event.clientX
+    handledSwipeRef.current = false
+    event.currentTarget.setPointerCapture(event.pointerId)
+  }
+
+  const handlePointerUp = (event) => {
+    if (swipeStartXRef.current === null) return
+    const distance = event.clientX - swipeStartXRef.current
+    swipeStartXRef.current = null
+    if (Math.abs(distance) < 24) return
+    handledSwipeRef.current = true
+    setIsOpen(distance < 0)
+  }
+
+  const handleRevealClick = (event) => {
+    if (handledSwipeRef.current) {
+      handledSwipeRef.current = false
+      return
+    }
+    if (window.innerWidth <= 768 && event.detail > 0) return
+    setIsOpen((open) => !open)
+  }
+
+  return (
+    <div
+      className={`global-theme-controls ${isOpen ? 'is-open' : ''}`}
+      onPointerDown={handlePointerDown}
+      onPointerUp={handlePointerUp}
+      onPointerCancel={() => { swipeStartXRef.current = null }}
+    >
+      <div className="global-theme-options" aria-hidden={!isOpen}>
+        <GlobalGradientToggle />
+        <GlobalThemeToggle />
+      </div>
+      <button
+        type="button"
+        className="global-theme-toggle global-theme-reveal"
+        onClick={handleRevealClick}
+        aria-label={isOpen ? 'Hide appearance controls' : 'Show appearance controls'}
+        aria-expanded={isOpen}
+        title={isOpen ? 'Swipe right to hide appearance controls' : 'Swipe left to show appearance controls'}
+      >
+        <SlidersHorizontal size={17} strokeWidth={2} />
+      </button>
+    </div>
   )
 }
 
@@ -89,10 +144,7 @@ function App() {
   return (
     <ThemeProvider>
       <Router>
-        <div className="global-theme-controls">
-          <GlobalGradientToggle />
-          <GlobalThemeToggle />
-        </div>
+        <GlobalThemeControls />
         <Routes>
           {import.meta.env.DEV && <Route path="/error-preview" element={<RescueErrorScreen />} />}
           <Route path="/login/:role?" element={<Login />} />

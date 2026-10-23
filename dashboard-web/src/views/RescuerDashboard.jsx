@@ -6,6 +6,8 @@ import { useWebSocket } from '../hooks/useWebSocket';
 import useVoiceCommunication from '../hooks/useVoiceCommunication.jsx';
 import { API_URL, WS_URL } from '../dataProvider';
 import '../styles/rescuer-console.css';
+import '../styles/logout-transition.css';
+import LogoutOverlay from '../components/LogoutOverlay';
 import {
   AlertTriangle,Map,ClipboardList,Bluetooth,UploadCloud,Menu,ChevronDown,User,MapPin,Users,Waves,Navigation,ExternalLink,Check,RotateCcw,MessageSquare,LogOut,} from 'lucide-react';
 
@@ -19,6 +21,7 @@ const RescuerDashboard = () => {
   const [activeView, setActiveView] = useState('alert');
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [isProfileMenuOpen, setIsProfileMenuOpen] = useState(false);
+  const [isLoggingOut, setIsLoggingOut] = useState(false);
   const [currentTime, setCurrentTime] = useState(() => new Date());
   const [currentUser, setCurrentUser] = useState(auth?.user || null);
   const [rescuerLocation, setRescuerLocation] = useState(null);
@@ -327,6 +330,9 @@ const RescuerDashboard = () => {
   }) + ' PHT';
 
   const handleLogout = async () => {
+    if (isLoggingOut) return;
+    setIsLoggingOut(true);
+    const minimumAnimation = new Promise((resolve) => window.setTimeout(resolve, 720));
     if (authToken) {
       try {
         const response = await fetch(`${API_URL}/auth/logout`, {
@@ -339,6 +345,7 @@ const RescuerDashboard = () => {
         console.error('Unable to mark rescuer off duty during logout.', error);
       }
     }
+    await minimumAnimation;
     localStorage.removeItem('auth');
     navigate('/', { replace: true });
   };
@@ -520,7 +527,9 @@ const RescuerDashboard = () => {
   ];
 
   return (
-    <div className="rescuer-app-shell" style={{ backgroundColor: '#070b14', color: '#cbd5e1', height: '100vh', width: '100%', display: 'flex', overflow: 'hidden', fontFamily: 'var(--ops-font)', fontSize: '14px' }}>
+    <div className={`rescuer-app-shell ${isLoggingOut ? 'is-logging-out' : ''}`} style={{ backgroundColor: '#070b14', color: '#cbd5e1', height: '100vh', width: '100%', display: 'flex', overflow: 'hidden', fontFamily: 'var(--ops-font)', fontSize: '14px' }}>
+
+      <LogoutOverlay active={isLoggingOut} />
 
       {/* SIDEBAR NAVIGATION */}
       <aside

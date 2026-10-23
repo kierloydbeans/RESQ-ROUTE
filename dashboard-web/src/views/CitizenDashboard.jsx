@@ -1,9 +1,11 @@
 import React, { useEffect, useRef, useState } from 'react'
 import { useWebSocket } from '../hooks/useWebSocket'
+import { useActiveRoadHazards } from '../hooks/useActiveRoadHazards'
 import { WS_URL } from '../dataProvider'
 import MapContainer from '../components/MapContainer'
+import RoadHazardReportForm from '../components/RoadHazardReportForm'
 import Logo from '../components/Logo'
-import { Accessibility, CheckCircle2, CircleHelp, Clock3, Menu, QrCode, UploadCloud } from 'lucide-react'
+import { Accessibility, CheckCircle2, CircleHelp, Clock3, Construction, Menu, QrCode, UploadCloud } from 'lucide-react'
 import QRCode from 'qrcode'
 import 'maplibre-gl/dist/maplibre-gl.css'
 import "../styles/citizen-console.css";
@@ -257,7 +259,6 @@ export const CitizenDashboard = ({ auth, onLogout }) => {
   const [centerDataStatus, setCenterDataStatus] = useState('loading')
   const [centersLastFetchedAt, setCentersLastFetchedAt] = useState(null)
   const [centerLoadError, setCenterLoadError] = useState('')
-  const [roadHazards, setRoadHazards] = useState([])
   const [publishedHazardLayers, setPublishedHazardLayers] = useState([])
   const [selectedCenter, setSelectedCenter] = useState(null)
   const [detailSheetState, setDetailSheetState] = useState('partial')
@@ -274,6 +275,9 @@ export const CitizenDashboard = ({ auth, onLogout }) => {
   const [routeError, setRouteError] = useState('')
   const [searchQuery, setSearchQuery] = useState('')
   const [isShelterPanelCollapsed, setIsShelterPanelCollapsed] = useState(false)
+  const [shelterSheetHeight, setShelterSheetHeight] = useState(null)
+  const [isShelterSheetDragging, setIsShelterSheetDragging] = useState(false)
+  const shelterSheetDragRef = useRef(null)
   const [activeTab, setActiveTab] = useState('shelters')
   const [isProfileMenuOpen, setIsProfileMenuOpen] = useState(false)
   const [isSettingsOpen, setIsSettingsOpen] = useState(false)
@@ -314,7 +318,8 @@ export const CitizenDashboard = ({ auth, onLogout }) => {
 
   const [peopleAffected, setPeopleAffected] = useState(3)
 
-  const { isConnected } = useWebSocket(WS_URL)
+  const { isConnected, lastMessage } = useWebSocket(WS_URL)
+  const { collection: roadHazardZones, hazards: roadHazards, applyFeature: applyRoadHazard } = useActiveRoadHazards(lastMessage, isConnected)
   const displayName = profileUser?.full_name || profileUser?.username || 'Resident'
   const [currentTime, setCurrentTime] = useState(() => new Date())
 
@@ -556,13 +561,6 @@ export const CitizenDashboard = ({ auth, onLogout }) => {
     }
     loadCenters()
 
-    const loadRoadHazards = async () => {
-      try {
-        const response = await fetch(`${API_BASE_URL}/api/v1/road-hazards/?limit=100`)
-        if (response.ok) setRoadHazards(await response.json())
-      } catch {}
-    }
-
     const loadPublishedHazardLayers = async () => {
       try {
         const response = await fetch(`${API_BASE_URL}/api/v1/hazards/map-layers?status=published`)
@@ -570,13 +568,10 @@ export const CitizenDashboard = ({ auth, onLogout }) => {
       } catch {}
     }
 
-    loadRoadHazards()
     loadPublishedHazardLayers()
-    const roadHazardRefresh = window.setInterval(loadRoadHazards, 60_000)
     const hazardLayerRefresh = window.setInterval(loadPublishedHazardLayers, 60_000)
     return () => {
       isCurrent = false
-      window.clearInterval(roadHazardRefresh)
       window.clearInterval(hazardLayerRefresh)
     }
   }, [])
@@ -611,7 +606,7 @@ export const CitizenDashboard = ({ auth, onLogout }) => {
       })
       if (!res.ok) throw new Error(`Directions are unavailable right now (${res.status}).`)
       const data = await res.json()
-      if (!data.geometry?.coordinates?.length) {
+      if (data.fallback || !Array.isArray(data.geometry?.coordinates) || data.geometry.coordinates.length < 2) {
         throw new Error('No walking route is available for this center right now.')
       }
       setEvacuationRoute(data.geometry)
@@ -621,7 +616,8 @@ export const CitizenDashboard = ({ auth, onLogout }) => {
           : null,
         duration: data.duration_seconds !== null && data.duration_seconds !== undefined && Number.isFinite(Number(data.duration_seconds))
           ? `${Math.round(Number(data.duration_seconds) / 60)} min walk`
-          : null
+          : null,
+        notice: data.original_route_hazard ? 'Original route goes through a road hazard. Taking another route.' : null,
       })
     } catch (error) {
       setEvacuationRoute(null)
@@ -645,7 +641,7 @@ export const CitizenDashboard = ({ auth, onLogout }) => {
   }
 
   const handleCloseReport = ({ clearShelterSelection = false } = {}) => {
-    if (activeTab !== 'alert' || isReportClosing) return
+    if (!['alert', 'road-hazard'].includes(activeTab) || isReportClosing) return
     setIsReportClosing(true)
     reportCloseTimeoutRef.current = window.setTimeout(() => {
       if (clearShelterSelection) {
@@ -681,6 +677,27 @@ export const CitizenDashboard = ({ auth, onLogout }) => {
     event.currentTarget.setPointerCapture(event.pointerId)
     sheetDragStartYRef.current = event.clientY
     ignoreSheetClickRef.current = false
+  }
+
+  const handleShelterSheetPointerDown = (event) => {
+    if (event.pointerType === 'mouse' && event.button !== 0) return
+    const sheet = event.currentTarget.closest('.shelter-sidebar')
+    if (!sheet || window.innerWidth > 768) return
+    event.currentTarget.setPointerCapture(event.pointerId)
+    shelterSheetDragRef.current = { startY: event.clientY, startHeight: sheet.getBoundingClientRect().height }
+    setIsShelterSheetDragging(true)
+  }
+
+  const handleShelterSheetPointerMove = (event) => {
+    const drag = shelterSheetDragRef.current
+    if (!drag) return
+    const maxHeight = window.innerHeight * 0.88
+    setShelterSheetHeight(Math.min(maxHeight, Math.max(120, drag.startHeight + drag.startY - event.clientY)))
+  }
+
+  const handleShelterSheetPointerEnd = () => {
+    shelterSheetDragRef.current = null
+    setIsShelterSheetDragging(false)
   }
 
   const handleSheetPointerUp = (event) => {
@@ -1000,11 +1017,12 @@ export const CitizenDashboard = ({ auth, onLogout }) => {
     })
 
   return (
-    <div className="citizen-map-layout">
+    <div className="citizen-map-layout" style={shelterSheetHeight === null ? undefined : { '--shelter-sheet-height': `${shelterSheetHeight}px` }}>
       {/* 1. Background Map */}
       <div className={`citizen-map-canvas ${activeTab === 'shelters' && isShelterPanelCollapsed ? 'panel-collapsed' : ''}`}>
         <MapContainer
           hazardLayers={publishedHazardLayers}
+          roadHazardZones={roadHazardZones}
           markers={[...centerMarkers, ...hazardMarkers]}
           route={evacuationRoute}
           center={selectedCenter ? [selectedCenter.longitude, selectedCenter.latitude] : null}
@@ -1033,7 +1051,7 @@ export const CitizenDashboard = ({ auth, onLogout }) => {
             <button
               className={`citizen-chip ${activeTab === 'shelters' ? 'active' : ''}`}
               onClick={() => {
-                if (activeTab === 'alert') {
+                if (activeTab === 'alert' || activeTab === 'road-hazard') {
                   handleCloseReport({ clearShelterSelection: true })
                 } else {
                   setActiveTab('shelters')
@@ -1048,6 +1066,12 @@ export const CitizenDashboard = ({ auth, onLogout }) => {
               onClick={handleOpenReport}
             >
               <Icons.Alert /> Report Emergency
+            </button>
+            <button
+              className={`citizen-chip road-hazard-chip ${activeTab === 'road-hazard' ? 'active' : ''}`}
+              onClick={() => setActiveTab('road-hazard')}
+            >
+              <Construction size={18} aria-hidden="true" /> Report Road Hazard
             </button>
             <div className="citizen-network-badge">
               <span className={`dot ${isConnected ? 'online' : 'offline'}`} />
@@ -1356,12 +1380,31 @@ export const CitizenDashboard = ({ auth, onLogout }) => {
       )}
       <aside
         id="citizen-shelter-sidebar"
-        className={`citizen-sidebar ${activeTab === 'shelters' ? 'shelter-sidebar' : 'report-sidebar'} ${activeTab === 'shelters' && isShelterPanelCollapsed ? 'collapsed' : ''} ${selectedCenter && activeTab === 'shelters' ? `has-center-detail detail-${detailSheetState}` : ''}`}
+        className={`citizen-sidebar ${activeTab === 'shelters' ? 'shelter-sidebar' : 'report-sidebar'} ${activeTab === 'shelters' && isShelterPanelCollapsed ? 'collapsed' : ''} ${activeTab === 'shelters' && !selectedCenter ? 'shelter-list-sheet' : ''} ${isShelterSheetDragging ? 'is-dragging' : ''} ${selectedCenter && activeTab === 'shelters' ? `has-center-detail detail-${detailSheetState}` : ''}`}
         aria-hidden={activeTab === 'shelters' && isShelterPanelCollapsed}
         inert={activeTab === 'shelters' && isShelterPanelCollapsed}
       >
-        <div className="mobile-pull-handle" />
-        {activeTab === 'alert' ? (
+        {activeTab === 'shelters' && !selectedCenter && (
+          <button
+            type="button"
+            className="mobile-pull-handle"
+            aria-label="Drag to resize shelter list"
+            onPointerDown={handleShelterSheetPointerDown}
+            onPointerMove={handleShelterSheetPointerMove}
+            onPointerUp={handleShelterSheetPointerEnd}
+            onPointerCancel={handleShelterSheetPointerEnd}
+          />
+        )}
+        {activeTab === 'road-hazard' ? (
+          <div className="citizen-scroll-content report-panel-padding">
+            <RoadHazardReportForm
+              initialLocation={pinnedLocation || latestGps}
+              reporterName={displayName}
+              onReported={applyRoadHazard}
+              onClose={() => setActiveTab('shelters')}
+            />
+          </div>
+        ) : activeTab === 'alert' ? (
           <div
             className={`citizen-scroll-content report-panel-padding${isReportClosing ? ' closing' : ''}`}
             aria-hidden={isReportClosing}
@@ -1626,11 +1669,7 @@ export const CitizenDashboard = ({ auth, onLogout }) => {
                 </div>
 
                 {routeError && <p className="shelter-route-error" role="alert">{routeError}</p>}
-                {routeInfo && !routeError && (
-                  <p className="shelter-route-summary">{routeInfo.distance} · {routeInfo.duration}</p>
-                )}
-
-                {routeError && <p className="shelter-route-error" role="alert">{routeError}</p>}
+                {routeInfo?.notice && <p className="shelter-route-notice" role="status">{routeInfo.notice}</p>}
 
                 <section className="shelter-detail-section">
                   <h3>Address</h3>

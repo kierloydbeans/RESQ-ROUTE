@@ -30,6 +30,7 @@ async def create_walking_route(
         select(RoadHazardReport).where(
             RoadHazardReport.is_active == True,  # noqa: E712
             RoadHazardReport.is_resolved == False,  # noqa: E712
+            RoadHazardReport.review_status == "approved",
         )
     )
     hazards = result.scalars().all()
