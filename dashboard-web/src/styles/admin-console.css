@@ -1356,6 +1356,30 @@
   margin: 0;
 }
 
+.resilience-root .response-rate-bar {
+  height: 5px;
+  width: 100%;
+  margin: 5px 0 1px;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--line) 55%, transparent);
+}
+
+.resilience-root .response-rate-bar span {
+  display: block;
+  width: var(--rate-width, 0%);
+  height: 100%;
+  border-radius: inherit;
+  background: var(--ok);
+  transition: width 180ms ease;
+}
+
+.resilience-root .response-rate-bar.is-unavailable span {
+  background: var(--mute);
+  opacity: .35;
+}
+
 .resilience-root .ub-unknown {
   color: var(--mute);
   background: rgba(148, 163, 184, 0.1);
