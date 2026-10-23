@@ -4,6 +4,8 @@ import CitizenDashboard from './CitizenDashboard'
 import DispatcherDashboard from './DispatcherDashboard'
 import CoordinatorDashboard from './CoordinatorDashboard'
 import CenterCoordinatorDashboard from './CenterCoordinatorDashboard'
+import RescuerDashboard from './RescuerDashboard'
+import AdminDashboard from './AdminDashboard'
 
 const getStoredAuth = () => {
   try {
@@ -27,6 +29,10 @@ export const Dashboard = () => {
   if (['citizen', 'public'].includes(role)) {
     return <CitizenDashboard auth={auth} onLogout={handleLogout} />
   }
+
+  if (role === 'admin') {
+  return <AdminDashboard auth={auth} onLogout={handleLogout} />
+}
 
   if (role === 'coordinator') {
     return <CoordinatorDashboard auth={auth} onLogout={handleLogout} />

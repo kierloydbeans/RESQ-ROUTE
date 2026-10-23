@@ -932,3 +932,10 @@
     flex: none;
   }
 }
+
+.mapboxgl-marker,
+.mapboxgl-popup,
+.maplibregl-marker,
+.maplibregl-popup {
+  transition: none !important;
+}
