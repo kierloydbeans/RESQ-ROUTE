@@ -199,6 +199,11 @@
 .shelter-amenities-row { display: flex; flex-wrap: wrap; gap: 6px; }
 .amenity-pill { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; font-weight: 500; padding: 4px 10px; border-radius: 8px; border: 1px solid rgba(156, 163, 175, 0.35); background: transparent; color: inherit; }
 .shelter-actions-trio { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.shelter-route-error, .shelter-route-summary { margin: 0; padding: 8px 10px; border-radius: 8px; font-size: 12px; line-height: 1.4; }
+.shelter-route-error { color: #fca5a5; background: rgba(239, 68, 68, 0.12); }
+.shelter-route-summary { color: #93c5fd; background: rgba(37, 99, 235, 0.12); }
+[data-theme='light'] .shelter-route-error { color: #b91c1c; }
+[data-theme='light'] .shelter-route-summary { color: #1d4ed8; }
 .shelter-btn-pill { display: flex; align-items: center; justify-content: center; gap: 6px; height: 38px; border-radius: 10px; border: 1px solid rgba(156, 163, 175, 0.35); background: var(--btn-bg, #fff); color: inherit; font-size: 13px; font-weight: 600; cursor: pointer; transition: background 0.15s ease; }
 .shelter-btn-pill:hover { background: rgba(156, 163, 175, 0.12); }
 .shelter-btn-pill.saved { color: #2563eb; border-color: #2563eb; }

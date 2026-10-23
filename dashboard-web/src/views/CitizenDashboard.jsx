@@ -231,6 +231,7 @@ export const CitizenDashboard = ({ auth, onLogout }) => {
   const [evacuationRoute, setEvacuationRoute] = useState(null)
   const [routeLoading, setRouteLoading] = useState(false)
   const [routeInfo, setRouteInfo] = useState(null)
+  const [routeError, setRouteError] = useState('')
   const [searchQuery, setSearchQuery] = useState('')
   const [isShelterPanelCollapsed, setIsShelterPanelCollapsed] = useState(false)
   const [activeTab, setActiveTab] = useState('shelters')
@@ -510,6 +511,7 @@ export const CitizenDashboard = ({ auth, onLogout }) => {
       return
     }
     setRouteLoading(true)
+    setRouteError('')
     try {
       const res = await fetch(`${API_BASE_URL}/api/v1/routing/walk`, {
         method: 'POST',
@@ -522,19 +524,18 @@ export const CitizenDashboard = ({ auth, onLogout }) => {
         })
       })
       const data = await res.json()
-      if (data.geometry?.coordinates) {
-        setEvacuationRoute(data.geometry)
-        setRouteInfo({
-          distance: (data.distance_meters / 1000).toFixed(1) + ' km',
-          duration: Math.round(data.duration_seconds / 60) + ' min walk'
-        })
+      if (!res.ok || data.fallback || !Array.isArray(data.geometry?.coordinates) || data.geometry.coordinates.length < 2) {
+        throw new Error('A road route avoiding active hazards is unavailable right now.')
       }
-    } catch {
-      setEvacuationRoute({
-        type: 'LineString',
-        coordinates: [[originLocation.longitude, originLocation.latitude], [Number(center.longitude), Number(center.latitude)]]
+      setEvacuationRoute(data.geometry)
+      setRouteInfo({
+        distance: (data.distance_meters / 1000).toFixed(1) + ' km',
+        duration: Math.round(data.duration_seconds / 60) + ' min walk'
       })
-      setRouteInfo({ distance: 'Direct path', duration: 'Estimate' })
+    } catch (error) {
+      setEvacuationRoute(null)
+      setRouteInfo(null)
+      setRouteError(error.message || 'A road route avoiding active hazards is unavailable right now.')
     } finally {
       setRouteLoading(false)
     }
@@ -548,6 +549,7 @@ export const CitizenDashboard = ({ auth, onLogout }) => {
       setIsDetailClosing(false)
       setEvacuationRoute(null)
       setRouteInfo(null)
+      setRouteError('')
     }, 260)
   }
 
@@ -1424,6 +1426,11 @@ export const CitizenDashboard = ({ auth, onLogout }) => {
                     <span>{copyFeedback || 'Share'}</span>
                   </button>
                 </div>
+
+                {routeError && <p className="shelter-route-error" role="alert">{routeError}</p>}
+                {routeInfo && !routeError && (
+                  <p className="shelter-route-summary">{routeInfo.distance} · {routeInfo.duration}</p>
+                )}
 
                 {isWithinQrCheckInRange && (
                   <button
