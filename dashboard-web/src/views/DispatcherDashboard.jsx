@@ -203,6 +203,8 @@ export const Dashboard = () => {
   const [evacuationRoute, setEvacuationRoute] = useState(null)
   const [activeEvacuationRoute, setActiveEvacuationRoute] = useState(null)
   const [roadHazards, setRoadHazards] = useState([])
+  const [hazardLayers, setHazardLayers] = useState([])
+  const [hazardLayerPublishing, setHazardLayerPublishing] = useState(null)
   const [routeRerouted, setRouteRerouted] = useState(false)
   const [rescuers, setRescuers] = useState([])
   const [selectedRescuerId, setSelectedRescuerId] = useState('')
@@ -1060,11 +1062,21 @@ export const Dashboard = () => {
       }
     }
 
+    const loadHazardLayers = async () => {
+      try {
+        const response = await fetch(`${API_BASE_URL}/api/v1/hazards/map-layers?status=all`, { headers: getAuthHeaders() })
+        if (response.ok) setHazardLayers(await response.json())
+      } catch (error) {
+        console.error('Failed to load hazard map layers', error)
+      }
+    }
+
     loadAlerts()
     loadRescuers()
     loadRescueUnits()
     loadCenters()
     loadRoadHazards()
+    loadHazardLayers()
     const roadHazardRefresh = window.setInterval(loadRoadHazards, 60_000)
     const rescuerStatusRefresh = window.setInterval(() => {
       loadRescuers()
@@ -1075,6 +1087,29 @@ export const Dashboard = () => {
       window.clearInterval(rescuerStatusRefresh)
     }
   }, [API_BASE_URL])
+
+  const mediumHazardLayers = hazardLayers.filter((layer) => String(layer.hazard_level).toLowerCase() === 'medium')
+  const highHazardLayers = hazardLayers.filter((layer) => String(layer.hazard_level).toLowerCase() === 'high')
+  const allMediumHazardsPublished = mediumHazardLayers.length > 0 && mediumHazardLayers.every((layer) => layer.is_published)
+  const allHighHazardsPublished = highHazardLayers.length > 0 && highHazardLayers.every((layer) => layer.is_published)
+
+  const handlePublishHazardLevel = async (hazardLevel, isPublished) => {
+    const layersToUpdate = hazardLevel === 'medium' ? mediumHazardLayers : highHazardLayers
+    setHazardLayerPublishing(hazardLevel)
+    try {
+      const responses = await Promise.all(layersToUpdate.map((layer) => fetch(`${API_BASE_URL}/api/v1/hazards/${layer.id}/publish`, {
+        method: 'PATCH',
+        headers: getAuthHeaders(),
+        body: JSON.stringify({ is_published: isPublished })
+      })))
+      if (responses.some((response) => !response.ok)) throw new Error('Unable to update hazard publication status.')
+      setHazardLayers((layers) => layers.map((layer) => layersToUpdate.some((updatedLayer) => updatedLayer.id === layer.id) ? { ...layer, is_published: isPublished } : layer))
+    } catch (error) {
+      setAlertStatus(error.message)
+    } finally {
+      setHazardLayerPublishing(null)
+    }
+  }
 
   const handleSendEmergencyAlert = async () => {
     if (!auth?.user || !latestGps) {
@@ -1882,6 +1917,24 @@ export const Dashboard = () => {
                 </button>
               ))}
             </div>
+            <div className="map-hazard-publish-controls" aria-label="Publish hazard layers to citizens">
+              {[
+                { level: 'medium', label: 'Medium', layers: mediumHazardLayers, published: allMediumHazardsPublished },
+                { level: 'high', label: 'High', layers: highHazardLayers, published: allHighHazardsPublished },
+              ].map(({ level, label, layers, published }) => (
+                <button
+                  key={level}
+                  type="button"
+                  className={`map-hazard-publish-button hazard-${level}`}
+                  disabled={hazardLayerPublishing !== null || layers.length === 0}
+                  aria-pressed={published}
+                  onClick={() => handlePublishHazardLevel(level, !published)}
+                >
+                  {hazardLayerPublishing === level && <span className="map-hazard-publish-spinner" aria-hidden="true" />}
+                  {published ? `Unpublish ${label} Hazards` : `Publish ${label} Hazards`}
+                </button>
+              ))}
+            </div>
             <div className="map-stage" style={{ height: `${mapHeight}px` }}>
               <DraggableMapOverlay className="map-coordinate" label="Map center coordinates" defaultPosition={{ left: 12, top: 12 }}>
                 {primaryCenter ? <>CENTER: {Number(primaryCenter.latitude).toFixed(5)}° N<br />LONG: {Number(primaryCenter.longitude).toFixed(5)}° E</> : 'CENTER: NO ACTIVE CENTER'}
@@ -1892,7 +1945,7 @@ export const Dashboard = () => {
                 <span><i className="dot green" /> AVAILABLE / CENTER</span>
                 <span><i className="dot blue" /> RESOLVING / IN TRANSIT</span>
               </DraggableMapOverlay>
-              <MapContainer markers={[...mapMarkers, ...activeRouteMarkers]} center={focusedAlertLocation} focusMarkerId={focusedAlertId} selectedAlertCategory={selectedMapAlertCategory} centerRequestKey={focusRequestKey} route={activeEvacuationRoute?.geometry} trackDeviceLocation={false} />
+              <MapContainer hazardLayers={hazardLayers} markers={[...mapMarkers, ...activeRouteMarkers]} center={focusedAlertLocation} focusMarkerId={focusedAlertId} selectedAlertCategory={selectedMapAlertCategory} centerRequestKey={focusRequestKey} route={activeEvacuationRoute?.geometry} trackDeviceLocation={false} />
               {activeEvacuationRoute && (
                 <DraggableMapOverlay className="evac-label evac-label-list" label="Active citizen evacuation route" defaultPosition={{ left: 280, top: 12 }}>
                   <b>ACTIVE EVACUATION ROUTE</b>

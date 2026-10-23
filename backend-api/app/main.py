@@ -1,10 +1,10 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from .api.v1 import auth, shelters, inventory, hazards, road_hazards, routing, center_coordinator, coordinator_dashboard
+from .api.v1 import auth, shelters, inventory, hazards, road_hazards, routing, center_coordinator, coordinator_dashboard, predictions
 from .api.websockets import telemetry
 from .core.config import settings
 from .db.base import init_db
-from .models import center, evacuee, vehicle, report, user, rescuer, emergency_alert, emergency_alert_status_report, road_hazard, household
+from .models import center, evacuee, vehicle, report, user, rescuer, emergency_alert, emergency_alert_status_report, road_hazard, household, hazard_map_layer
 
 api = FastAPI(title="RESQ-Route API", version="1.0.0")
 
@@ -27,6 +27,7 @@ api.include_router(inventory.router, prefix="/api/v1/inventory", tags=["inventor
 api.include_router(coordinator_dashboard.router, prefix="/api/v1/coordinator-dashboard", tags=["coordinator-dashboard"])
 api.include_router(center_coordinator.router, prefix="/api/v1/center-coordinator", tags=["center-coordinator"])
 api.include_router(hazards.router, prefix="/api/v1/hazards", tags=["hazards"])
+api.include_router(predictions.router, prefix="/api/v1/predictions", tags=["predictions"])
 api.include_router(road_hazards.router, prefix="/api/v1/road-hazards", tags=["road-hazards"])
 api.include_router(routing.router, prefix="/api/v1/routing", tags=["routing"])
 api.include_router(telemetry.router, tags=["websockets"])

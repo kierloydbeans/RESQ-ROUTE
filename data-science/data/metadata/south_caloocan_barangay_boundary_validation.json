@@ -1,0 +1,14 @@
+{
+  "requested_relation_count": 164,
+  "returned_relation_count": 164,
+  "missing_relation_ids": [],
+  "extra_relation_ids": [],
+  "requested_barangay_name_count": 164,
+  "returned_barangay_name_count": 164,
+  "missing_barangay_names": [],
+  "geometry_type_counts": {
+    "relation": 164
+  },
+  "valid": true,
+  "status": "candidate_osm_geometry_requires_official_boundary_validation"
+}
