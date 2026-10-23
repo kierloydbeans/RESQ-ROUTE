@@ -1,6 +1,6 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from .api.v1 import auth, shelters, inventory, hazards, road_hazards, routing, center_coordinator, coordinator_dashboard, admin_dashboard, audit_logs, predictions, operations, rescuers
+from .api.v1 import auth, shelters, inventory, hazards, road_hazards, routing, center_coordinator, coordinator_dashboard, admin_dashboard, audit_logs, predictions, operations, rescuers, rbac
 from .api.websockets import telemetry
 from .core.config import settings
 from .db.base import init_db
@@ -29,6 +29,7 @@ api.include_router(admin_dashboard.router, prefix="/api/v1/admin-dashboard", tag
 api.include_router(operations.router, prefix="/api/v1/operations", tags=["operations"])
 api.include_router(rescuers.router, prefix="/api/v1/rescuers", tags=["rescuers"])
 api.include_router(audit_logs.router, prefix="/api/v1/audit-logs", tags=["audit-logs"])
+api.include_router(rbac.router, prefix="/api/v1/rbac", tags=["rbac"])
 api.include_router(center_coordinator.router, prefix="/api/v1/center-coordinator", tags=["center-coordinator"])
 api.include_router(hazards.router, prefix="/api/v1/hazards", tags=["hazards"])
 api.include_router(predictions.router, prefix="/api/v1/predictions", tags=["predictions"])

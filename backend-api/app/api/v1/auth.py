@@ -147,6 +147,10 @@ class LoginRequest(BaseModel):
     role: str
 
 
+class ReauthRequest(BaseModel):
+    password: str
+
+
 class EmergencyAlertCreated(EmergencyAlertRead):
     media_upload_token: str
 
@@ -303,6 +307,26 @@ async def login(
             "assigned_center_id": user.assigned_center_id
         }
     }
+
+
+@router.post("/reauth")
+async def reauthenticate(
+    payload: ReauthRequest,
+    current_user: dict = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+):
+    result = await session.execute(select(User).where(User.username == current_user.get("sub")))
+    user = result.scalar_one_or_none()
+    if not user or not user.is_active or user.role != UserRole.ADMIN:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Administrator account required")
+    if not verify_password(payload.password, user.hashed_password):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Incorrect administrator password")
+
+    reauth_token = create_access_token(
+        data={"sub": user.username, "role": user.role, "reauth": True},
+        expires_delta=timedelta(minutes=10),
+    )
+    return {"authenticated": True, "reauthToken": reauth_token}
 
 
 @router.post("/login-role")

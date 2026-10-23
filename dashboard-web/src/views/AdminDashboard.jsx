@@ -14,7 +14,7 @@ const API_BASE_URL = rawApiBase.endsWith('/api/v1') ? rawApiBase.replace(/\/api\
  * GET  /api/dashboard -> { incidents, units, services, analytics, kpis, map }
  * GET  /api/audit     -> { entries: [{ id, action, user, role, timestamp, ip, urgent }] }
  * GET  /api/rbac      -> { roles: { Role: { permission_id: boolean } }, version, roleUserCounts }
- * POST /api/auth/reauth -> { authenticated: true, reauthToken?: string }
+ * POST /api/v1/auth/reauth -> { authenticated: true, reauthToken?: string }
  * PUT  /api/rbac      -> { roles, version, roleUserCounts }
  *
  * The server must validate authentication, permission IDs, System Admin
@@ -110,17 +110,6 @@ const DEMO_DATA = {
     },
     kpis: { rescueSuccessRate: 98.7, rescueSuccessComparison: '+0.2%' },
   },
-  rbac: {
-    version: 1,
-    roles: Object.fromEntries([
-      ['System Admin', PERMISSIONS.map(p => p.id)],
-      ['Dispatcher', ['view_dashboard', 'dispatch_units']],
-      ['Field Commander', ['view_dashboard', 'dispatch_units', 'resolve_incidents']],
-      ['Warehouse Mgr', ['view_dashboard', 'edit_inventory']],
-      ['Center Staff', ['view_dashboard', 'register_evacuees']]
-    ].map(([role, allowed]) => [role, Object.fromEntries(PERMISSIONS.map(p => [p.id, allowed.includes(p.id)]))])),
-    roleUserCounts: { 'System Admin': 1, Dispatcher: 3, 'Field Commander': 4, 'Warehouse Mgr': 2, 'Center Staff': 0 }
-  }
 }
 
 const PHT_CLOCK_FORMATTER = new Intl.DateTimeFormat('en-GB', {
@@ -1246,8 +1235,8 @@ export function AdminDashboard({
   apiBaseUrl = '',
   dashboardEndpoint = '/api/dashboard',
   auditEndpoint = `${API_BASE_URL}/api/v1/audit-logs`,
-  rbacEndpoint = '/api/rbac',
-  reauthEndpoint = '/api/auth/reauth',
+  rbacEndpoint = `${API_BASE_URL}/api/v1/rbac/summary`,
+  reauthEndpoint = `${API_BASE_URL}/api/v1/auth/reauth`,
   noahPredictionEndpoint = `${API_BASE_URL}/api/v1/predictions/flood`,
   metricsEndpoint = `${API_BASE_URL}/api/v1/admin-dashboard/metrics`,
   operationsMetricsEndpoint = `${API_BASE_URL}/api/v1/operations/metrics?window_days=7`,
@@ -1330,7 +1319,7 @@ export function AdminDashboard({
   }, [apiBaseUrl, authToken, auditEndpoint])
 
   const loadRbac = useCallback(async () => {
-    if (suppliedRbac || !rbacEndpoint) {
+    if (!rbacEndpoint) {
       setRbacLoading(false)
       return
     }
@@ -1344,7 +1333,7 @@ export function AdminDashboard({
     } finally {
       setRbacLoading(false)
     }
-  }, [apiBaseUrl, authToken, rbacEndpoint, rbacEditor.hydrate, suppliedRbac])
+  }, [apiBaseUrl, authToken, rbacEndpoint, rbacEditor.hydrate])
 
   useEffect(() => { loadDashboard() }, [loadDashboard])
   useEffect(() => { loadAudit() }, [loadAudit])
@@ -1472,17 +1461,25 @@ export function AdminDashboard({
   useIdleTimeout({ enabled: Boolean(onLogout), minutes: idleTimeoutMinutes, onTimeout: handleIdleTimeout })
 
   const handleFinalSave = useCallback(async (password) => {
-    if (demoMode) {
-      setSaveError('Role changes are not persisted in preview mode. Connect the authorization service to save changes.')
-      return
-    }
     setSaveBusy(true)
     setSaveError('')
     try {
-      const reauth = await apiRequest(resolveEndpoint(apiBaseUrl, reauthEndpoint), authToken, {
-        method: 'POST',
-        body: JSON.stringify({ password })
-      })
+      let reauth
+      try {
+        reauth = await apiRequest(resolveEndpoint(apiBaseUrl, reauthEndpoint), authToken, {
+          method: 'POST',
+          body: JSON.stringify({ password })
+        })
+      } catch (error) {
+        if (error.status !== 404) throw error
+        const username = auth?.user?.username || auth?.username
+        if (!username) throw new ApiRequestError('Administrator username is unavailable for re-authentication.', 401)
+        reauth = await apiRequest(`${API_BASE_URL}/api/v1/auth/login`, '', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+          body: new URLSearchParams({ username, password, role: 'admin' }).toString()
+        })
+      }
       if (reauth?.authenticated === false) throw new ApiRequestError('Administrator re-authentication failed.', 401, reauth)
 
       const reauthHeaders = reauth?.reauthToken ? { 'X-Reauth-Token': reauth.reauthToken } : undefined
@@ -1508,7 +1505,7 @@ export function AdminDashboard({
     } finally {
       setSaveBusy(false)
     }
-  }, [demoMode, apiBaseUrl, authToken, loadAudit, rbacEditor.draftMatrix, rbacEditor.roleUserCounts, rbacEditor.saveSucceeded, rbacEditor.version, rbacEndpoint, reauthEndpoint])
+  }, [apiBaseUrl, auth, authToken, loadAudit, rbacEditor.draftMatrix, rbacEditor.roleUserCounts, rbacEditor.saveSucceeded, rbacEditor.version, rbacEndpoint, reauthEndpoint])
 
   const closeSaveModal = useCallback(() => {
     if (!saveBusy) {
@@ -1718,7 +1715,7 @@ export function AdminDashboard({
           </section>
         )}
 
-        {activeTab === 'rb' && <RbacMatrix editor={rbacEditor} loading={rbacLoading} error={rbacError} onOpenDelete={handleOpenDelete} onRequestSave={() => { if (demoMode) { rbacEditor.setMutationError('Demo changes are temporary. Connect your backend to save them.'); return }; setSaveError(''); setSaveModalOpen(true) }} />}
+        {activeTab === 'rb' && <RbacMatrix editor={rbacEditor} loading={rbacLoading} error={rbacError} onOpenDelete={handleOpenDelete} onRequestSave={() => { setSaveError(''); setSaveModalOpen(true) }} />}
 
         {activeTab === 'si' && (
           <section id="integrity-panel" className="view on" role="tabpanel" aria-labelledby="tab-si" tabIndex="0">
