@@ -1,0 +1,86 @@
+{
+  "status": "noah_static_hazard_model",
+  "warning": "This predicts a static NOAH susceptibility label; it is not a temporal flood-event forecast.",
+  "input_rows": 288,
+  "feature_columns": [
+    "min_lat",
+    "min_lon",
+    "max_lat",
+    "max_lon",
+    "building_count",
+    "building_area_m2",
+    "road_count",
+    "road_length_m",
+    "facility_count",
+    "hospital_count",
+    "clinic_count",
+    "doctor_count",
+    "school_count",
+    "shelter_count",
+    "ambulance_station_count",
+    "latest_rain_mm",
+    "rain_6h_total_mm",
+    "rain_24h_total_mm",
+    "osm_critical_count",
+    "osm_waterway_length_m"
+  ],
+  "excluded_target_columns": [
+    "flood_susceptibility_score",
+    "real_hazard_score"
+  ],
+  "target_definition": {
+    "source_column": "flood_susceptibility_score",
+    "positive_class": "score >= 1/3",
+    "class_counts": {
+      "0": 167,
+      "1": 121
+    }
+  },
+  "split": {
+    "strategy": "spatial_row_group_holdout",
+    "random_state": 42,
+    "train_rows": 224,
+    "test_rows": 64
+  },
+  "metrics": {
+    "accuracy": 0.453125,
+    "balanced_accuracy": 0.4497536945812808,
+    "classification_report": {
+      "0": {
+        "precision": 0.5,
+        "recall": 0.4857142857142857,
+        "f1-score": 0.4927536231884058,
+        "support": 35.0
+      },
+      "1": {
+        "precision": 0.4,
+        "recall": 0.41379310344827586,
+        "f1-score": 0.4067796610169492,
+        "support": 29.0
+      },
+      "accuracy": 0.453125,
+      "macro avg": {
+        "precision": 0.45,
+        "recall": 0.4497536945812808,
+        "f1-score": 0.44976664210267747,
+        "support": 64.0
+      },
+      "weighted avg": {
+        "precision": 0.4546875,
+        "recall": 0.453125,
+        "f1-score": 0.4537966715794645,
+        "support": 64.0
+      }
+    },
+    "confusion_matrix": [
+      [
+        17,
+        18
+      ],
+      [
+        17,
+        12
+      ]
+    ]
+  }
+}

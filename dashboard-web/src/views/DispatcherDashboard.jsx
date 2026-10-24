@@ -1,7 +1,9 @@
-import React, { useEffect, useLayoutEffect, useState, useRef } from 'react'
+import React, { useCallback, useEffect, useLayoutEffect, useState, useRef } from 'react'
 import { useWebSocket } from '../hooks/useWebSocket'
+import { useActiveRoadHazards } from '../hooks/useActiveRoadHazards'
 import { useVoiceConference } from '../hooks/useVoiceConference'
 import MapContainer from '../components/MapContainer'
+import RoadHazardReportForm from '../components/RoadHazardReportForm'
 import Logo from '../components/Logo'
 import { useTheme } from '../ThemeContext'
 import HazardTicker from '../components/HazardTicker'
@@ -184,7 +186,7 @@ const SosFeedItem = ({ alert, now, onAssign, onView, isClosed = false }) => {
   )
 }
 
-export const Dashboard = () => {
+export const Dashboard = ({ onLogout }) => {
   const auth = getStoredAuth()
   const role = normalizeRole(auth?.user?.role) || 'citizen'
   const [latestGps, setLatestGps] = useState(null)
@@ -197,12 +199,18 @@ export const Dashboard = () => {
   const pendingStatusReportIds = useRef(new Set())
   const statusReportsInitialized = useRef(false)
   const [alertRecords, setAlertRecords] = useState([])
+  const [operationMetrics, setOperationMetrics] = useState(null)
   const [centers, setCenters] = useState([])
   const [evacuationRecommendation, setEvacuationRecommendation] = useState(null)
   const [evacuationLoading, setEvacuationLoading] = useState(false)
   const [evacuationRoute, setEvacuationRoute] = useState(null)
   const [activeEvacuationRoute, setActiveEvacuationRoute] = useState(null)
-  const [roadHazards, setRoadHazards] = useState([])
+  const [isRoadHazardFormOpen, setIsRoadHazardFormOpen] = useState(false)
+  const [pendingRoadHazards, setPendingRoadHazards] = useState({ type: 'FeatureCollection', features: [] })
+  const [roadHazardReviewing, setRoadHazardReviewing] = useState(null)
+  const [roadHazardReviewError, setRoadHazardReviewError] = useState('')
+  const [hazardLayers, setHazardLayers] = useState([])
+  const [hazardLayerPublishing, setHazardLayerPublishing] = useState(null)
   const [routeRerouted, setRouteRerouted] = useState(false)
   const [rescuers, setRescuers] = useState([])
   const [selectedRescuerId, setSelectedRescuerId] = useState('')
@@ -338,12 +346,6 @@ export const Dashboard = () => {
     ? alertRecords
     : alertRecords.filter((alert) => normalizeDisasterType(alert.disaster_type) === selectedMapAlertCategory)
   const closedAlerts = categoryFilteredAlertRecords.filter(isClosedAlert)
-  const closedAlertResponseTimes = closedAlerts
-    .map(getAlertResponseMinutes)
-    .filter((minutes) => minutes !== null)
-  const averageResponseMinutes = closedAlertResponseTimes.length
-    ? closedAlertResponseTimes.reduce((total, minutes) => total + minutes, 0) / closedAlertResponseTimes.length
-    : null
   const isReportDateRangeValid = Boolean(reportStartDate && reportEndDate && reportStartDate <= reportEndDate)
   const reportAlerts = isReportDateRangeValid
     ? alertRecords.filter((alert) => {
@@ -794,6 +796,49 @@ export const Dashboard = () => {
   const verifiedAlert = verifiedAlertState
   const setVerifiedAlert = (alert) => setVerifiedAlertState((current) => current?.id === alert?.id ? null : alert)
   const { socket, isConnected, lastMessage } = useWebSocket(WS_URL)
+  const { collection: roadHazardZones, hazards: roadHazards, applyFeature: applyRoadHazard } = useActiveRoadHazards(lastMessage, isConnected)
+
+  const refreshPendingRoadHazards = useCallback(async () => {
+    if (!['dispatcher', 'admin'].includes(role)) return
+    const response = await fetch(`${API_BASE_URL}/api/v1/hazards/pending`, { headers: getAuthHeaders() })
+    if (!response.ok) throw new Error(`Pending road hazards could not be loaded (${response.status}).`)
+    setPendingRoadHazards(await response.json())
+  }, [role])
+
+  useEffect(() => {
+    void refreshPendingRoadHazards().catch(() => {})
+    const timer = window.setInterval(() => void refreshPendingRoadHazards().catch(() => {}), 30_000)
+    return () => window.clearInterval(timer)
+  }, [refreshPendingRoadHazards])
+
+  useEffect(() => {
+    if (lastMessage?.type === 'road_hazard_submitted') {
+      void refreshPendingRoadHazards().catch(() => {})
+    }
+  }, [lastMessage, refreshPendingRoadHazards])
+
+  const reviewRoadHazard = async (id, approved) => {
+    setRoadHazardReviewing(id)
+    setRoadHazardReviewError('')
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/v1/hazards/road-reports/${id}/review`, {
+        method: 'PATCH',
+        headers: { ...getAuthHeaders(), 'Content-Type': 'application/json' },
+        body: JSON.stringify({ approved }),
+      })
+      if (!response.ok) throw new Error(`Review failed (${response.status}).`)
+      const feature = await response.json()
+      setPendingRoadHazards((current) => ({
+        ...current,
+        features: current.features.filter((item) => String(item.id) !== String(id)),
+      }))
+      applyRoadHazard(feature)
+    } catch (error) {
+      setRoadHazardReviewError(error.message || 'Unable to review road hazard.')
+    } finally {
+      setRoadHazardReviewing(null)
+    }
+  }
 
   useEffect(() => {
     const clock = window.setInterval(() => setCurrentTime(new Date()), 1000)
@@ -1010,6 +1055,30 @@ export const Dashboard = () => {
   }, [API_BASE_URL, role])
 
   useEffect(() => {
+    let disposed = false
+    const loadOperationMetrics = async () => {
+      try {
+        const response = await fetch(`${API_BASE_URL}/api/v1/operations/metrics?window_days=7`, { headers: getAuthHeaders() })
+        if (!response.ok) throw new Error(`Unable to load operation metrics (${response.status}).`)
+        const payload = await response.json()
+        if (!disposed) setOperationMetrics(payload)
+      } catch (error) {
+        if (!disposed) {
+          setOperationMetrics(null)
+          console.error('Failed to load operation metrics', error)
+        }
+      }
+    }
+
+    loadOperationMetrics()
+    const intervalId = window.setInterval(loadOperationMetrics, 30_000)
+    return () => {
+      disposed = true
+      window.clearInterval(intervalId)
+    }
+  }, [API_BASE_URL])
+
+  useEffect(() => {
     const loadAlerts = async () => {
       try {
         const response = await fetch(`${API_BASE_URL}/api/v1/auth/alerts`, { headers: getAuthHeaders() })
@@ -1051,12 +1120,12 @@ export const Dashboard = () => {
       }
     }
 
-    const loadRoadHazards = async () => {
+    const loadHazardLayers = async () => {
       try {
-        const response = await fetch(`${API_BASE_URL}/api/v1/road-hazards/?limit=100`, { headers: getAuthHeaders() })
-        if (response.ok) setRoadHazards(await response.json())
+        const response = await fetch(`${API_BASE_URL}/api/v1/hazards/map-layers?status=all`, { headers: getAuthHeaders() })
+        if (response.ok) setHazardLayers(await response.json())
       } catch (error) {
-        console.error('Failed to load road hazards', error)
+        console.error('Failed to load hazard map layers', error)
       }
     }
 
@@ -1064,17 +1133,39 @@ export const Dashboard = () => {
     loadRescuers()
     loadRescueUnits()
     loadCenters()
-    loadRoadHazards()
-    const roadHazardRefresh = window.setInterval(loadRoadHazards, 60_000)
+    loadHazardLayers()
     const rescuerStatusRefresh = window.setInterval(() => {
       loadRescuers()
       loadRescueUnits()
     }, 30_000)
     return () => {
-      window.clearInterval(roadHazardRefresh)
       window.clearInterval(rescuerStatusRefresh)
     }
   }, [API_BASE_URL])
+
+  const mediumHazardLayers = hazardLayers.filter((layer) => String(layer.hazard_level).toLowerCase() === 'medium')
+  const highHazardLayers = hazardLayers.filter((layer) => String(layer.hazard_level).toLowerCase() === 'high')
+  const visibleHazardLayers = hazardLayers.filter((layer) => ['medium', 'high'].includes(String(layer.hazard_level).toLowerCase()))
+  const allMediumHazardsPublished = mediumHazardLayers.length > 0 && mediumHazardLayers.every((layer) => layer.is_published)
+  const allHighHazardsPublished = highHazardLayers.length > 0 && highHazardLayers.every((layer) => layer.is_published)
+
+  const handlePublishHazardLevel = async (hazardLevel, isPublished) => {
+    const layersToUpdate = hazardLevel === 'medium' ? mediumHazardLayers : highHazardLayers
+    setHazardLayerPublishing(hazardLevel)
+    try {
+      const responses = await Promise.all(layersToUpdate.map((layer) => fetch(`${API_BASE_URL}/api/v1/hazards/${layer.id}/publish`, {
+        method: 'PATCH',
+        headers: getAuthHeaders(),
+        body: JSON.stringify({ is_published: isPublished })
+      })))
+      if (responses.some((response) => !response.ok)) throw new Error('Unable to update hazard publication status.')
+      setHazardLayers((layers) => layers.map((layer) => layersToUpdate.some((updatedLayer) => updatedLayer.id === layer.id) ? { ...layer, is_published: isPublished } : layer))
+    } catch (error) {
+      setAlertStatus(error.message)
+    } finally {
+      setHazardLayerPublishing(null)
+    }
+  }
 
   const handleSendEmergencyAlert = async () => {
     if (!auth?.user || !latestGps) {
@@ -1368,6 +1459,15 @@ export const Dashboard = () => {
     details: { type: String(hazard.hazard_type).replace(/_/g, ' '), severity: hazard.severity, status: hazard.is_resolved ? 'Resolved' : hazard.is_active === false ? 'Inactive' : 'Active', road: hazard.road_name || 'Unspecified road', time: formatTime(hazard.reported_at || hazard.created_at), location: `${hazard.latitude}, ${hazard.longitude}`, description: hazard.description }
   }))
 
+  const pendingHazardMarkers = pendingRoadHazards.features.map(({ id, properties }) => ({
+    id: `pending-road-${id}`,
+    position: [properties.longitude, properties.latitude],
+    label: `${properties.road_name || 'Road hazard'} · Pending review`,
+    color: '#f59e0b',
+    icon: '!',
+    details: { type: properties.hazard_type, severity: properties.severity, status: 'Pending dispatcher review', description: properties.description },
+  }))
+
   const activeRouteMarkers = activeEvacuationRoute ? [
     {
       position: [activeEvacuationRoute.origin.longitude, activeEvacuationRoute.origin.latitude],
@@ -1385,7 +1485,7 @@ export const Dashboard = () => {
     }
   ] : []
 
-  const mapMarkers = [...centerMarkers, ...alertMarkers, ...rescuerMarkers, ...liveRescuerMarkers, ...vehicleMarkers, ...hazardMarkers]
+  const mapMarkers = [...centerMarkers, ...alertMarkers, ...rescuerMarkers, ...liveRescuerMarkers, ...vehicleMarkers, ...hazardMarkers, ...pendingHazardMarkers]
   const primaryCenter = centers.find((center) => center.is_active !== false) || centers[0]
   const displayName = auth?.user?.full_name || auth?.user?.username || 'Cmdr. Reyes'
   const visibleAlerts = role === 'rescuer' ? alerts.filter((alert) => alert.assigned_rescuer_id === rescuerId) : alerts
@@ -1422,9 +1522,9 @@ export const Dashboard = () => {
     }
 
     const onPointerUp = (upEvent) => {
-      handle.releasePointerCapture(upEvent.pointerId)
-      handle.removeEventListener('pointermove', onPointerMove)
-      handle.removeEventListener('pointerup', onPointerUp)
+      if (handle.hasPointerCapture?.(upEvent.pointerId)) handle.releasePointerCapture(upEvent.pointerId)
+      handle?.removeEventListener('pointermove', onPointerMove)
+      handle?.removeEventListener('pointerup', onPointerUp)
       window.dispatchEvent(new Event('resize'))
     }
 
@@ -1478,10 +1578,7 @@ export const Dashboard = () => {
     return (first.status || '').localeCompare(second.status || '')
   })
 
-  const handleLogout = () => {
-    localStorage.removeItem('auth')
-    window.location.href = '/'
-  }
+  const handleLogout = () => onLogout?.()
 
   const accountMenu = (
     <div className="account-menu">
@@ -1690,11 +1787,7 @@ export const Dashboard = () => {
                 value={`${rescueUnits.dispatched_count || 0} / ${rescueUnits.rescuer_count || 0}`}
                 color="red"
               />
-              <Metric
-                label="RESCUED"
-                value={rescueUnits.closed_alert_count || 0}
-                color="green"
-              />
+              <Metric label="RESCUED (7D)" value={operationMetrics ? operationMetrics.people_rescued : '—'} color="green" />
             </div>
           </section>}
 
@@ -1863,6 +1956,35 @@ export const Dashboard = () => {
         {renderedPanels.tacticalMap && <main className={`center-column map-only-column ${getPanelAnimationClass('tacticalMap')}`}>
           <section className="map-panel">
             <PanelTitle title="CDRRMO TACTICAL MAP AREA" badge="TRACKING MAP" />
+            <button className="map-hazard-publish-button" type="button" onClick={() => setIsRoadHazardFormOpen((open) => !open)}>
+              Report Road Hazard
+            </button>
+            {pendingRoadHazards.features.length > 0 && (
+              <section className="road-hazard-review-queue" aria-label="Pending road hazard reports">
+                <h3>Road hazards awaiting review ({pendingRoadHazards.features.length})</h3>
+                {pendingRoadHazards.features.map(({ id, properties }) => (
+                  <article key={id} className="road-hazard-review-item">
+                    <strong>{String(properties.hazard_type).replace(/_/g, ' ')} · {properties.severity}</strong>
+                    <span>{properties.road_name || 'Unnamed road'} · {properties.radius_meters} m radius</span>
+                    <p>{properties.description}</p>
+                    <small>{Number(properties.latitude).toFixed(5)}, {Number(properties.longitude).toFixed(5)} · Reported by {properties.reporter_name || 'Anonymous'}</small>
+                    <div>
+                      <button type="button" disabled={roadHazardReviewing !== null} onClick={() => reviewRoadHazard(id, true)}>Approve & publish</button>
+                      <button type="button" disabled={roadHazardReviewing !== null} onClick={() => reviewRoadHazard(id, false)}>Reject</button>
+                    </div>
+                  </article>
+                ))}
+              </section>
+            )}
+            {roadHazardReviewError && <p className="road-hazard-review-error" role="alert">{roadHazardReviewError}</p>}
+            {isRoadHazardFormOpen && (
+              <RoadHazardReportForm
+                initialLocation={latestGps || primaryCenter}
+                reporterName={auth?.user?.full_name || ''}
+                onReported={() => void refreshPendingRoadHazards()}
+                onClose={() => setIsRoadHazardFormOpen(false)}
+              />
+            )}
             <div className="map-category-filter" role="group" aria-label="Filter alert markers by category">
               {alertCategoryOptions.map((category) => (
                 <button
@@ -1882,32 +2004,43 @@ export const Dashboard = () => {
                 </button>
               ))}
             </div>
+            <div className="map-hazard-publish-controls" aria-label="Publish hazard layers to citizens">
+              {[
+                { level: 'medium', label: 'Medium', layers: mediumHazardLayers, published: allMediumHazardsPublished },
+                { level: 'high', label: 'High', layers: highHazardLayers, published: allHighHazardsPublished },
+              ].map(({ level, label, layers, published }) => (
+                <button
+                  key={level}
+                  type="button"
+                  className={`map-hazard-publish-button hazard-${level}`}
+                  disabled={hazardLayerPublishing !== null || layers.length === 0}
+                  aria-pressed={published}
+                  onClick={() => handlePublishHazardLevel(level, !published)}
+                >
+                  {hazardLayerPublishing === level && <span className="map-hazard-publish-spinner" aria-hidden="true" />}
+                  {published ? `Unpublish ${label} Hazards` : `Publish ${label} Hazards`}
+                </button>
+              ))}
+            </div>
             <div className="map-stage" style={{ height: `${mapHeight}px` }}>
-              <DraggableMapOverlay className="map-coordinate" label="Map center coordinates" defaultPosition={{ left: 12, top: 12 }}>
-                {primaryCenter ? <>CENTER: {Number(primaryCenter.latitude).toFixed(5)}° N<br />LONG: {Number(primaryCenter.longitude).toFixed(5)}° E</> : 'CENTER: NO ACTIVE CENTER'}
-              </DraggableMapOverlay>
-              <DraggableMapOverlay className="map-legend" label="Map legend" defaultPosition={{ right: 12, top: 12 }}>
-                <span><i className="dot red" /> ACTIVE ALERT</span>
-                <span><i className="dot amber" /> ASSIGNED / RECOVERING</span>
-                <span><i className="dot green" /> AVAILABLE / CENTER</span>
-                <span><i className="dot blue" /> RESOLVING / IN TRANSIT</span>
-              </DraggableMapOverlay>
-              <MapContainer markers={[...mapMarkers, ...activeRouteMarkers]} center={focusedAlertLocation} focusMarkerId={focusedAlertId} selectedAlertCategory={selectedMapAlertCategory} centerRequestKey={focusRequestKey} route={activeEvacuationRoute?.geometry} trackDeviceLocation={false} />
-              {activeEvacuationRoute && (
-                <DraggableMapOverlay className="evac-label evac-label-list" label="Active citizen evacuation route" defaultPosition={{ left: 280, top: 12 }}>
-                  <b>ACTIVE EVACUATION ROUTE</b>
-                  <span>{activeEvacuationRoute.citizenName} → {activeEvacuationRoute.centerName}</span>
-                </DraggableMapOverlay>
-              )}
-              {centers.length > 0 && (
-                <DraggableMapOverlay className="evac-label evac-label-list" label="Evacuation center list" defaultPosition={{ left: 580, top: 164 }}>
-                  <b>EVACUATION CENTERS</b>
-                  {centers.filter((center) => center.is_active !== false).map((center) => {
-                    const occupancy = center.capacity > 0 ? Math.round((center.current_occupancy / center.capacity) * 100) : 0
-                    return <span key={center.id}>{center.name} ({occupancy}%)</span>
-                  })}
-                </DraggableMapOverlay>
-              )}
+              <div className="map-legend-static" role="group" aria-label="Map legend">
+                <b>MAP LEGEND</b>
+                <span><i className="legend-swatch marker-alert-flood" /> ALERT · FLOOD</span>
+                <span><i className="legend-swatch marker-alert-earthquake" /> ALERT · EARTHQUAKE</span>
+                <span><i className="legend-swatch marker-alert-fire" /> ALERT · FIRE</span>
+                <span><i className="legend-swatch marker-alert-medical" /> ALERT · MEDICAL</span>
+                <span><i className="legend-swatch marker-alert-rescue" /> ALERT · RESCUE</span>
+                <span><i className="legend-swatch marker-alert-other" /> ALERT · OTHER</span>
+                <span><i className="legend-swatch marker-available" /> AVAILABLE / CENTER</span>
+                <span><i className="legend-swatch marker-recovering" /> RECOVERING</span>
+                <span><i className="legend-swatch marker-transit" /> IN TRANSIT</span>
+                <span><i className="legend-swatch marker-full" /> FULL CENTER / MAINTENANCE</span>
+                <span><i className="legend-swatch hazard-high" /> NOAH HIGH HAZARD</span>
+                <span><i className="legend-swatch hazard-medium" /> NOAH MEDIUM HAZARD</span>
+                <span><i className="legend-swatch road-hazard" /> ACTIVE ROAD HAZARD</span>
+                <span><i className="legend-swatch pending-road-hazard" /> PENDING ROAD HAZARD</span>
+              </div>
+              <MapContainer hazardLayers={visibleHazardLayers} roadHazardZones={roadHazardZones} pendingRoadHazardZones={pendingRoadHazards} markers={[...mapMarkers, ...activeRouteMarkers]} center={focusedAlertLocation} focusMarkerId={focusedAlertId} selectedAlertCategory={selectedMapAlertCategory} centerRequestKey={focusRequestKey} route={activeEvacuationRoute?.geometry} trackDeviceLocation={false} />
               <button className="map-resize-handle" onPointerDown={startMapResize} aria-label="Drag to resize map" title="Drag to resize map">↕</button>
             </div>
           </section>
@@ -1918,11 +2051,11 @@ export const Dashboard = () => {
           {/* 1. TOP: Average Response */}
           {renderedPanels.averageResponse && <section className={`metric-card response-card ${getPanelAnimationClass('averageResponse')}`}>
             <small>AVERAGE RESPONSE</small>
-            <strong>{averageResponseMinutes === null ? '—' : `${averageResponseMinutes.toFixed(1)} min`}</strong>
+            <strong>{operationMetrics?.average_response_minutes == null ? '—' : `${Number(operationMetrics.average_response_minutes).toFixed(1)} min`}</strong>
             <span>
-              {averageResponseMinutes === null
-                ? 'No closed alerts to calculate'
-                : `Mean from ${closedAlertResponseTimes.length} closed alert${closedAlertResponseTimes.length === 1 ? '' : 's'}`}
+              {operationMetrics?.average_response_minutes == null
+                ? 'No resolved operations in the 7-day window'
+                : `Database mean from ${operationMetrics.response_samples} resolved operation${operationMetrics.response_samples === 1 ? '' : 's'}`}
             </span>
           </section>}
 
@@ -2211,74 +2344,6 @@ export const Dashboard = () => {
         />
       )}
     </main>
-  )
-}
-
-const DraggableMapOverlay = ({ className, label, defaultPosition, children }) => {
-  const [position, setPosition] = useState(defaultPosition)
-  const [minimized, setMinimized] = useState(false)
-  const dragRef = useRef(null)
-
-  const moveOverlay = (clientX, clientY) => {
-    const mapBounds = dragRef.current?.parentElement?.getBoundingClientRect()
-    if (!mapBounds) return
-    const overlayBounds = dragRef.current.getBoundingClientRect()
-    const left = Math.max(0, Math.min(mapBounds.width - overlayBounds.width, clientX - mapBounds.left))
-    const top = Math.max(0, Math.min(mapBounds.height - overlayBounds.height, clientY - mapBounds.top))
-    setPosition({ left, top })
-  }
-
-  const handlePointerDown = (event) => {
-    event.currentTarget.setPointerCapture(event.pointerId)
-    const move = (moveEvent) => moveOverlay(moveEvent.clientX, moveEvent.clientY)
-    const stop = () => {
-      event.currentTarget.removeEventListener('pointermove', move)
-      event.currentTarget.removeEventListener('pointerup', stop)
-    }
-    event.currentTarget.addEventListener('pointermove', move)
-    event.currentTarget.addEventListener('pointerup', stop)
-  }
-
-  const handleKeyDown = (event) => {
-    const distance = event.shiftKey ? 20 : 5
-    const nextPosition = { ...position }
-    if (event.key === 'ArrowLeft') nextPosition.left -= distance
-    if (event.key === 'ArrowRight') nextPosition.left += distance
-    if (event.key === 'ArrowUp') nextPosition.top -= distance
-    if (event.key === 'ArrowDown') nextPosition.top += distance
-    if (nextPosition.left !== position.left || nextPosition.top !== position.top) {
-      event.preventDefault()
-      setPosition({ left: Math.max(0, nextPosition.left), top: Math.max(0, nextPosition.top) })
-    }
-  }
-
-  return (
-    <div
-      ref={dragRef}
-      className={`map-overlay-draggable ${className} ${minimized ? 'minimized' : ''}`}
-      style={{
-        left: position.left ?? 'auto',
-        top: position.top ?? 'auto',
-        right: position.right ?? 'auto',
-        bottom: position.bottom ?? 'auto'
-      }}
-      onPointerDown={handlePointerDown}
-      onKeyDown={handleKeyDown}
-      role="group"
-      tabIndex="0"
-      aria-label={`${label}. Use arrow keys to move.`}
-    >
-      <button
-        className="map-overlay-toggle"
-        onPointerDown={(event) => event.stopPropagation()}
-        onClick={() => setMinimized((value) => !value)}
-        aria-label={`${minimized ? 'Expand' : 'Minimize'} ${label}`}
-        title={minimized ? 'Expand' : 'Minimize'}
-      >
-        {minimized ? '+' : '-'}
-      </button>
-      {!minimized && children}
-    </div>
   )
 }
 

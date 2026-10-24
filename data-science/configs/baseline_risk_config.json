@@ -1,0 +1,17 @@
+{
+  "weights": {
+    "flood": 0.35,
+    "earthquake": 0.15,
+    "fire": 0.35,
+    "vulnerability": 0.15
+  },
+  "flood": {
+    "rain_24h_threshold_mm": 50.0
+  },
+  "method_notes": {
+    "flood": "Provisional linear normalization of the latest 24-hour forecast rainfall; not calibrated to flood observations.",
+    "fire": "Provisional combination of relative building density and inverse relative road length; not a fire probability.",
+    "earthquake": "Unavailable until a verified vector fault or seismic hazard layer covering South Caloocan is obtained.",
+    "vulnerability": "Unavailable until approved population and vulnerability data is obtained."
+  }
+}

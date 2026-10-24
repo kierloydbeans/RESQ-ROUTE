@@ -5,7 +5,9 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 import httpx
 
 from app.core.config import settings
+from app.models.hazard_map_layer import HazardMapLayer
 from app.models.road_hazard import RoadHazardReport
+from app.services.valhalla_routing import decode_polyline6, request_valhalla_route
 
 Coordinate = Tuple[float, float]
 
@@ -76,6 +78,90 @@ def exclusion_polygon(latitude: float, longitude: float, radius_meters: float, s
     return ring
 
 
+def layer_polygon(layer: HazardMapLayer) -> Optional[List[List[float]]]:
+    geometry = layer.geometry or {}
+    if geometry.get("type") != "Polygon":
+        return None
+    coordinates = geometry.get("coordinates") or []
+    if not coordinates or not coordinates[0] or len(coordinates[0]) < 4:
+        return None
+    ring = [[float(point[0]), float(point[1])] for point in coordinates[0] if len(point) >= 2]
+    if ring and ring[0] != ring[-1]:
+        ring.append(ring[0])
+    return ring if len(ring) >= 4 else None
+
+
+def build_hazard_exclusion_model(
+    road_hazards: Sequence[RoadHazardReport],
+    noah_layers: Sequence[HazardMapLayer],
+) -> Tuple[Dict[str, Any], List[Dict[str, Any]]]:
+    area_features: List[Dict[str, Any]] = []
+    excluded_zones: List[Dict[str, Any]] = []
+
+    for hazard in road_hazards:
+        name = f"road_hazard_{hazard.id}"
+        polygon = exclusion_polygon(hazard.latitude, hazard.longitude, max(1, hazard.radius_meters))
+        area_features.append({
+            "type": "Feature",
+            "id": name,
+            "properties": {},
+            "geometry": {"type": "Polygon", "coordinates": [polygon]},
+        })
+        excluded_zones.append({"type": "road_hazard", "id": hazard.id, "area": name})
+
+    for layer in noah_layers:
+        polygon = layer_polygon(layer)
+        if not polygon:
+            continue
+        name = f"noah_high_{layer.id}"
+        area_features.append({
+            "type": "Feature",
+            "id": name,
+            "properties": {},
+            "geometry": {"type": "Polygon", "coordinates": [polygon]},
+        })
+        excluded_zones.append({
+            "type": "noah_high_risk_zone",
+            "id": layer.id,
+            "source_grid_id": layer.source_grid_id,
+            "hazard_score": layer.hazard_score,
+            "area": name,
+        })
+
+    priority_rules = [
+        {"if": f"in_{area_feature['id']}", "multiply_by": "0"}
+        for area_feature in area_features
+    ]
+    return {
+        "priority": priority_rules,
+        "areas": {"type": "FeatureCollection", "features": area_features},
+    }, excluded_zones
+
+
+def build_valhalla_exclusion_polygons(
+    road_hazards: Sequence[RoadHazardReport],
+    noah_layers: Sequence[HazardMapLayer],
+) -> List[List[List[float]]]:
+    polygons: List[List[List[float]]] = []
+    for hazard in road_hazards:
+        polygons.append(exclusion_polygon(
+            hazard.latitude,
+            hazard.longitude,
+            max(1, hazard.radius_meters),
+        ))
+    for layer in noah_layers:
+        polygon = layer_polygon(layer)
+        if polygon:
+            polygons.append(polygon)
+    return polygons
+
+
+def extract_valhalla_geometry(trip: Dict[str, Any]) -> List[List[float]]:
+    legs = trip.get("legs") or []
+    shape = legs[0].get("shape") if legs else None
+    return decode_polyline6(shape) if shape else []
+
+
 def point_to_segment_meters(
     point_latitude: float,
     point_longitude: float,
@@ -130,6 +216,23 @@ def hazards_on_route(coordinates: List[List[float]], hazards: Sequence[RoadHazar
     return [hazard for hazard in hazards if route_intersects_hazard(coordinates, hazard)]
 
 
+def layer_near_route(coordinates: List[List[float]], layer: HazardMapLayer) -> bool:
+    ring = layer_polygon(layer)
+    if not ring or len(coordinates) < 2:
+        return False
+    vertices = ring[:-1]
+    center_longitude = sum(point[0] for point in vertices) / len(vertices)
+    center_latitude = sum(point[1] for point in vertices) / len(vertices)
+    radius = max(
+        haversine_meters(center_latitude, center_longitude, latitude, longitude)
+        for longitude, latitude in vertices
+    )
+    return any(
+        point_to_segment_meters(center_latitude, center_longitude, start, end) <= radius
+        for start, end in zip(coordinates, coordinates[1:])
+    )
+
+
 def extract_geometry(path: Dict[str, Any]) -> List[List[float]]:
     points = path.get("points")
     if points:
@@ -177,7 +280,7 @@ async def request_graphhopper_route(
     origin_longitude: float,
     destination_latitude: float,
     destination_longitude: float,
-    avoid_polygons: Optional[List[List[List[float]]]] = None,
+    custom_model: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     url = (settings.GRAPHHOPPER_URL or "").strip()
     if not url:
@@ -197,16 +300,8 @@ async def request_graphhopper_route(
         "points_encoded": False,
     }
     
-    if avoid_polygons:
-        # GraphHopper expects avoid_polygons as GeoJSON Polygon format
-        # Format: {"polygons": [[[[lon, lat], [lon, lat], ...]]]}
-        geojson_polygons = []
-        for polygon in avoid_polygons:
-            # polygon is already [lon, lat] format from exclusion_polygon
-            geojson_polygons.append([polygon])
-        
-        payload["avoid_polygons"] = {"polygons": geojson_polygons}
-        print(f"Sending avoid_polygons to GraphHopper: {payload['avoid_polygons']}")
+    if custom_model:
+        payload["custom_model"] = custom_model
 
     timeout = httpx.Timeout(60.0, connect=30.0)
     headers = {
@@ -219,8 +314,15 @@ async def request_graphhopper_route(
     
     # Build URL with API key as query parameter
     route_url = f"{url}/route"
+    query_parameters = []
     if api_key:
-        route_url = f"{route_url}?key={api_key}"
+        query_parameters.append(f"key={api_key}")
+    # GraphHopper requires contraction hierarchies to be disabled when a
+    # request supplies a custom model, otherwise it rejects the JSON payload.
+    if custom_model:
+        query_parameters.append("ch.disable=true")
+    if query_parameters:
+        route_url = f"{route_url}?{'&'.join(query_parameters)}"
 
     async with httpx.AsyncClient(timeout=timeout, headers=headers, follow_redirects=True) as client:
         try:
@@ -261,74 +363,92 @@ async def route_citizen(
     destination_latitude: float,
     destination_longitude: float,
     hazards: Sequence[RoadHazardReport],
+    noah_layers: Sequence[HazardMapLayer] = (),
 ) -> Dict[str, Any]:
     active_hazards = [
         hazard for hazard in hazards
         if hazard.is_active and not hazard.is_resolved
     ]
 
+    custom_model, excluded_zones = build_hazard_exclusion_model(active_hazards, noah_layers)
+
     try:
-        initial_route = await request_graphhopper_route(
+        path = await request_graphhopper_route(
+            origin_latitude,
+            origin_longitude,
+            destination_latitude,
+            destination_longitude,
+            custom_model=custom_model if excluded_zones else None,
+        )
+        coordinates = extract_geometry(path)
+        if len(coordinates) < 2:
+            raise ValueError("GraphHopper returned no route geometry")
+        return {
+            "engine": "graphhopper",
+            "algorithm": "dijkstra",
+            "costing": "pedestrian",
+            "rerouted": bool(excluded_zones),
+            "fallback": False,
+            "distance_meters": path.get("distance", 0),
+            "duration_seconds": path.get("time", 0) / 1000,
+            "geometry": {"type": "LineString", "coordinates": coordinates},
+            "avoided_hazards": excluded_zones,
+            "message": f"Route calculated with {len(excluded_zones)} active hazard exclusion zone(s).",
+        }
+    except (httpx.HTTPError, ValueError, OSError):
+        # Free GraphHopper plans reject custom models. Use a normal road route
+        # to identify only the hazards this trip actually needs to avoid.
+        baseline = await request_graphhopper_route(
             origin_latitude,
             origin_longitude,
             destination_latitude,
             destination_longitude,
         )
-        
-        initial_coordinates = extract_geometry(initial_route)
-        distance_meters = initial_route.get("distance", 0)
-        duration_seconds = initial_route.get("time", 0) / 1000  # GraphHopper returns milliseconds
-        
-        blocking_hazards = hazards_on_route(initial_coordinates, active_hazards)
-        
-        if not blocking_hazards:
+        baseline_coordinates = extract_geometry(baseline)
+        if len(baseline_coordinates) < 2:
+            raise ValueError("GraphHopper returned no road route geometry")
+        blocking_roads = hazards_on_route(baseline_coordinates, active_hazards)
+        blocking_layers = [layer for layer in noah_layers if layer_near_route(baseline_coordinates, layer)]
+        if not blocking_roads and not blocking_layers:
             return {
                 "engine": "graphhopper",
                 "algorithm": "dijkstra",
                 "costing": "pedestrian",
                 "rerouted": False,
                 "fallback": False,
-                "distance_meters": distance_meters,
-                "duration_seconds": duration_seconds,
-                "geometry": {"type": "LineString", "coordinates": initial_coordinates},
+                "distance_meters": baseline.get("distance", 0),
+                "duration_seconds": baseline.get("time", 0) / 1000,
+                "geometry": {"type": "LineString", "coordinates": baseline_coordinates},
                 "avoided_hazards": [],
-                "message": "Walking route calculated with GraphHopper.",
+                "message": "No active hazard intersects this road route.",
             }
 
-        # GraphHopper's avoid_polygons doesn't work reliably on free tier
-        # Return route with hazard warning instead
-        return {
-            "engine": "graphhopper",
-            "algorithm": "dijkstra",
-            "costing": "pedestrian",
-            "rerouted": False,
-            "fallback": False,
-            "distance_meters": distance_meters,
-            "duration_seconds": duration_seconds,
-            "geometry": {"type": "LineString", "coordinates": initial_coordinates},
-            "avoided_hazards": [serialize_hazard(hazard) for hazard in blocking_hazards],
-            "message": f"Route calculated with {len(blocking_hazards)} hazard(s) detected on path. Manual avoidance recommended.",
-        }
-        
-    except (httpx.HTTPError, ValueError, OSError) as error:
-        geometry = straight_line_geometry(
+        valhalla_trip = await request_valhalla_route(
             origin_latitude,
             origin_longitude,
             destination_latitude,
             destination_longitude,
+            exclude_polygons=build_valhalla_exclusion_polygons(blocking_roads, blocking_layers),
         )
-        blocking = hazards_on_route(geometry["coordinates"], active_hazards)
+        coordinates = extract_valhalla_geometry(valhalla_trip)
+        if len(coordinates) < 2:
+            raise ValueError("Valhalla returned no road route geometry")
+        if hazards_on_route(coordinates, active_hazards) or any(
+            layer_near_route(coordinates, layer) for layer in noah_layers
+        ):
+            raise ValueError("No route avoiding all active hazards was found")
+        _, avoided = build_hazard_exclusion_model(blocking_roads, blocking_layers)
+        summary = valhalla_trip.get("summary") or {}
         return {
-            "engine": "graphhopper",
-            "algorithm": "dijkstra",
+            "engine": "valhalla",
+            "algorithm": "dijkstra_astar",
             "costing": "pedestrian",
-            "rerouted": False,
-            "fallback": True,
-            "distance_meters": haversine_meters(
-                origin_latitude, origin_longitude, destination_latitude, destination_longitude
-            ),
-            "duration_seconds": None,
-            "geometry": geometry,
-            "avoided_hazards": [serialize_hazard(hazard) for hazard in blocking],
-            "message": f"GraphHopper was unavailable ({format_routing_error(error)}). Direct path used as fallback.",
+            "rerouted": True,
+            "fallback": False,
+            "distance_meters": float(summary.get("length") or 0) * 1000,
+            "duration_seconds": float(summary.get("time") or 0),
+            "geometry": {"type": "LineString", "coordinates": coordinates},
+            "avoided_hazards": avoided,
+            "original_route_hazard": bool(blocking_roads),
+            "message": "Road route calculated with active hazard polygons excluded.",
         }

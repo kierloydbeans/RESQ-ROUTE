@@ -33,6 +33,9 @@ class RoadHazardReport(RoadHazardReportBase, table=True):
     __tablename__ = "road_hazard_reports"
 
     id: Optional[int] = Field(default=None, primary_key=True)
+    review_status: str = Field(default="pending")
+    reviewed_by: Optional[str] = None
+    reviewed_at: Optional[datetime] = None
     reported_at: datetime = Field(default_factory=datetime.utcnow)
     expires_at: datetime
     resolved_at: Optional[datetime] = None
@@ -46,6 +49,9 @@ class RoadHazardReportCreate(RoadHazardReportBase):
 
 class RoadHazardReportRead(RoadHazardReportBase):
     id: int
+    review_status: str
+    reviewed_by: Optional[str]
+    reviewed_at: Optional[datetime]
     reported_at: datetime
     expires_at: datetime
     resolved_at: Optional[datetime]

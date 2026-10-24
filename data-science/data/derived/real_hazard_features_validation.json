@@ -1,0 +1,69 @@
+{
+  "output_rows": 288,
+  "grid_count_expected": 288,
+  "barangay_count": 164,
+  "polygonized_barangay_count": 157,
+  "polygonized_barangay_gap": 7,
+  "grid_cells_with_barangay": 38,
+  "grid_cells_without_barangay": 250,
+  "crs": {
+    "source": "EPSG:4326",
+    "projected": "EPSG:32651"
+  },
+  "sources": {
+    "noah": {
+      "available": true,
+      "path": "C:\\Users\\schof\\OneDrive\\Desktop\\Kier\\projects\\resq-route\\data-science\\data\\raw\\noah\\metro_manila_100yr.zip",
+      "features": 3,
+      "hazard_field": "Var",
+      "hazard_mapping": "Var / 3, where Var=1 low, 2 medium, 3 high"
+    },
+    "osm_hot": {
+      "available_files": [
+        "C:\\Users\\schof\\OneDrive\\Desktop\\Kier\\projects\\resq-route\\data-science\\data\\raw\\osm\\south_caloocan_facilities_overpass.json",
+        "C:\\Users\\schof\\OneDrive\\Desktop\\Kier\\projects\\resq-route\\data-science\\data\\raw\\osm\\south_caloocan_highways_overpass.json"
+      ],
+      "critical_count": 534,
+      "waterway_count": 0
+    },
+    "pagasa_mmda_stations": {
+      "available": false,
+      "path": "C:\\Users\\schof\\OneDrive\\Desktop\\Kier\\projects\\resq-route\\data-science\\data\\raw\\stations\\south_caloocan_flood_stations.csv"
+    }
+  },
+  "normalized_score_columns": [
+    "flood_susceptibility_score",
+    "osm_critical_infrastructure_score",
+    "osm_waterway_score",
+    "station_threshold_proxy_score",
+    "real_hazard_score"
+  ],
+  "score_range_checks": {
+    "flood_susceptibility_score": [
+      0.0,
+      0.9999317375315692
+    ],
+    "osm_critical_infrastructure_score": [
+      0.0,
+      1.0
+    ],
+    "osm_waterway_score": [
+      0.0,
+      0.0
+    ],
+    "station_threshold_proxy_score": [
+      0.0,
+      0.0
+    ],
+    "real_hazard_score": [
+      0.0,
+      0.38997278069674446
+    ]
+  },
+  "real_hazard_data_available": true,
+  "limitations": [
+    "OSM counts and lengths are current snapshot proxies, not historical incident labels.",
+    "NOAH and PAGASA/MMDA values are zero-filled only with explicit source availability flags when files are absent.",
+    "Candidate OSM barangay boundaries require official PSGC validation."
+  ]
+}

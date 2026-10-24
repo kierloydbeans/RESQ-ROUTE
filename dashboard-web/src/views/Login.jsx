@@ -3,7 +3,9 @@ import { useNavigate, Link, useParams } from 'react-router-dom'
 import { Eye, EyeOff } from 'lucide-react'
 import Logo from '../components/Logo'
 import GradientBackground from '../components/GradientBackground'
+import LogoutOverlay from '../components/LogoutOverlay'
 import { useTheme } from '../ThemeContext'
+import '../styles/logout-transition.css'
 
 const rawApiBase = (import.meta.env.VITE_API_URL || import.meta.env.VITE_API_BASE_URL || 'https://resq-route.onrender.com').replace(/\/$/, '')
 const API_BASE_URL = rawApiBase.endsWith('/api/v1') ? rawApiBase.replace(/\/api\/v1$/, '') : rawApiBase
@@ -12,10 +14,12 @@ const API_URL = `${API_BASE_URL}/api/v1`
 const roles = [
   { value: 'citizen', label: 'Citizen' },
   { value: 'dispatcher', label: 'Dispatcher' },
+  { value: 'admin', label: 'Admin' },
   { value: 'rescuer', label: 'Rescuer' },
   { value: 'coordinator', label: 'Coordinator' },
   { value: 'center_coordinator', label: 'Center Coordinator' }
 ]
+
 const BackgroundPin = ({ top, left, delay }) => (
   <svg
     className="pulsing-pin"
@@ -43,6 +47,7 @@ const Login = () => {
   const [formData, setFormData] = useState({ username: '', password: '' })
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
+  const [isSigningIn, setIsSigningIn] = useState(false)
   const [showPassword, setShowPassword] = useState(false)
   const [showForgotModal, setShowForgotModal] = useState(false)
   const [resetEmail, setResetEmail] = useState('')
@@ -50,11 +55,6 @@ const Login = () => {
   const [resetMessage, setResetMessage] = useState({ type: '', text: '' })
   const [isPageLoading, setIsPageLoading] = useState(true)
   const navigate = useNavigate()
-
-  useEffect(() => {
-    const timer = setTimeout(() => setIsPageLoading(false), 1200)
-    return () => clearTimeout(timer)
-  }, [])
 
   useEffect(() => {
     const timer = setTimeout(() => setIsPageLoading(false), 1200)
@@ -70,6 +70,8 @@ const Login = () => {
     event.preventDefault()
     setError('')
     setLoading(true)
+    setIsSigningIn(true)
+    const minimumAnimation = new Promise((resolve) => window.setTimeout(resolve, 720))
     try {
       const response = await fetch(`${API_URL}/auth/login-role`, {
         method: 'POST',
@@ -89,10 +91,11 @@ const Login = () => {
         user: data.user
       }))
 
+      await minimumAnimation
       navigate(role === 'rescuer' ? '/rescuer' : '/')
     } catch (err) {
-      setError(err.message)
-    } finally {
+      setIsSigningIn(false)
+      setError('Incorrect username or password')
       setLoading(false)
     }
   }
@@ -184,7 +187,8 @@ const Login = () => {
   }
 
   return (
-    <div className="login-page" style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', backgroundColor: '#f3f4f6', padding: '1.5rem' }}>
+    <div className={`login-page ${isSigningIn ? 'is-signing-in' : ''}`} style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', backgroundColor: '#f3f4f6', padding: '1.5rem' }}>
+      <LogoutOverlay active={isSigningIn} mode="login" />
       <style>{pinPulseStyle}</style>
 
       <div className="login-card" style={{

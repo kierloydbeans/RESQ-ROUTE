@@ -14,12 +14,12 @@
   --ops-report-border: #0e7490;
   --ops-report-bg: rgba(8, 47, 73, .45);
   --ops-report-accent: #67e8f9;
-  --citizen-accent: #f07a43;
-  --citizen-accent-strong: #ff9461;
+  --citizen-accent: #e9654c;
+  --citizen-accent-strong: #f27c67;
   --citizen-accent-soft: #3b211d;
   --citizen-accent-border: #8b4a37;
   --citizen-accent-gradient-start: #c52222;
-  --citizen-accent-gradient-end: #a36b16;
+  --citizen-accent-gradient-end: #a94b32;
   --ops-backup-border: #b45309;
   --ops-backup-bg: rgba(120, 53, 15, .35);
   --ops-backup-accent: #fbbf24;
@@ -47,7 +47,7 @@
   --citizen-accent-soft: #fff0e8;
   --citizen-accent-border: #e9b39b;
   --citizen-accent-gradient-start: #c52222;
-  --citizen-accent-gradient-end: #a36b16;
+  --citizen-accent-gradient-end: #a94b32;
   --ops-backup-border: #b45309;
   --ops-backup-bg: #fff7ed;
   --ops-backup-accent: #92400e;

@@ -1,4 +1,4 @@
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, Depends, Request, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel
 from typing import List, Dict, Optional
 import json
@@ -6,8 +6,10 @@ import time
 from fastapi import HTTPException
 from sqlalchemy import select
 from ...core.security import decode_token
-from ...db.session import async_session
+from ...core.security import get_current_user
+from ...db.session import async_session, get_session
 from ...models.user import User, UserRole
+from ...services.audit_logging import record_audit_log
 
 router = APIRouter()
 
@@ -342,7 +344,19 @@ async def get_latest_gps():
 
 
 @router.post("/api/v1/evacuation-route")
-async def update_evacuation_route(payload: Dict):
+async def update_evacuation_route(
+    payload: Dict,
+    request: Request,
+    current_user: dict = Depends(get_current_user),
+    session=Depends(get_session),
+):
+    record_audit_log(
+        session,
+        current_user,
+        request,
+        "Evacuation route override updated",
+    )
+    await session.commit()
     manager.telemetry_data["evacuation_route"] = payload
     await manager.broadcast({
         "type": "evacuation_route_updated",
