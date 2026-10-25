@@ -212,6 +212,8 @@ export const Dashboard = ({ onLogout }) => {
   const [selectedRoadHazard, setSelectedRoadHazard] = useState(null)
   const [hazardLayers, setHazardLayers] = useState([])
   const [hazardLayerPublishing, setHazardLayerPublishing] = useState(null)
+  const [showNoahHazards, setShowNoahHazards] = useState(true)
+  const [showRoadHazards, setShowRoadHazards] = useState(true)
   const [routeRerouted, setRouteRerouted] = useState(false)
   const [rescuers, setRescuers] = useState([])
   const [selectedRescuerId, setSelectedRescuerId] = useState('')
@@ -827,7 +829,10 @@ export const Dashboard = ({ onLogout }) => {
         headers: { ...getAuthHeaders(), 'Content-Type': 'application/json' },
         body: JSON.stringify({ approved }),
       })
-      if (!response.ok) throw new Error(`Review failed (${response.status}).`)
+      if (!response.ok) {
+        const responseData = await response.json().catch(() => null)
+        throw new Error(responseData?.detail || `Review failed (${response.status}).`)
+      }
       const feature = await response.json()
       setPendingRoadHazards((current) => ({
         ...current,
@@ -1162,6 +1167,9 @@ export const Dashboard = ({ onLogout }) => {
   const mediumHazardLayers = hazardLayers.filter((layer) => String(layer.hazard_level).toLowerCase() === 'medium')
   const highHazardLayers = hazardLayers.filter((layer) => String(layer.hazard_level).toLowerCase() === 'high')
   const visibleHazardLayers = hazardLayers.filter((layer) => ['medium', 'high'].includes(String(layer.hazard_level).toLowerCase()))
+  const renderedHazardLayers = showNoahHazards ? visibleHazardLayers : []
+  const renderedRoadHazardZones = showRoadHazards ? roadHazardZones : { type: 'FeatureCollection', features: [] }
+  const renderedPendingRoadHazards = showRoadHazards ? pendingRoadHazards : { type: 'FeatureCollection', features: [] }
   const allMediumHazardsPublished = mediumHazardLayers.length > 0 && mediumHazardLayers.every((layer) => layer.is_published)
   const allHighHazardsPublished = highHazardLayers.length > 0 && highHazardLayers.every((layer) => layer.is_published)
 
@@ -2075,7 +2083,17 @@ export const Dashboard = ({ onLogout }) => {
                 <span><i className="legend-swatch road-hazard" /> ACTIVE ROAD HAZARD</span>
                 <span><i className="legend-swatch pending-road-hazard" /> PENDING ROAD HAZARD</span>
               </div>
-              <MapContainer hazardLayers={visibleHazardLayers} roadHazardZones={roadHazardZones} pendingRoadHazardZones={pendingRoadHazards} markers={[...mapMarkers, ...activeRouteMarkers]} onMarkerClick={handleMapMarkerClick} center={focusedAlertLocation} focusMarkerId={focusedAlertId} selectedAlertCategory={selectedMapAlertCategory} centerRequestKey={focusRequestKey} route={activeEvacuationRoute?.geometry} trackDeviceLocation={false} />
+              <MapContainer hazardLayers={renderedHazardLayers} roadHazardZones={renderedRoadHazardZones} pendingRoadHazardZones={renderedPendingRoadHazards} markers={[...mapMarkers.filter((marker) => showRoadHazards || marker.kind !== 'road-hazard'), ...activeRouteMarkers]} onMarkerClick={handleMapMarkerClick} center={focusedAlertLocation} focusMarkerId={focusedAlertId} selectedAlertCategory={selectedMapAlertCategory} centerRequestKey={focusRequestKey} route={activeEvacuationRoute?.geometry} trackDeviceLocation={false} />
+              <div className="ops-map-layer-controls" role="group" aria-label="Map layers">
+                <button type="button" className={`ops-map-layer-button${showNoahHazards ? ' active' : ''}`} aria-pressed={showNoahHazards} onClick={() => setShowNoahHazards((visible) => !visible)} title={`${showNoahHazards ? 'Hide' : 'Show'} UP NOAH disaster hazards`}>
+                  <span className="ops-map-layer-swatch noah" aria-hidden="true" />
+                  {showNoahHazards ? 'Hide' : 'Show'} UP NOAH
+                </button>
+                <button type="button" className={`ops-map-layer-button${showRoadHazards ? ' active' : ''}`} aria-pressed={showRoadHazards} onClick={() => setShowRoadHazards((visible) => !visible)} title={`${showRoadHazards ? 'Hide' : 'Show'} public road hazards`}>
+                  <span className="ops-map-layer-swatch road" aria-hidden="true" />
+                  {showRoadHazards ? 'Hide' : 'Show'} road hazards
+                </button>
+              </div>
               <button className="map-resize-handle" onPointerDown={startMapResize} aria-label="Drag to resize map" title="Drag to resize map">↕</button>
             </div>
           </section>
