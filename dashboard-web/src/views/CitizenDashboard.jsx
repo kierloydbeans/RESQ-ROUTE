@@ -351,6 +351,8 @@ export const CitizenDashboard = ({ auth, onLogout }) => {
   const profileMenuRef = useRef(null)
 
   const [pinnedLocation, setPinnedLocation] = useState(null)
+  const [showNoahHazards, setShowNoahHazards] = useState(true)
+  const [showRoadHazards, setShowRoadHazards] = useState(true)
 
   const [selectedIncident, setSelectedIncident] = useState('flood')
   const [selectedSeverity, setSelectedSeverity] = useState('high')
@@ -520,6 +522,11 @@ export const CitizenDashboard = ({ auth, onLogout }) => {
     if (activeTab === 'alert') {
       setAlertStatus(`Pinned location: ${getReadablePinnedLocation(coords, centers)}`)
     }
+  }
+
+  const clearPinnedLocation = () => {
+    setPinnedLocation(null)
+    if (activeTab === 'alert') setAlertStatus('Dropped pin cleared.')
   }
 
   const formattedPhtTime = new Intl.DateTimeFormat('en-PH', {
@@ -723,6 +730,7 @@ export const CitizenDashboard = ({ auth, onLogout }) => {
   const handleSelectCenter = (center) => {
     window.clearTimeout(detailCloseTimeoutRef.current)
     setIsDetailClosing(false)
+    setIsShelterPanelCollapsed(false)
     setSelectedCenter(center)
     setDetailSheetState('partial')
     setRouteError('')
@@ -990,10 +998,20 @@ export const CitizenDashboard = ({ auth, onLogout }) => {
   })
 
   const hazardMarkers = roadHazards.filter((h) => h.is_active !== false && !h.is_resolved).map((h) => ({
+    id: h.id,
+    kind: 'road-hazard',
     position: [h.longitude, h.latitude],
-    label: `${h.road_name || 'Hazard'}`,
+    label: `${h.road_name || 'Road hazard'} · ${String(h.hazard_type || 'hazard').replace(/_/g, ' ')}`,
     color: '#d93025',
-    icon: '!'
+    icon: '!',
+    details: {
+      type: String(h.hazard_type || 'hazard').replace(/_/g, ' '),
+      severity: h.severity || 'Unknown',
+      status: h.is_resolved ? 'Resolved' : h.is_active === false ? 'Inactive' : 'Active',
+      road: h.road_name || 'Unspecified road',
+      location: `${h.latitude}, ${h.longitude}`,
+      description: h.description || 'No description provided.',
+    },
   }))
 
   const isSaved = selectedCenter && savedShelterIds.includes(selectedCenter.id)
@@ -1078,9 +1096,14 @@ export const CitizenDashboard = ({ auth, onLogout }) => {
       {/* 1. Background Map */}
       <div className={`citizen-map-canvas ${activeTab === 'shelters' && isShelterPanelCollapsed ? 'panel-collapsed' : ''}`}>
         <MapContainer
-          hazardLayers={publishedHazardLayers}
-          roadHazardZones={roadHazardZones}
-          markers={[...centerMarkers, ...hazardMarkers]}
+          hazardLayers={showNoahHazards ? publishedHazardLayers : []}
+          roadHazardZones={showRoadHazards ? roadHazardZones : { type: 'FeatureCollection', features: [] }}
+          markers={[...centerMarkers, ...(showRoadHazards ? hazardMarkers : [])]}
+          onMarkerClick={(marker) => {
+            if (marker.kind !== 'shelter') return
+            const center = centers.find((candidate) => String(candidate.id) === String(marker.id))
+            if (center) handleSelectCenter(center)
+          }}
           route={evacuationRoute}
           center={selectedCenter ? [selectedCenter.longitude, selectedCenter.latitude] : null}
           centerRequestKey={centerRequestKey}
@@ -1096,6 +1119,33 @@ export const CitizenDashboard = ({ auth, onLogout }) => {
           <span><i className="legend-full" aria-hidden="true" /> Full / closed</span>
           <span><i className="legend-unverified" aria-hidden="true" /> Not verified</span>
           <span><i className="legend-selected" aria-hidden="true" /> Selected</span>
+        </div>
+        <div className="citizen-map-layer-controls" role="group" aria-label="Map layers">
+          <button
+            type="button"
+            className={`citizen-map-layer-button${showNoahHazards ? ' active' : ''}`}
+            aria-pressed={showNoahHazards}
+            onClick={() => setShowNoahHazards((visible) => !visible)}
+            title={`${showNoahHazards ? 'Hide' : 'Show'} UP NOAH disaster hazards`}
+          >
+            <span className="layer-swatch noah" aria-hidden="true" />
+            {showNoahHazards ? 'Hide' : 'Show'} UP NOAH Disaster Hazards
+          </button>
+          <button
+            type="button"
+            className={`citizen-map-layer-button${showRoadHazards ? ' active' : ''}`}
+            aria-pressed={showRoadHazards}
+            onClick={() => setShowRoadHazards((visible) => !visible)}
+            title={`${showRoadHazards ? 'Hide' : 'Show'} public road hazards`}
+          >
+            <span className="layer-swatch road" aria-hidden="true" />
+            {showRoadHazards ? 'Hide' : 'Show'} road hazards
+          </button>
+          {pinnedLocation && (
+            <button type="button" className="citizen-map-layer-button clear-pin" onClick={clearPinnedLocation} title="Remove dropped pin">
+              × Clear dropped pin
+            </button>
+          )}
         </div>
       </div>
 
@@ -1487,7 +1537,7 @@ export const CitizenDashboard = ({ auth, onLogout }) => {
                   <button
                     type="button"
                     className="pinned-location-clear-btn"
-                    onClick={() => setPinnedLocation(null)}
+                    onClick={clearPinnedLocation}
                   >
                     Clear
                   </button>

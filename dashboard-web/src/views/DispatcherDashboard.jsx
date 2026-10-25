@@ -209,6 +209,7 @@ export const Dashboard = ({ onLogout }) => {
   const [pendingRoadHazards, setPendingRoadHazards] = useState({ type: 'FeatureCollection', features: [] })
   const [roadHazardReviewing, setRoadHazardReviewing] = useState(null)
   const [roadHazardReviewError, setRoadHazardReviewError] = useState('')
+  const [selectedRoadHazard, setSelectedRoadHazard] = useState(null)
   const [hazardLayers, setHazardLayers] = useState([])
   const [hazardLayerPublishing, setHazardLayerPublishing] = useState(null)
   const [routeRerouted, setRouteRerouted] = useState(false)
@@ -840,6 +841,21 @@ export const Dashboard = ({ onLogout }) => {
     }
   }
 
+  const handleMapMarkerClick = (marker) => {
+    if (marker.kind !== 'road-hazard') return
+    const pendingId = String(marker.id || '').startsWith('pending-road-')
+      ? String(marker.id).replace('pending-road-', '')
+      : null
+    const pendingFeature = pendingId
+      ? pendingRoadHazards.features.find((feature) => String(feature.id) === pendingId)
+      : null
+    const hazard = roadHazards.find((item) => String(item.id) === String(marker.id))
+    setSelectedRoadHazard({
+      id: hazard?.id || pendingFeature?.id || pendingId || marker.id,
+      ...(hazard || pendingFeature?.properties || {}),
+    })
+  }
+
   useEffect(() => {
     const clock = window.setInterval(() => setCurrentTime(new Date()), 1000)
     return () => window.clearInterval(clock)
@@ -1452,6 +1468,8 @@ export const Dashboard = ({ onLogout }) => {
   }))
 
   const hazardMarkers = roadHazards.filter((hazard) => hazard.is_active !== false && !hazard.is_resolved).map((hazard) => ({
+    id: hazard.id,
+    kind: 'road-hazard',
     position: [hazard.longitude, hazard.latitude],
     label: `${hazard.road_name || 'Road hazard'} · ${String(hazard.hazard_type).replace(/_/g, ' ')} (${hazard.radius_meters}m)`,
     color: '#ea580c',
@@ -1461,6 +1479,7 @@ export const Dashboard = ({ onLogout }) => {
 
   const pendingHazardMarkers = pendingRoadHazards.features.map(({ id, properties }) => ({
     id: `pending-road-${id}`,
+    kind: 'road-hazard',
     position: [properties.longitude, properties.latitude],
     label: `${properties.road_name || 'Road hazard'} · Pending review`,
     color: '#f59e0b',
@@ -1959,6 +1978,22 @@ export const Dashboard = ({ onLogout }) => {
             <button className="map-hazard-publish-button" type="button" onClick={() => setIsRoadHazardFormOpen((open) => !open)}>
               Report Road Hazard
             </button>
+            {selectedRoadHazard && (
+              <article className="road-hazard-selected-report" aria-label={`Road hazard report ${selectedRoadHazard.id}`}>
+                <div className="road-hazard-selected-heading">
+                  <h3>Road hazard report #{selectedRoadHazard.id}</h3>
+                  <button type="button" onClick={() => setSelectedRoadHazard(null)} aria-label="Close hazard report details">×</button>
+                </div>
+                <dl>
+                  <div><dt>Type</dt><dd>{String(selectedRoadHazard.hazard_type || '—').replace(/_/g, ' ')}</dd></div>
+                  <div><dt>Severity</dt><dd>{selectedRoadHazard.severity || '—'}</dd></div>
+                  <div><dt>Status</dt><dd>{selectedRoadHazard.review_status || (selectedRoadHazard.is_resolved ? 'Resolved' : 'Active')}</dd></div>
+                  <div><dt>Road</dt><dd>{selectedRoadHazard.road_name || 'Unspecified road'}</dd></div>
+                  <div><dt>Location</dt><dd>{selectedRoadHazard.latitude ?? '—'}, {selectedRoadHazard.longitude ?? '—'}</dd></div>
+                  <div><dt>Description</dt><dd>{selectedRoadHazard.description || 'No description provided.'}</dd></div>
+                </dl>
+              </article>
+            )}
             {pendingRoadHazards.features.length > 0 && (
               <section className="road-hazard-review-queue" aria-label="Pending road hazard reports">
                 <h3>Road hazards awaiting review ({pendingRoadHazards.features.length})</h3>
@@ -2040,7 +2075,7 @@ export const Dashboard = ({ onLogout }) => {
                 <span><i className="legend-swatch road-hazard" /> ACTIVE ROAD HAZARD</span>
                 <span><i className="legend-swatch pending-road-hazard" /> PENDING ROAD HAZARD</span>
               </div>
-              <MapContainer hazardLayers={visibleHazardLayers} roadHazardZones={roadHazardZones} pendingRoadHazardZones={pendingRoadHazards} markers={[...mapMarkers, ...activeRouteMarkers]} center={focusedAlertLocation} focusMarkerId={focusedAlertId} selectedAlertCategory={selectedMapAlertCategory} centerRequestKey={focusRequestKey} route={activeEvacuationRoute?.geometry} trackDeviceLocation={false} />
+              <MapContainer hazardLayers={visibleHazardLayers} roadHazardZones={roadHazardZones} pendingRoadHazardZones={pendingRoadHazards} markers={[...mapMarkers, ...activeRouteMarkers]} onMarkerClick={handleMapMarkerClick} center={focusedAlertLocation} focusMarkerId={focusedAlertId} selectedAlertCategory={selectedMapAlertCategory} centerRequestKey={focusRequestKey} route={activeEvacuationRoute?.geometry} trackDeviceLocation={false} />
               <button className="map-resize-handle" onPointerDown={startMapResize} aria-label="Drag to resize map" title="Drag to resize map">↕</button>
             </div>
           </section>
