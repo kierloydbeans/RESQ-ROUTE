@@ -99,6 +99,7 @@ const vehicleMarkerColors = { available: '#00d6a0', in_transit: '#2563eb', maint
 const isCriticalAlert = (alert) => String(alert?.severity || '').toLowerCase() === 'critical'
 const isRecoveringRescuer = (rescuer) => String(rescuer?.status || '').toLowerCase() === 'recovering'
 const isAvailableRescuer = (rescuer) => String(rescuer?.status || '').toLowerCase() === 'available'
+const isDisplayableRescuer = (rescuer) => isAvailableRescuer(rescuer) || isRecoveringRescuer(rescuer)
 const getEligibleAssignmentRescuers = (rescuers, alert) => {
   if (isCriticalAlert(alert)) return rescuers
   const availableRescuers = rescuers.filter(isAvailableRescuer)
@@ -1559,6 +1560,7 @@ export const Dashboard = ({ onLogout }) => {
     handle.addEventListener('pointerup', onPointerUp)
   }
 
+  const activeRescuerCount = rescueUnits.rescuers.filter(isDisplayableRescuer).length
   const sortedRescuers = [...rescueUnits.rescuers].sort((first, second) => {
     if (unitSort === 'name') return (first.full_name || first.username || '').localeCompare(second.full_name || second.username || '')
     return (first.status || '').localeCompare(second.status || '')
@@ -2087,7 +2089,7 @@ export const Dashboard = ({ onLogout }) => {
               <div className="ops-map-layer-controls" role="group" aria-label="Map layers">
                 <button type="button" className={`ops-map-layer-button${showNoahHazards ? ' active' : ''}`} aria-pressed={showNoahHazards} onClick={() => setShowNoahHazards((visible) => !visible)} title={`${showNoahHazards ? 'Hide' : 'Show'} UP NOAH disaster hazards`}>
                   <span className="ops-map-layer-swatch noah" aria-hidden="true" />
-                  {showNoahHazards ? 'Hide' : 'Show'} UP NOAH
+                  {showNoahHazards ? 'Hide' : 'Show'} UP NOAH Disaster hazards
                 </button>
                 <button type="button" className={`ops-map-layer-button${showRoadHazards ? ' active' : ''}`} aria-pressed={showRoadHazards} onClick={() => setShowRoadHazards((visible) => !visible)} title={`${showRoadHazards ? 'Hide' : 'Show'} public road hazards`}>
                   <span className="ops-map-layer-swatch road" aria-hidden="true" />
@@ -2151,7 +2153,7 @@ export const Dashboard = ({ onLogout }) => {
             <div className="unit-panel-heading">
               <PanelTitle
                 title="RESCUER PROFILES"
-                badge={`${rescueUnits.rescuers.length} ACTIVE`}
+                badge={`${activeRescuerCount} ACTIVE`}
                 onClick={() => openModal('units')}
               />
               <button
