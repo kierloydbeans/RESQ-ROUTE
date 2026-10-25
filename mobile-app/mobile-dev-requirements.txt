@@ -1,0 +1,27 @@
+# RESQ-Route mobile development dependencies
+#
+# The mobile app is written in Flutter/Dart. These dependencies are managed by
+# pubspec.yaml and installed with:
+#
+#   flutter pub get
+#
+# This file is intentionally pip-compatible: Flutter packages are documented
+# below as comments because pip cannot install Dart packages.
+
+# Required SDKs (install separately):
+# - Flutter 3.0+
+# - Dart SDK >=3.0.0 <4.0.0 (bundled with Flutter)
+
+# Runtime Flutter packages (declared in pubspec.yaml):
+# flutter_blue_plus ^1.31.0
+# geolocator ^10.1.0
+# web_socket_channel ^2.4.0
+# http ^1.1.0
+# provider ^6.1.0
+# qr_flutter ^4.1.0
+# flutter_map ^6.1.0
+# latlong2 ^0.9.0
+
+# Development Flutter packages:
+# flutter_test (bundled with Flutter)
+# flutter_lints ^3.0.0

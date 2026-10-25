@@ -1,12 +1,15 @@
 import React, { useState } from 'react'
 import { useSearchParams, useNavigate, Link } from 'react-router-dom'
 import Logo from '../components/Logo'
+import GradientBackground from '../components/GradientBackground'
+import { useTheme } from '../ThemeContext'
 
 const rawApiBase = (import.meta.env.VITE_API_URL || import.meta.env.VITE_API_BASE_URL || 'https://resq-route.onrender.com').replace(/\/$/, '')
 const API_BASE_URL = rawApiBase.endsWith('/api/v1') ? rawApiBase.replace(/\/api\/v1$/, '') : rawApiBase
 const API_URL = `${API_BASE_URL}/api/v1`
 
 const ResetPassword = () => {
+  const { isShaderGradient } = useTheme()
   const [searchParams] = useSearchParams()
   const token = searchParams.get('token')
   const navigate = useNavigate()
@@ -55,7 +58,7 @@ const ResetPassword = () => {
   }
 
   return (
-    <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', backgroundColor: '#f3f4f6', padding: '1.5rem' }}>
+    <div className="auth-page" style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', backgroundColor: '#f3f4f6', padding: '1.5rem' }}>
       <div style={{
         maxWidth: '900px',
         width: '100%',
@@ -74,8 +77,11 @@ const ResetPassword = () => {
           display: 'flex',
           flexDirection: 'column',
           justifyContent: 'center',
-          color: '#ffffff'
+          color: '#ffffff',
+          position: 'relative',
+          overflow: 'hidden'
         }}>
+          <GradientBackground animated={isShaderGradient} />
           <h1 style={{ fontSize: '2.25rem', fontWeight: '800', lineHeight: 1.2, marginBottom: '1rem', color: '#ffffff' }}>
             Set New Password
           </h1>
@@ -85,7 +91,7 @@ const ResetPassword = () => {
         </div>
 
         {/* RIGHT PANEL */}
-        <div style={{ flex: '1', padding: '3rem 2.5rem', display: 'flex', flexDirection: 'column', justifyContent: 'center', backgroundColor: '#ffffff' }}>
+        <div className="auth-form-panel" style={{ flex: '1', padding: '3rem 2.5rem', display: 'flex', flexDirection: 'column', justifyContent: 'center', backgroundColor: '#ffffff' }}>
           <div style={{ marginBottom: '1.5rem' }}>
             <Logo size="large" />
           </div>

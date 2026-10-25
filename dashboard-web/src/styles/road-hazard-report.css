@@ -1,0 +1,36 @@
+.road-hazard-report-form { display: grid; gap: 12px; padding: 16px; color: #e7edf5; background: #101827; border: 1px solid #334155; border-radius: 12px; }
+.road-hazard-report-heading { display: flex; justify-content: space-between; gap: 12px; align-items: flex-start; }
+.road-hazard-report-heading h2 { margin: 0; font-size: 18px; }
+.road-hazard-report-heading p { margin: 4px 0 0; color: #a9b5c7; font-size: 12px; }
+.road-hazard-report-heading button { border: 0; background: transparent; color: inherit; font-size: 24px; cursor: pointer; }
+.road-hazard-report-form label { display: grid; gap: 4px; font-size: 12px; font-weight: 600; }
+.road-hazard-report-form input, .road-hazard-report-form select, .road-hazard-report-form textarea { width: 100%; min-width: 0; padding: 9px; color: #e7edf5; background: #1e293b; border: 1px solid #475569; border-radius: 7px; font: inherit; }
+.road-hazard-report-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.road-hazard-submit { padding: 10px; border: 0; border-radius: 7px; color: white; background: #dc2626; font-weight: 700; cursor: pointer; }
+.road-hazard-submit:disabled { opacity: .6; cursor: wait; }
+.road-hazard-report-status { margin: 0; font-size: 12px; line-height: 1.4; }
+[data-theme='light'] .road-hazard-report-form { color: #152033; background: #fff; border-color: #cbd5e1; }
+[data-theme='light'] .road-hazard-report-form input, [data-theme='light'] .road-hazard-report-form select, [data-theme='light'] .road-hazard-report-form textarea { color: #152033; background: #f8fafc; }
+.road-hazard-review-queue { display: grid; gap: 8px; padding: 10px; max-height: 240px; overflow: auto; color: #e7edf5; background: #101827; }
+.road-hazard-review-queue h3 { margin: 0; font-size: 13px; }
+.road-hazard-review-item { display: grid; gap: 4px; padding: 9px; border: 1px solid #475569; border-radius: 8px; font-size: 12px; }
+.road-hazard-review-item p { margin: 0; }
+.road-hazard-review-item small { color: #a9b5c7; }
+.road-hazard-review-item > div { display: flex; gap: 8px; }
+.road-hazard-review-item button { padding: 6px 10px; border: 1px solid #64748b; border-radius: 6px; background: #1e293b; color: inherit; cursor: pointer; }
+.road-hazard-review-item button:first-child { border-color: #16a34a; }
+.road-hazard-review-item button:last-child { border-color: #dc2626; }
+.road-hazard-review-item button:disabled { opacity: .5; cursor: wait; }
+.road-hazard-review-error { margin: 0; padding: 8px; color: #fca5a5; font-size: 12px; }
+.road-hazard-selected-report { display: grid; gap: 8px; margin: 10px; padding: 12px; border: 1px solid #f97316; border-radius: 8px; background: rgba(234, 88, 12, .12); }
+.road-hazard-selected-heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.road-hazard-selected-heading h3 { margin: 0; font-size: 13px; text-transform: uppercase; }
+.road-hazard-selected-heading button { border: 0; background: transparent; color: inherit; font-size: 20px; cursor: pointer; }
+.road-hazard-selected-report dl { display: grid; gap: 5px; margin: 0; font-size: 12px; }
+.road-hazard-selected-report dl > div { display: grid; grid-template-columns: 82px 1fr; gap: 8px; }
+.road-hazard-selected-report dt { color: #94a3b8; text-transform: uppercase; }
+.road-hazard-selected-report dd { margin: 0; overflow-wrap: anywhere; }
+[data-theme='light'] .road-hazard-selected-report { color: #152033; background: #fff7ed; border-color: #f97316; }
+[data-theme='light'] .road-hazard-selected-report dt { color: #64748b; }
+[data-theme='light'] .road-hazard-review-queue { color: #152033; background: #f8fafc; }
+[data-theme='light'] .road-hazard-review-item button { color: #152033; background: #fff; }

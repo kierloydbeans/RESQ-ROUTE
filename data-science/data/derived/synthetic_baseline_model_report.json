@@ -1,0 +1,93 @@
+{
+  "status": "synthetic_prototype_only",
+  "warning": "Target labels are quantile bins derived from provisional baseline_score; no observed hazard labels were used.",
+  "input_rows": 288,
+  "feature_columns": [
+    "building_count",
+    "building_area_m2",
+    "road_count",
+    "road_length_m",
+    "facility_count",
+    "hospital_count",
+    "clinic_count",
+    "doctor_count",
+    "school_count",
+    "shelter_count",
+    "ambulance_station_count",
+    "latest_rain_mm",
+    "rain_6h_total_mm",
+    "rain_24h_total_mm"
+  ],
+  "target_definition": {
+    "source_column": "baseline_score",
+    "class_names": [
+      "low",
+      "medium",
+      "high"
+    ],
+    "quantile_cutoffs": {
+      "low_medium": 0.219488,
+      "medium_high": 0.26339233333333334
+    }
+  },
+  "split": {
+    "test_size": 0.2,
+    "random_state": 42,
+    "train_rows": 230,
+    "test_rows": 58
+  },
+  "metrics": {
+    "accuracy": 0.9137931034482759,
+    "balanced_accuracy": 0.9131578947368421,
+    "classification_report": {
+      "low": {
+        "precision": 1.0,
+        "recall": 0.8947368421052632,
+        "f1-score": 0.9444444444444444,
+        "support": 19.0
+      },
+      "medium": {
+        "precision": 0.85,
+        "recall": 0.8947368421052632,
+        "f1-score": 0.8717948717948718,
+        "support": 19.0
+      },
+      "high": {
+        "precision": 0.9047619047619048,
+        "recall": 0.95,
+        "f1-score": 0.926829268292683,
+        "support": 20.0
+      },
+      "accuracy": 0.9137931034482759,
+      "macro avg": {
+        "precision": 0.9182539682539682,
+        "recall": 0.9131578947368421,
+        "f1-score": 0.9143561948439998,
+        "support": 58.0
+      },
+      "weighted avg": {
+        "precision": 0.9180213464696223,
+        "recall": 0.9137931034482759,
+        "f1-score": 0.9145712478344944,
+        "support": 58.0
+      }
+    },
+    "confusion_matrix": [
+      [
+        17,
+        2,
+        0
+      ],
+      [
+        0,
+        17,
+        2
+      ],
+      [
+        0,
+        1,
+        19
+      ]
+    ]
+  }
+}

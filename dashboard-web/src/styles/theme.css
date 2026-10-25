@@ -1,0 +1,95 @@
+:root {
+  --ops-bg: #070a10;
+  --ops-surface: #0e1320;
+  --ops-surface-2: #111827;
+  --ops-border: #202a3d;
+  --ops-text: #e7edf5;
+  --ops-muted: #a9b5c7;
+  --ops-red: #f23e4f;
+  --ops-green: #00d6a0;
+  --ops-amber: #f4b21b;
+  --ops-blue: #50a8ff;
+  --ops-icon-bg: #271520;
+  --ops-rail-metric-bg: rgba(255, 255, 255, .02);
+  --ops-report-border: #0e7490;
+  --ops-report-bg: rgba(8, 47, 73, .45);
+  --ops-report-accent: #67e8f9;
+  --citizen-accent: #e9654c;
+  --citizen-accent-strong: #f27c67;
+  --citizen-accent-soft: #3b211d;
+  --citizen-accent-border: #8b4a37;
+  --citizen-accent-gradient-start: #c52222;
+  --citizen-accent-gradient-end: #a94b32;
+  --ops-backup-border: #b45309;
+  --ops-backup-bg: rgba(120, 53, 15, .35);
+  --ops-backup-accent: #fbbf24;
+  --auth-role-active-bg: rgba(242, 62, 79, .14);
+  --login-skeleton-base: #1f2937;
+  --login-skeleton-strong: #374151;
+  --ops-font: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --ops-mono: var(--ops-font);
+}
+
+:root[data-theme='light'] {
+  --ops-bg: #e8edf1;
+  --ops-surface: #f8fafb;
+  --ops-surface-2: #ffffff;
+  --ops-border: #cbd5df;
+  --ops-text: #17212b;
+  --ops-muted: #607080;
+  --ops-icon-bg: #fef2f2;
+  --ops-rail-metric-bg: var(--ops-surface-2);
+  --ops-report-border: #0e7490;
+  --ops-report-bg: #ecfeff;
+  --ops-report-accent: #0e7490;
+  --citizen-accent: #b83b20;
+  --citizen-accent-strong: #9f321b;
+  --citizen-accent-soft: #fff0e8;
+  --citizen-accent-border: #e9b39b;
+  --citizen-accent-gradient-start: #c52222;
+  --citizen-accent-gradient-end: #a94b32;
+  --ops-backup-border: #b45309;
+  --ops-backup-bg: #fff7ed;
+  --ops-backup-accent: #92400e;
+  --auth-role-active-bg: #fef2f2;
+  --login-skeleton-base: #e5e7eb;
+  --login-skeleton-strong: #d1d5db;
+}
+
+::view-transition-old(root),
+::view-transition-new(root) {
+  animation-duration: 280ms;
+  animation-timing-function: ease-in-out;
+}
+
+::view-transition-old(root) {
+  animation-name: theme-crossfade-out;
+}
+
+::view-transition-new(root) {
+  animation-name: theme-crossfade-in;
+}
+
+@keyframes theme-crossfade-out {
+  to { opacity: 0; }
+}
+
+@keyframes theme-crossfade-in {
+  from { opacity: 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  ::view-transition-old(root),
+  ::view-transition-new(root) {
+    animation-duration: 0.01ms;
+  }
+}
+
+* { box-sizing: border-box; }
+html, body, #root { width: 100%; min-height: 100vh; margin: 0; padding: 0; overflow-x: hidden; }
+body { margin: 0; background: var(--ops-bg); color: var(--ops-text); font-family: var(--ops-font); }
+button, textarea, select { font: inherit; }
+.RaLayout-sidebar, .RaSidebar-root, .RaSidebar-fixed, .MuiDrawer-root, .RaAppBar-root { display: none !important; }
+.RaLayout-appFrame { margin-top: 0 !important; }
+.RaLayout-contentWithSidebar { margin-left: 0 !important; }
+.RaLayout-content { padding: 0 !important; }

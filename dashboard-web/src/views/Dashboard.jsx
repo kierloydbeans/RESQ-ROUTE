@@ -1,321 +1,66 @@
-import React, { useEffect, useState } from 'react'
-import { useWebSocket } from '../hooks/useWebSocket'
-import MapContainer from '../components/MapContainer'
-import IntakeStats from '../components/IntakeStats'
-import Logo from '../components/Logo'
+import React, { useCallback, useState } from 'react'
+import { Navigate } from 'react-router-dom'
+import CitizenDashboard from './CitizenDashboard'
+import DispatcherDashboard from './DispatcherDashboard'
+import CoordinatorDashboard from './CoordinatorDashboard'
+import CenterCoordinatorDashboard from './CenterCoordinatorDashboard'
+import RescuerDashboard from './RescuerDashboard'
+import AdminDashboard from './AdminDashboard'
+import LogoutOverlay from '../components/LogoutOverlay'
+import '../styles/logout-transition.css'
 
-// Convert http/https base URL to ws/wss dynamically
-const rawApiBase = (import.meta.env.VITE_API_URL || import.meta.env.VITE_API_BASE_URL || 'https://resq-route.onrender.com').replace(/\/$/, '')
-const API_BASE_URL = rawApiBase.endsWith('/api/v1') ? rawApiBase.replace(/\/api\/v1$/, '') : rawApiBase
-const WS_BASE_URL = API_BASE_URL.replace(/^http/, 'ws')
+const getStoredAuth = () => {
+  try {
+    return JSON.parse(localStorage.getItem('auth'))
+  } catch {
+    return null
+  }
+}
+
+const normalizeRole = (role) => String(role?.value || role || '').toLowerCase().split('.').pop()
 
 export const Dashboard = () => {
-  const [latestGps, setLatestGps] = useState(null)
-  const [showTestGps, setShowTestGps] = useState(false)
-  const [testLat, setTestLat] = useState(14.6349)
-  const [testLng, setTestLng] = useState(120.9722)
-  const [sendingTest, setSendingTest] = useState(false)
-  const { isConnected, lastMessage } = useWebSocket(`${WS_BASE_URL}/api/v1/ws`)
+  const auth = getStoredAuth()
+  const role = normalizeRole(auth?.user?.role) || 'citizen'
+  const [isLoggingOut, setIsLoggingOut] = useState(false)
 
-  useEffect(() => {
-    fetch(`${API_BASE_URL}/api/v1/gps`)
-      .then((response) => response.json())
-      .then((data) => setLatestGps(data.gps))
-      .catch(() => {})
-  }, [API_BASE_URL])
+  const handleLogout = useCallback(() => {
+    if (isLoggingOut) return
+    setIsLoggingOut(true)
+    window.setTimeout(() => {
+      localStorage.removeItem('auth')
+      window.location.href = '/'
+    }, 720)
+  }, [isLoggingOut])
 
-  useEffect(() => {
-    if (lastMessage?.type === 'gps_update' && lastMessage.data) {
-      setLatestGps(lastMessage.data)
-    }
-  }, [lastMessage])
+  let dashboard
 
-  const handleSendTestGps = async () => {
-    setSendingTest(true)
-    try {
-      const response = await fetch(`${API_BASE_URL}/api/v1/gps`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          latitude: parseFloat(testLat),
-          longitude: parseFloat(testLng),
-          accuracy: 10,
-          device_id: 'dashboard-test'
-        })
-      })
-      if (response.ok) {
-        setShowTestGps(false)
-      }
-    } catch (err) {
-      console.error('Failed to send test GPS:', err)
-    } finally {
-      setSendingTest(false)
-    }
+  if (['citizen', 'public'].includes(role)) {
+    dashboard = <CitizenDashboard auth={auth} onLogout={handleLogout} />
+  } else if (role === 'admin') {
+    dashboard = <AdminDashboard auth={auth} onLogout={handleLogout} />
+  } else if (role === 'coordinator') {
+    dashboard = <CoordinatorDashboard auth={auth} onLogout={handleLogout} />
+  } else if (role === 'center_coordinator') {
+    dashboard = <CenterCoordinatorDashboard auth={auth} onLogout={handleLogout} />
+  } else if (role === 'dispatcher') {
+    dashboard = <DispatcherDashboard auth={auth} onLogout={handleLogout} />
+  } else if (role === 'rescuer') {
+    dashboard = <Navigate to="/rescuer" replace />
+  } else {
+    dashboard = (
+      <main className="restricted-console">
+        <h1>Access denied</h1>
+        <p>This dashboard is not available for the current role.</p>
+        <button className="emergency-button" onClick={handleLogout}>RETURN TO LOGIN</button>
+      </main>
+    )
   }
-
-  const mockStats = {
-    totalEvacuees: 1250,
-    capacityUsed: 78,
-    activeShelters: 12,
-    criticalNeeds: 5
-  }
-
-  const mockMarkers = [
-    { position: [14.65, 120.98], label: 'Caloocan City Hall Shelter' },
-    { position: [14.66, 120.99], label: 'Bagong Silang Evacuation Center' },
-    { position: [14.64, 120.97], label: 'Tala High School Shelter' }
-  ]
 
   return (
-    <div style={{ padding: '2rem', backgroundColor: '#f9fafb', minHeight: '100vh' }}>
-      {/* HEADER SECTION */}
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '2rem' }}>
-        <div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', marginBottom: '0.5rem' }}>
-            <Logo size="medium" />
-            <h1 style={{
-              fontSize: '2rem',
-              fontWeight: '800',
-              margin: 0,
-              background: 'linear-gradient(135deg, #c52222 0%, #a36b16 100%)',
-              WebkitBackgroundClip: 'text',
-              WebkitTextFillColor: 'transparent'
-            }}>
-              Central Command Panel
-            </h1>
-          </div>
-          <p style={{ color: '#6b7280', fontSize: '0.95rem', margin: 0 }}>
-            Real-time disaster response coordination and shelter monitoring
-          </p>
-        </div>
-
-        <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
-          <div style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: '0.75rem',
-            backgroundColor: '#ffffff',
-            padding: '0.625rem 1.25rem',
-            borderRadius: '9999px',
-            boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.05)',
-            border: '1px solid #e5e7eb'
-          }}>
-            <span style={{
-              height: '10px',
-              width: '10px',
-              borderRadius: '50%',
-              backgroundColor: isConnected ? '#10b981' : '#ef4444',
-              display: 'inline-block'
-            }}></span>
-            <span style={{ fontSize: '0.875rem', fontWeight: '600', color: '#374151' }}>
-              System {isConnected ? 'Online' : 'Offline'}
-            </span>
-          </div>
-
-          <div style={{
-            backgroundColor: '#ffffff',
-            padding: '0.875rem 1.1rem',
-            borderRadius: '14px',
-            boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.05)',
-            border: '1px solid #e5e7eb',
-            minWidth: '220px'
-          }}>
-            <div style={{ fontSize: '0.75rem', textTransform: 'uppercase', letterSpacing: '0.08em', color: '#6b7280' }}>
-              Live GPS
-            </div>
-            {latestGps ? (
-              <div style={{ marginTop: '0.25rem', fontWeight: '700', color: '#111827' }}>
-                {latestGps.latitude.toFixed(5)}, {latestGps.longitude.toFixed(5)}
-              </div>
-            ) : (
-              <div style={{ marginTop: '0.25rem', color: '#9ca3af' }}>Waiting for device telemetry...</div>
-            )}
-          </div>
-
-          <button
-            onClick={() => setShowTestGps(true)}
-            style={{
-              padding: '0.625rem 1.25rem',
-              borderRadius: '9999px',
-              border: 'none',
-              backgroundColor: '#3b82f6',
-              color: '#ffffff',
-              fontSize: '0.875rem',
-              fontWeight: '600',
-              cursor: 'pointer',
-              boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)'
-            }}
-          >
-            Test GPS
-          </button>
-        </div>
-      </div>
-
-      {/* TEST GPS MODAL */}
-      {showTestGps && (
-        <div style={{
-          position: 'fixed',
-          inset: 0,
-          backgroundColor: 'rgba(0, 0, 0, 0.5)',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          zIndex: 50
-        }}>
-          <div style={{
-            backgroundColor: '#ffffff',
-            borderRadius: '12px',
-            padding: '2rem',
-            maxWidth: '400px',
-            boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.1)'
-          }}>
-            <h2 style={{ fontSize: '1.5rem', fontWeight: '700', margin: '0 0 1rem 0', color: '#111827' }}>
-              Send Test GPS
-            </h2>
-            <div style={{ marginBottom: '1rem' }}>
-              <label style={{ display: 'block', fontSize: '0.875rem', fontWeight: '600', color: '#374151', marginBottom: '0.5rem' }}>
-                Latitude
-              </label>
-              <input
-                type="number"
-                step="0.0001"
-                value={testLat}
-                onChange={(e) => setTestLat(e.target.value)}
-                style={{
-                  width: '100%',
-                  padding: '0.75rem',
-                  border: '1px solid #e5e7eb',
-                  borderRadius: '8px',
-                  fontSize: '0.875rem',
-                  boxSizing: 'border-box'
-                }}
-              />
-            </div>
-            <div style={{ marginBottom: '1.5rem' }}>
-              <label style={{ display: 'block', fontSize: '0.875rem', fontWeight: '600', color: '#374151', marginBottom: '0.5rem' }}>
-                Longitude
-              </label>
-              <input
-                type="number"
-                step="0.0001"
-                value={testLng}
-                onChange={(e) => setTestLng(e.target.value)}
-                style={{
-                  width: '100%',
-                  padding: '0.75rem',
-                  border: '1px solid #e5e7eb',
-                  borderRadius: '8px',
-                  fontSize: '0.875rem',
-                  boxSizing: 'border-box'
-                }}
-              />
-            </div>
-            <div style={{ display: 'flex', gap: '0.75rem' }}>
-              <button
-                onClick={() => setShowTestGps(false)}
-                style={{
-                  flex: 1,
-                  padding: '0.75rem',
-                  borderRadius: '8px',
-                  border: '1px solid #e5e7eb',
-                  backgroundColor: '#f3f4f6',
-                  color: '#374151',
-                  fontSize: '0.875rem',
-                  fontWeight: '600',
-                  cursor: 'pointer'
-                }}
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleSendTestGps}
-                disabled={sendingTest}
-                style={{
-                  flex: 1,
-                  padding: '0.75rem',
-                  borderRadius: '8px',
-                  border: 'none',
-                  backgroundColor: sendingTest ? '#d1d5db' : '#3b82f6',
-                  color: '#ffffff',
-                  fontSize: '0.875rem',
-                  fontWeight: '600',
-                  cursor: sendingTest ? 'not-allowed' : 'pointer'
-                }}
-              >
-                {sendingTest ? 'Sending...' : 'Send'}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* DASHBOARD GRID CONTENT */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: '1.5rem' }}>
-        {/* STATS OVERVIEW */}
-        <div style={{
-          backgroundColor: '#ffffff',
-          borderRadius: '16px',
-          boxShadow: '0 4px 12px rgba(0,0,0,0.03)',
-          border: '1px solid #e5e7eb',
-          overflow: 'hidden'
-        }}>
-          <IntakeStats stats={mockStats} />
-        </div>
-
-        {/* LIVE MAP CARD */}
-        <div style={{
-          backgroundColor: '#ffffff',
-          borderRadius: '16px',
-          padding: '1.5rem',
-          boxShadow: '0 4px 12px rgba(0,0,0,0.03)',
-          border: '1px solid #e5e7eb'
-        }}>
-          <div style={{ marginBottom: '1.25rem' }}>
-            <h3 style={{ fontSize: '1.25rem', fontWeight: '700', color: '#111827', margin: 0 }}>
-              Live Operations Map
-            </h3>
-            <p style={{ color: '#6b7280', fontSize: '0.875rem', marginTop: '0.25rem', margin: 0 }}>
-              Real-time shelter status, incident dispatching, and evacuation locations
-            </p>
-          </div>
-          <div style={{ borderRadius: '12px', overflow: 'hidden', minHeight: '400px' }}>
-            <MapContainer markers={mockMarkers} />
-          </div>
-        </div>
-
-        {/* WEBSOCKET LOG & DETAILS CARD */}
-        <div style={{
-          backgroundColor: '#ffffff',
-          borderRadius: '16px',
-          padding: '1.25rem 1.5rem',
-          boxShadow: '0 4px 12px rgba(0,0,0,0.03)',
-          border: '1px solid #e5e7eb',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between'
-        }}>
-          <div>
-            <h4 style={{ fontSize: '0.95rem', fontWeight: '700', color: '#374151', margin: 0 }}>
-              Live Telemetry Stream
-            </h4>
-            <p style={{ color: '#6b7280', fontSize: '0.85rem', marginTop: '0.25rem', margin: 0 }}>
-              WebSocket status: <strong style={{ color: isConnected ? '#059669' : '#dc2626' }}>{isConnected ? 'Connected to /ws' : 'Reconnecting...'}</strong>
-            </p>
-          </div>
-          {lastMessage && (
-            <div style={{
-              fontSize: '0.8rem',
-              color: '#4b5563',
-              backgroundColor: '#f3f4f6',
-              padding: '0.5rem 0.85rem',
-              borderRadius: '8px',
-              fontFamily: 'monospace'
-            }}>
-              Latest update received
-            </div>
-          )}
-        </div>
-      </div>
+    <div className={`dashboard-session ${isLoggingOut ? 'is-logging-out' : ''}`}>
+      {dashboard}
+      <LogoutOverlay active={isLoggingOut} />
     </div>
   )
 }

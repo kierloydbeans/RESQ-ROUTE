@@ -29,6 +29,15 @@ INSERT INTO vehicles (plate_number, vehicle_type, driver_name, driver_phone, cap
 ('GHI-9012', 'van', 'Antonio Cruz', '09153333333', 12, 14.6400, 120.9700, 'available', 3, NOW(), NOW()),
 ('JKL-3456', 'ambulance', 'Maria Reyes', '09154444444', 4, 14.6450, 120.9750, 'maintenance', 4, NOW(), NOW());
 
+-- Insert mock road hazards that Valhalla should avoid when routing citizens
+INSERT INTO road_hazard_reports (
+    hazard_type, description, latitude, longitude, radius_meters, severity, road_name, reporter_name, is_active, is_resolved, reported_at
+) VALUES
+('debris', 'Fallen trees blocking the road toward Bagong Silang', 14.6550, 120.9850, 80, 'high', 'A. Mabini Street', 'Field observer', true, false, NOW()),
+('flood', 'Deep flood covering the carriageway near Grace Park', 14.6475, 120.9775, 90, 'critical', 'Rizal Avenue Extension', 'Barangay watch', true, false, NOW()),
+('collapsed_road', 'Cracked pavement and sinkhole on the approach to Tala', 14.6450, 120.9755, 70, 'high', 'Quirino Highway', 'Public works', true, false, NOW()),
+('downed_power_line', 'Live wire across the lane, already cleared', 14.6580, 120.9880, 60, 'medium', 'Congressional Road', 'Meralco crew', true, true, NOW());
+
 -- Insert mock hazard reports
 INSERT INTO reports (type, description, latitude, longitude, severity, reporter_name, reporter_phone, is_resolved, reported_at) VALUES
 ('structural', 'Collapsed building wall on Main Street', 14.6520, 120.9820, 'high', 'John Doe', '09161111111', false, NOW()),

@@ -1,0 +1,2 @@
+# Convenience entry point for installing the backend dependencies from the repository root.
+-r backend-api/requirements.txt

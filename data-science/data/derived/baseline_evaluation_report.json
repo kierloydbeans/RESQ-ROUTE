@@ -1,0 +1,87 @@
+{
+  "evaluation_type": "label_free_baseline_diagnostics",
+  "input_rows": 288,
+  "score_bounds_valid": true,
+  "score_distribution": {
+    "min": 0.07905,
+    "p25": 0.2070425,
+    "median": 0.237124,
+    "p75": 0.28239274999999997,
+    "max": 0.475469,
+    "mean": 0.24999711111111111
+  },
+  "component_distribution": {
+    "flood": {
+      "min": 0.06,
+      "max": 0.06,
+      "mean": 0.06
+    },
+    "fire": {
+      "min": 0.098099,
+      "max": 0.890938,
+      "mean": 0.4399941770833333
+    }
+  },
+  "threshold_counts": {
+    "0.2": {
+      "count": 229,
+      "proportion": 0.795139
+    },
+    "0.3": {
+      "count": 46,
+      "proportion": 0.159722
+    },
+    "0.4": {
+      "count": 14,
+      "proportion": 0.048611
+    },
+    "0.5": {
+      "count": 0,
+      "proportion": 0.0
+    }
+  },
+  "top_decile": {
+    "cell_count": 29,
+    "mean_score": 0.3943364827586207,
+    "grid_ids": [
+      "sc-r03-c02",
+      "sc-r12-c02",
+      "sc-r10-c03",
+      "sc-r12-c12",
+      "sc-r10-c01",
+      "sc-r10-c02",
+      "sc-r12-c13",
+      "sc-r04-c02",
+      "sc-r13-c09",
+      "sc-r03-c03",
+      "sc-r02-c02",
+      "sc-r05-c13",
+      "sc-r01-c02",
+      "sc-r02-c03",
+      "sc-r09-c04",
+      "sc-r08-c04",
+      "sc-r12-c08",
+      "sc-r09-c02",
+      "sc-r04-c12",
+      "sc-r13-c13",
+      "sc-r13-c12",
+      "sc-r10-c00",
+      "sc-r07-c05",
+      "sc-r16-c07",
+      "sc-r09-c01",
+      "sc-r09-c12",
+      "sc-r06-c05",
+      "sc-r12-c09",
+      "sc-r01-c11"
+    ]
+  },
+  "unavailable_evaluation": [
+    "No precision, recall, F1, ROC-AUC, PR-AUC, calibration, MAE, or RMSE: no verified hazard labels are available.",
+    "No temporal or geographic holdout evaluation: the current table is a single provisional snapshot."
+  ],
+  "limitations": [
+    "Scores use a provisional bounding box rather than a verified barangay boundary.",
+    "The rainfall threshold and OSM urban-form proxies are not calibrated to observed incidents.",
+    "Earthquake and vulnerability components are absent."
+  ]
+}

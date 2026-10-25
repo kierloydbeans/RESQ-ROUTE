@@ -1,8 +1,11 @@
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlmodel import Session, select
 from typing import List
+from app.core.security import get_current_user
 from app.models.center import Center, CenterCreate, CenterRead, CenterUpdate
 from app.db.session import get_session
+from app.models.user import User, UserRole
+from app.services.audit_logging import record_audit_log
 
 router = APIRouter()
 
@@ -39,8 +42,19 @@ async def create_shelter(
 async def update_shelter(
     center_id: int,
     center_update: CenterUpdate,
-    session: Session = Depends(get_session)
+    request: Request,
+    current_user: dict = Depends(get_current_user),
+    session: Session = Depends(get_session),
 ):
+    user_result = await session.execute(
+        select(User).where(User.username == current_user.get("sub"))
+    )
+    user = user_result.scalar_one_or_none()
+    if not user or not user.is_active:
+        raise HTTPException(status_code=401, detail="Active user account required")
+    if user.role not in {UserRole.ADMIN, UserRole.COORDINATOR}:
+        raise HTTPException(status_code=403, detail="Coordinator account required")
+
     result = await session.execute(select(Center).where(Center.id == center_id))
     db_center = result.scalar_one_or_none()
     if not db_center:
@@ -50,6 +64,7 @@ async def update_shelter(
     for key, value in center_data.items():
         setattr(db_center, key, value)
     
+    record_audit_log(session, current_user, request, f"Evacuation center {center_id} updated")
     await session.commit()
     await session.refresh(db_center)
     return db_center

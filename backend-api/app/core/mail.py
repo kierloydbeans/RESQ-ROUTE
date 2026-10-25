@@ -1,20 +1,43 @@
-# app/core/mail.py
-import smtplib
-from email.message import EmailMessage
+import json
+from urllib.error import HTTPError, URLError
+from urllib.request import Request, urlopen
+
 from app.core.config import settings
 
-def send_email(email_to: str, subject: str, body: str) -> None:
-    msg = EmailMessage()
-    msg["Subject"] = subject
-    msg["From"] = f"{settings.EMAILS_FROM_NAME} <{settings.EMAILS_FROM_EMAIL}>"
-    msg["To"] = email_to
-    msg.set_content(body)
 
-    with smtplib.SMTP(settings.SMTP_HOST, settings.SMTP_PORT) as server:
-        if settings.SMTP_TLS:
-            server.starttls()
-        server.login(settings.SMTP_USER, settings.SMTP_PASSWORD)
-        server.send_message(msg)
+def send_email(email_to: str, subject: str, body: str, html_body: str | None = None) -> None:
+    payload = {
+        "sender": {
+            "name": settings.EMAILS_FROM_NAME,
+            "email": settings.EMAILS_FROM_EMAIL,
+        },
+        "to": [{"email": email_to}],
+        "subject": subject,
+        "textContent": body,
+    }
+    if html_body:
+        payload["htmlContent"] = html_body
+
+    request = Request(
+        settings.BREVO_API_URL,
+        data=json.dumps(payload).encode("utf-8"),
+        headers={
+            "accept": "application/json",
+            "api-key": settings.BREVO_API_KEY,
+            "content-type": "application/json",
+        },
+        method="POST",
+    )
+
+    try:
+        with urlopen(request, timeout=15) as response:
+            if response.status < 200 or response.status >= 300:
+                raise RuntimeError(f"Brevo email request failed with status {response.status}")
+    except HTTPError as error:
+        response_body = error.read().decode("utf-8", errors="replace")
+        raise RuntimeError(f"Brevo email request failed with status {error.code}: {response_body}") from error
+    except URLError as error:
+        raise RuntimeError(f"Brevo email request could not be sent: {error.reason}") from error
 
 def send_reset_password_email(email_to: str, token: str) -> None:
     # Set to your React Dashboard URL or local dev host
@@ -36,9 +59,6 @@ The ResQ-Route Team
     send_email(email_to=email_to, subject=subject, body=body)
 
 def send_otp_email(email_to: str, otp_code: str) -> None:
-    """
-    Sends a 6-digit verification OTP code via SMTP.
-    """
     subject = f"{settings.PROJECT_NAME} - Your Verification Code"
     
     # Text fallback for strict mail clients
@@ -80,18 +100,9 @@ The ResQ-Route Team
     </html>
     """
 
-    msg = EmailMessage()
-    msg['Subject'] = subject
-    msg['From'] = f"{settings.EMAILS_FROM_NAME} <{settings.EMAILS_FROM_EMAIL}>"
-    msg['To'] = email_to
-    
-    msg.set_content(text_content)
-    msg.add_alternative(html_content, subtype='html')
-
-    # Send using your SMTP settings
-    with smtplib.SMTP(settings.SMTP_HOST, settings.SMTP_PORT) as server:
-        if settings.SMTP_TLS:
-            server.starttls()
-        if settings.SMTP_USER and settings.SMTP_PASSWORD:
-            server.login(settings.SMTP_USER, settings.SMTP_PASSWORD)
-        server.send_message(msg)
+    send_email(
+        email_to=email_to,
+        subject=subject,
+        body=text_content,
+        html_body=html_content,
+    )

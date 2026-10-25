@@ -1,0 +1,2559 @@
+{
+  "definition": "Barangays 1 through 164",
+  "relation_count_requested": 164,
+  "relation_ids": [
+    338857,
+    338858,
+    338867,
+    338868,
+    338876,
+    338878,
+    396424,
+    396425,
+    396426,
+    396427,
+    396428,
+    396539,
+    396540,
+    1731552,
+    1731553,
+    1731554,
+    1731555,
+    1731556,
+    1731557,
+    1731558,
+    1731559,
+    1731560,
+    1731561,
+    1731562,
+    1731563,
+    1731564,
+    1731565,
+    1731566,
+    1731567,
+    1731568,
+    1731569,
+    1731570,
+    1731571,
+    1731572,
+    1731573,
+    1731574,
+    1731718,
+    1731719,
+    1731720,
+    1731721,
+    1731722,
+    1731723,
+    1731724,
+    1731725,
+    1731726,
+    1731727,
+    1731728,
+    1731729,
+    1731730,
+    1731731,
+    1731732,
+    1731733,
+    1731734,
+    1731735,
+    1731736,
+    1731737,
+    1731738,
+    1731739,
+    1731740,
+    3273443,
+    3273444,
+    3273445,
+    3273446,
+    3273447,
+    3273448,
+    3273449,
+    3273450,
+    3273451,
+    3273452,
+    3400245,
+    3400246,
+    3400247,
+    3400248,
+    3400249,
+    3400250,
+    3400251,
+    3400252,
+    3400273,
+    3400274,
+    3400275,
+    3400276,
+    3400277,
+    3400278,
+    3400279,
+    3400280,
+    3400281,
+    3400282,
+    3400283,
+    3400284,
+    3400285,
+    3400307,
+    3400308,
+    3400309,
+    3400310,
+    3400311,
+    3400312,
+    3400313,
+    3400314,
+    3400324,
+    3400325,
+    3400326,
+    3400327,
+    3400328,
+    3400329,
+    3400330,
+    3400447,
+    3400448,
+    3400449,
+    3400450,
+    3400451,
+    3400452,
+    3400688,
+    3400689,
+    3400690,
+    3400691,
+    3400692,
+    3400693,
+    3400694,
+    3400695,
+    3400696,
+    3400697,
+    3400698,
+    3400699,
+    3400700,
+    4443464,
+    4443465,
+    4443466,
+    4443467,
+    4443468,
+    4443469,
+    4443470,
+    4443471,
+    4443536,
+    4443537,
+    4443538,
+    4443539,
+    4443540,
+    4443541,
+    4443554,
+    4443555,
+    4443556,
+    4443557,
+    4443558,
+    4443559,
+    4443592,
+    4443593,
+    4443594,
+    4443595,
+    4443596,
+    4443597,
+    4443598,
+    4443599,
+    4443600,
+    4443601,
+    4443602,
+    4445753,
+    4445754,
+    4445755,
+    4445813,
+    4445814,
+    4445815,
+    4445816,
+    4445817,
+    4445818
+  ],
+  "selected_relations": [
+    {
+      "relation_id": 338857,
+      "name": "Barangay 134",
+      "center": {
+        "lat": 14.6595735,
+        "lon": 120.9908993
+      },
+      "ref": "137501134"
+    },
+    {
+      "relation_id": 338858,
+      "name": "Barangay 135",
+      "center": {
+        "lat": 14.6595849,
+        "lon": 120.9924454
+      },
+      "ref": "137501135"
+    },
+    {
+      "relation_id": 338867,
+      "name": "Barangay 137",
+      "center": {
+        "lat": 14.6608062,
+        "lon": 120.9947362
+      },
+      "ref": "137501137"
+    },
+    {
+      "relation_id": 338868,
+      "name": "Barangay 136",
+      "center": {
+        "lat": 14.6584687,
+        "lon": 120.9947613
+      },
+      "ref": "137501136"
+    },
+    {
+      "relation_id": 338876,
+      "name": "Barangay 138",
+      "center": {
+        "lat": 14.6596552,
+        "lon": 120.9970486
+      },
+      "ref": "137501138"
+    },
+    {
+      "relation_id": 338878,
+      "name": "Barangay 139",
+      "center": {
+        "lat": 14.6596874,
+        "lon": 120.998579
+      },
+      "ref": "137501139"
+    },
+    {
+      "relation_id": 396424,
+      "name": "Barangay 103",
+      "center": {
+        "lat": 14.6492486,
+        "lon": 120.9902512
+      },
+      "ref": "137501103"
+    },
+    {
+      "relation_id": 396425,
+      "name": "Barangay 104",
+      "center": {
+        "lat": 14.6492929,
+        "lon": 120.9888168
+      },
+      "ref": "137501104"
+    },
+    {
+      "relation_id": 396426,
+      "name": "Barangay 121",
+      "center": {
+        "lat": 14.6464619,
+        "lon": 120.989437
+      },
+      "ref": "137501121"
+    },
+    {
+      "relation_id": 396427,
+      "name": "Barangay 112",
+      "center": {
+        "lat": 14.6465196,
+        "lon": 120.9872873
+      },
+      "ref": "137501112"
+    },
+    {
+      "relation_id": 396428,
+      "name": "Barangay 111",
+      "center": {
+        "lat": 14.6465651,
+        "lon": 120.9858466
+      },
+      "ref": "137501111"
+    },
+    {
+      "relation_id": 396539,
+      "name": "Barangay 108",
+      "center": {
+        "lat": 14.6500473,
+        "lon": 120.9874028
+      },
+      "ref": "137501108"
+    },
+    {
+      "relation_id": 396540,
+      "name": "Barangay 107",
+      "center": {
+        "lat": 14.6500936,
+        "lon": 120.985957
+      },
+      "ref": "137501107"
+    },
+    {
+      "relation_id": 1731552,
+      "name": "Barangay 86",
+      "center": {
+        "lat": 14.6564235,
+        "lon": 120.9861151
+      },
+      "ref": "137501086"
+    },
+    {
+      "relation_id": 1731553,
+      "name": "Barangay 106",
+      "center": {
+        "lat": 14.6501429,
+        "lon": 120.9844883
+      },
+      "ref": "137501106"
+    },
+    {
+      "relation_id": 1731554,
+      "name": "Barangay 116",
+      "center": {
+        "lat": 14.6450805,
+        "lon": 120.9872251
+      },
+      "ref": "137501116"
+    },
+    {
+      "relation_id": 1731555,
+      "name": "Barangay 94",
+      "center": {
+        "lat": 14.656498,
+        "lon": 120.9941648
+      },
+      "ref": "137501094"
+    },
+    {
+      "relation_id": 1731556,
+      "name": "Barangay 113",
+      "center": {
+        "lat": 14.6451802,
+        "lon": 120.9843477
+      },
+      "ref": "137501113"
+    },
+    {
+      "relation_id": 1731557,
+      "name": "Barangay 97",
+      "center": {
+        "lat": 14.6526573,
+        "lon": 120.9932389
+      },
+      "ref": "137501097"
+    },
+    {
+      "relation_id": 1731558,
+      "name": "Barangay 110",
+      "center": {
+        "lat": 14.6465382,
+        "lon": 120.9843895
+      },
+      "ref": "137501110"
+    },
+    {
+      "relation_id": 1731559,
+      "name": "Barangay 92",
+      "center": {
+        "lat": 14.6541931,
+        "lon": 120.9914862
+      },
+      "ref": "137501092"
+    },
+    {
+      "relation_id": 1731560,
+      "name": "Barangay 114",
+      "center": {
+        "lat": 14.6451517,
+        "lon": 120.9854311
+      },
+      "ref": "137501114"
+    },
+    {
+      "relation_id": 1731561,
+      "name": "Barangay 91",
+      "center": {
+        "lat": 14.6521867,
+        "lon": 120.9863697
+      },
+      "ref": "137501091"
+    },
+    {
+      "relation_id": 1731562,
+      "name": "Barangay 89",
+      "center": {
+        "lat": 14.6542156,
+        "lon": 120.9893503
+      },
+      "ref": "137501089"
+    },
+    {
+      "relation_id": 1731563,
+      "name": "Barangay 88",
+      "center": {
+        "lat": 14.6548159,
+        "lon": 120.9860751
+      },
+      "ref": "137501088"
+    },
+    {
+      "relation_id": 1731564,
+      "name": "Barangay 98",
+      "center": {
+        "lat": 14.6522626,
+        "lon": 120.9943071
+      },
+      "ref": "137501098"
+    },
+    {
+      "relation_id": 1731565,
+      "name": "Barangay 115",
+      "center": {
+        "lat": 14.6451256,
+        "lon": 120.9861535
+      },
+      "ref": "137501115"
+    },
+    {
+      "relation_id": 1731566,
+      "name": "Barangay 122",
+      "center": {
+        "lat": 14.646064,
+        "lon": 120.9924548
+      },
+      "ref": "137501122"
+    },
+    {
+      "relation_id": 1731567,
+      "name": "Barangay 93",
+      "center": {
+        "lat": 14.652045,
+        "lon": 120.990702
+      },
+      "ref": "137501093"
+    },
+    {
+      "relation_id": 1731568,
+      "name": "Barangay 124",
+      "center": {
+        "lat": 14.6447934,
+        "lon": 120.9904012
+      },
+      "ref": "137501124"
+    },
+    {
+      "relation_id": 1731569,
+      "name": "Barangay 123",
+      "center": {
+        "lat": 14.6450315,
+        "lon": 120.9886853
+      },
+      "ref": "137501123"
+    },
+    {
+      "relation_id": 1731570,
+      "name": "Barangay 125",
+      "center": {
+        "lat": 14.6449299,
+        "lon": 120.9919611
+      },
+      "ref": "137501125"
+    },
+    {
+      "relation_id": 1731571,
+      "name": "Barangay 90",
+      "center": {
+        "lat": 14.65359,
+        "lon": 120.9860629
+      },
+      "ref": "137501090"
+    },
+    {
+      "relation_id": 1731572,
+      "name": "Barangay 87",
+      "center": {
+        "lat": 14.6564596,
+        "lon": 120.9904502
+      },
+      "ref": "137501087"
+    },
+    {
+      "relation_id": 1731573,
+      "name": "Barangay 96",
+      "center": {
+        "lat": 14.6544291,
+        "lon": 120.9932648
+      },
+      "ref": "137501096"
+    },
+    {
+      "relation_id": 1731574,
+      "name": "Barangay 109",
+      "center": {
+        "lat": 14.6479913,
+        "lon": 120.9858566
+      },
+      "ref": "137501109"
+    },
+    {
+      "relation_id": 1731718,
+      "name": "Barangay 146",
+      "center": {
+        "lat": 14.6648037,
+        "lon": 120.995846
+      },
+      "ref": "137501146"
+    },
+    {
+      "relation_id": 1731719,
+      "name": "Barangay 145",
+      "center": {
+        "lat": 14.6658141,
+        "lon": 120.9939361
+      },
+      "ref": "137501145"
+    },
+    {
+      "relation_id": 1731720,
+      "name": "Barangay 84",
+      "center": {
+        "lat": 14.6598558,
+        "lon": 120.9867608
+      },
+      "ref": "137501084"
+    },
+    {
+      "relation_id": 1731721,
+      "name": "Barangay 150",
+      "center": {
+        "lat": 14.6664242,
+        "lon": 120.997226
+      },
+      "ref": "137501150"
+    },
+    {
+      "relation_id": 1731722,
+      "name": "Barangay 154",
+      "center": {
+        "lat": 14.6661899,
+        "lon": 120.999433
+      },
+      "ref": "137501154"
+    },
+    {
+      "relation_id": 1731723,
+      "name": "Barangay 133",
+      "center": {
+        "lat": 14.662991,
+        "lon": 120.9926215
+      },
+      "ref": "137501133"
+    },
+    {
+      "relation_id": 1731724,
+      "name": "Barangay 143",
+      "center": {
+        "lat": 14.6634036,
+        "lon": 120.9934047
+      },
+      "ref": "137501143"
+    },
+    {
+      "relation_id": 1731725,
+      "name": "Barangay 152",
+      "center": {
+        "lat": 14.668284,
+        "lon": 120.9977497
+      },
+      "ref": "137501152"
+    },
+    {
+      "relation_id": 1731726,
+      "name": "Barangay 82",
+      "center": {
+        "lat": 14.6627968,
+        "lon": 120.9889442
+      },
+      "ref": "137501082"
+    },
+    {
+      "relation_id": 1731727,
+      "name": "Barangay 155",
+      "center": {
+        "lat": 14.6683713,
+        "lon": 120.9993687
+      },
+      "ref": "137501155"
+    },
+    {
+      "relation_id": 1731728,
+      "name": "Barangay 83",
+      "center": {
+        "lat": 14.6599444,
+        "lon": 120.9883775
+      },
+      "ref": "137501083"
+    },
+    {
+      "relation_id": 1731729,
+      "name": "Barangay 132",
+      "center": {
+        "lat": 14.663342,
+        "lon": 120.9908628
+      },
+      "ref": "137501132"
+    },
+    {
+      "relation_id": 1731730,
+      "name": "Barangay 144",
+      "center": {
+        "lat": 14.6640465,
+        "lon": 120.9944138
+      },
+      "ref": "137501144"
+    },
+    {
+      "relation_id": 1731731,
+      "name": "Barangay 85",
+      "center": {
+        "lat": 14.6591289,
+        "lon": 120.9896294
+      },
+      "ref": "137501085"
+    },
+    {
+      "relation_id": 1731732,
+      "name": "Barangay 140",
+      "center": {
+        "lat": 14.6631341,
+        "lon": 120.995165
+      },
+      "ref": "137501140"
+    },
+    {
+      "relation_id": 1731733,
+      "name": "Barangay 148",
+      "center": {
+        "lat": 14.6658477,
+        "lon": 120.9957614
+      },
+      "ref": "137501148"
+    },
+    {
+      "relation_id": 1731734,
+      "name": "Barangay 149",
+      "center": {
+        "lat": 14.6673022,
+        "lon": 120.9956376
+      },
+      "ref": "137501149"
+    },
+    {
+      "relation_id": 1731735,
+      "name": "Barangay 151",
+      "center": {
+        "lat": 14.6650292,
+        "lon": 120.998727
+      },
+      "ref": "137501151"
+    },
+    {
+      "relation_id": 1731736,
+      "name": "Barangay 142",
+      "center": {
+        "lat": 14.6647344,
+        "lon": 120.9926998
+      },
+      "ref": "137501142"
+    },
+    {
+      "relation_id": 1731737,
+      "name": "Barangay 153",
+      "center": {
+        "lat": 14.6672335,
+        "lon": 120.9987033
+      },
+      "ref": "137501153"
+    },
+    {
+      "relation_id": 1731738,
+      "name": "Barangay 141",
+      "center": {
+        "lat": 14.6632075,
+        "lon": 120.997654
+      },
+      "ref": "137501141"
+    },
+    {
+      "relation_id": 1731739,
+      "name": "Barangay 81",
+      "center": {
+        "lat": 14.6593031,
+        "lon": 120.984718
+      },
+      "ref": "137501081"
+    },
+    {
+      "relation_id": 1731740,
+      "name": "Barangay 147",
+      "center": {
+        "lat": 14.6643403,
+        "lon": 120.9974264
+      },
+      "ref": "137501147"
+    },
+    {
+      "relation_id": 3273443,
+      "name": "Barangay 117",
+      "center": {
+        "lat": 14.6437793,
+        "lon": 120.9846387
+      },
+      "ref": "137501117"
+    },
+    {
+      "relation_id": 3273444,
+      "name": "Barangay 118",
+      "center": {
+        "lat": 14.6408307,
+        "lon": 120.9875243
+      },
+      "ref": "137501118"
+    },
+    {
+      "relation_id": 3273445,
+      "name": "Barangay 119",
+      "center": {
+        "lat": 14.6424302,
+        "lon": 120.9845962
+      },
+      "ref": "137501119"
+    },
+    {
+      "relation_id": 3273446,
+      "name": "Barangay 120",
+      "center": {
+        "lat": 14.6392151,
+        "lon": 120.9841438
+      },
+      "ref": "137501120"
+    },
+    {
+      "relation_id": 3273447,
+      "name": "Barangay 126",
+      "center": {
+        "lat": 14.6431157,
+        "lon": 120.9916659
+      },
+      "ref": "137501126"
+    },
+    {
+      "relation_id": 3273448,
+      "name": "Barangay 127",
+      "center": {
+        "lat": 14.6413804,
+        "lon": 120.9908457
+      },
+      "ref": "137501127"
+    },
+    {
+      "relation_id": 3273449,
+      "name": "Barangay 128",
+      "center": {
+        "lat": 14.6396825,
+        "lon": 120.9905347
+      },
+      "ref": "137501128"
+    },
+    {
+      "relation_id": 3273450,
+      "name": "Barangay 129",
+      "center": {
+        "lat": 14.6387199,
+        "lon": 120.9898265
+      },
+      "ref": "137501129"
+    },
+    {
+      "relation_id": 3273451,
+      "name": "Barangay 130",
+      "center": {
+        "lat": 14.6377431,
+        "lon": 120.9895532
+      },
+      "ref": "137501130"
+    },
+    {
+      "relation_id": 3273452,
+      "name": "Barangay 131",
+      "center": {
+        "lat": 14.6375609,
+        "lon": 120.9914339
+      },
+      "ref": "137501131"
+    },
+    {
+      "relation_id": 3400245,
+      "name": "Barangay 1",
+      "center": {
+        "lat": 14.6591246,
+        "lon": 120.9730986
+      },
+      "ref": "137501001"
+    },
+    {
+      "relation_id": 3400246,
+      "name": "Barangay 2",
+      "center": {
+        "lat": 14.6609588,
+        "lon": 120.9719552
+      },
+      "ref": "137501002"
+    },
+    {
+      "relation_id": 3400247,
+      "name": "Barangay 3",
+      "center": {
+        "lat": 14.6587813,
+        "lon": 120.9717263
+      },
+      "ref": "137501003"
+    },
+    {
+      "relation_id": 3400248,
+      "name": "Barangay 4",
+      "center": {
+        "lat": 14.6593307,
+        "lon": 120.9693906
+      },
+      "ref": "137501004"
+    },
+    {
+      "relation_id": 3400249,
+      "name": "Barangay 77",
+      "center": {
+        "lat": 14.6579964,
+        "lon": 120.9810059
+      },
+      "ref": "137501077"
+    },
+    {
+      "relation_id": 3400250,
+      "name": "Barangay 78",
+      "center": {
+        "lat": 14.6590401,
+        "lon": 120.9832889
+      },
+      "ref": "137501078"
+    },
+    {
+      "relation_id": 3400251,
+      "name": "Barangay 79",
+      "center": {
+        "lat": 14.6597951,
+        "lon": 120.98106
+      },
+      "ref": "137501079"
+    },
+    {
+      "relation_id": 3400252,
+      "name": "Barangay 80",
+      "center": {
+        "lat": 14.6597959,
+        "lon": 120.9765309
+      },
+      "ref": "137501080"
+    },
+    {
+      "relation_id": 3400273,
+      "name": "Barangay 64",
+      "center": {
+        "lat": 14.6523617,
+        "lon": 120.9754181
+      },
+      "ref": "137501064"
+    },
+    {
+      "relation_id": 3400274,
+      "name": "Barangay 65",
+      "center": {
+        "lat": 14.6526583,
+        "lon": 120.9766551
+      },
+      "ref": "137501065"
+    },
+    {
+      "relation_id": 3400275,
+      "name": "Barangay 66",
+      "center": {
+        "lat": 14.652592,
+        "lon": 120.9783318
+      },
+      "ref": "137501066"
+    },
+    {
+      "relation_id": 3400276,
+      "name": "Barangay 67",
+      "center": {
+        "lat": 14.6529728,
+        "lon": 120.980745
+      },
+      "ref": "137501067"
+    },
+    {
+      "relation_id": 3400277,
+      "name": "Barangay 68",
+      "center": {
+        "lat": 14.6527963,
+        "lon": 120.9827354
+      },
+      "ref": "137501068"
+    },
+    {
+      "relation_id": 3400278,
+      "name": "Barangay 69",
+      "center": {
+        "lat": 14.6543715,
+        "lon": 120.9775997
+      },
+      "ref": "137501069"
+    },
+    {
+      "relation_id": 3400279,
+      "name": "Barangay 70",
+      "center": {
+        "lat": 14.6543646,
+        "lon": 120.9792116
+      },
+      "ref": "137501070"
+    },
+    {
+      "relation_id": 3400280,
+      "name": "Barangay 71",
+      "center": {
+        "lat": 14.6544322,
+        "lon": 120.9821847
+      },
+      "ref": "137501071"
+    },
+    {
+      "relation_id": 3400281,
+      "name": "Barangay 72",
+      "center": {
+        "lat": 14.6550268,
+        "lon": 120.9821673
+      },
+      "ref": "137501072"
+    },
+    {
+      "relation_id": 3400282,
+      "name": "Barangay 73",
+      "center": {
+        "lat": 14.6554191,
+        "lon": 120.975415
+      },
+      "ref": "137501073"
+    },
+    {
+      "relation_id": 3400283,
+      "name": "Barangay 74",
+      "center": {
+        "lat": 14.6564605,
+        "lon": 120.9782939
+      },
+      "ref": "137501074"
+    },
+    {
+      "relation_id": 3400284,
+      "name": "Barangay 75",
+      "center": {
+        "lat": 14.6556323,
+        "lon": 120.9806593
+      },
+      "ref": "137501075"
+    },
+    {
+      "relation_id": 3400285,
+      "name": "Barangay 76",
+      "center": {
+        "lat": 14.6564304,
+        "lon": 120.9828531
+      },
+      "ref": "137501076"
+    },
+    {
+      "relation_id": 3400307,
+      "name": "Barangay 56",
+      "center": {
+        "lat": 14.6482621,
+        "lon": 120.9766902
+      },
+      "ref": "137501056"
+    },
+    {
+      "relation_id": 3400308,
+      "name": "Barangay 57",
+      "center": {
+        "lat": 14.6482008,
+        "lon": 120.9793203
+      },
+      "ref": "137501057"
+    },
+    {
+      "relation_id": 3400309,
+      "name": "Barangay 58",
+      "center": {
+        "lat": 14.6480986,
+        "lon": 120.9822151
+      },
+      "ref": "137501058"
+    },
+    {
+      "relation_id": 3400310,
+      "name": "Barangay 59",
+      "center": {
+        "lat": 14.6496629,
+        "lon": 120.9765643
+      },
+      "ref": "137501059"
+    },
+    {
+      "relation_id": 3400311,
+      "name": "Barangay 60",
+      "center": {
+        "lat": 14.6503336,
+        "lon": 120.9786785
+      },
+      "ref": "137501060"
+    },
+    {
+      "relation_id": 3400312,
+      "name": "Barangay 61",
+      "center": {
+        "lat": 14.6495272,
+        "lon": 120.9815361
+      },
+      "ref": "137501061"
+    },
+    {
+      "relation_id": 3400313,
+      "name": "Barangay 62",
+      "center": {
+        "lat": 14.6509275,
+        "lon": 120.9815972
+      },
+      "ref": "137501062"
+    },
+    {
+      "relation_id": 3400314,
+      "name": "Barangay 63",
+      "center": {
+        "lat": 14.6510475,
+        "lon": 120.9764754
+      },
+      "ref": "137501063"
+    },
+    {
+      "relation_id": 3400324,
+      "name": "Barangay 49",
+      "center": {
+        "lat": 14.644909,
+        "lon": 120.9770496
+      },
+      "ref": "137501049"
+    },
+    {
+      "relation_id": 3400325,
+      "name": "Barangay 50",
+      "center": {
+        "lat": 14.6439756,
+        "lon": 120.9788842
+      },
+      "ref": "137501050"
+    },
+    {
+      "relation_id": 3400326,
+      "name": "Barangay 51",
+      "center": {
+        "lat": 14.6438647,
+        "lon": 120.981726
+      },
+      "ref": "137501051"
+    },
+    {
+      "relation_id": 3400327,
+      "name": "Barangay 52",
+      "center": {
+        "lat": 14.6469788,
+        "lon": 120.9767939
+      },
+      "ref": "137501052"
+    },
+    {
+      "relation_id": 3400328,
+      "name": "Barangay 53",
+      "center": {
+        "lat": 14.6460727,
+        "lon": 120.9785222
+      },
+      "ref": "137501053"
+    },
+    {
+      "relation_id": 3400329,
+      "name": "Barangay 54",
+      "center": {
+        "lat": 14.6466156,
+        "lon": 120.9814459
+      },
+      "ref": "137501054"
+    },
+    {
+      "relation_id": 3400330,
+      "name": "Barangay 55",
+      "center": {
+        "lat": 14.6452736,
+        "lon": 120.9814106
+      },
+      "ref": "137501055"
+    },
+    {
+      "relation_id": 3400447,
+      "name": "Barangay 100",
+      "center": {
+        "lat": 14.6534024,
+        "lon": 120.9957654
+      },
+      "ref": "137501100"
+    },
+    {
+      "relation_id": 3400448,
+      "name": "Barangay 101",
+      "center": {
+        "lat": 14.6506013,
+        "lon": 120.9935961
+      },
+      "ref": "137501101"
+    },
+    {
+      "relation_id": 3400449,
+      "name": "Barangay 102",
+      "center": {
+        "lat": 14.6497576,
+        "lon": 120.9939051
+      },
+      "ref": "137501102"
+    },
+    {
+      "relation_id": 3400450,
+      "name": "Barangay 105",
+      "center": {
+        "lat": 14.6483006,
+        "lon": 120.9930284
+      },
+      "ref": "137501105"
+    },
+    {
+      "relation_id": 3400451,
+      "name": "Barangay 95",
+      "center": {
+        "lat": 14.656627,
+        "lon": 120.9967633
+      },
+      "ref": "137501095"
+    },
+    {
+      "relation_id": 3400452,
+      "name": "Barangay 99",
+      "center": {
+        "lat": 14.6550498,
+        "lon": 120.9968148
+      },
+      "ref": "137501099"
+    },
+    {
+      "relation_id": 3400688,
+      "name": "Barangay 36",
+      "center": {
+        "lat": 14.6364698,
+        "lon": 120.9783322
+      },
+      "ref": "137501036"
+    },
+    {
+      "relation_id": 3400689,
+      "name": "Barangay 37",
+      "center": {
+        "lat": 14.6388824,
+        "lon": 120.9781399
+      },
+      "ref": "137501037"
+    },
+    {
+      "relation_id": 3400690,
+      "name": "Barangay 38",
+      "center": {
+        "lat": 14.6393133,
+        "lon": 120.9788079
+      },
+      "ref": "137501038"
+    },
+    {
+      "relation_id": 3400691,
+      "name": "Barangay 39",
+      "center": {
+        "lat": 14.6374208,
+        "lon": 120.9823645
+      },
+      "ref": "137501039"
+    },
+    {
+      "relation_id": 3400692,
+      "name": "Barangay 40",
+      "center": {
+        "lat": 14.6385959,
+        "lon": 120.9822804
+      },
+      "ref": "137501040"
+    },
+    {
+      "relation_id": 3400693,
+      "name": "Barangay 41",
+      "center": {
+        "lat": 14.6397149,
+        "lon": 120.982301
+      },
+      "ref": "137501041"
+    },
+    {
+      "relation_id": 3400694,
+      "name": "Barangay 42",
+      "center": {
+        "lat": 14.6394794,
+        "lon": 120.9804742
+      },
+      "ref": "137501042"
+    },
+    {
+      "relation_id": 3400695,
+      "name": "Barangay 43",
+      "center": {
+        "lat": 14.6409825,
+        "lon": 120.9779914
+      },
+      "ref": "137501043"
+    },
+    {
+      "relation_id": 3400696,
+      "name": "Barangay 44",
+      "center": {
+        "lat": 14.6411786,
+        "lon": 120.9801678
+      },
+      "ref": "137501044"
+    },
+    {
+      "relation_id": 3400697,
+      "name": "Barangay 45",
+      "center": {
+        "lat": 14.6411097,
+        "lon": 120.9823483
+      },
+      "ref": "137501045"
+    },
+    {
+      "relation_id": 3400698,
+      "name": "Barangay 46",
+      "center": {
+        "lat": 14.6425482,
+        "lon": 120.9778629
+      },
+      "ref": "137501046"
+    },
+    {
+      "relation_id": 3400699,
+      "name": "Barangay 47",
+      "center": {
+        "lat": 14.6425636,
+        "lon": 120.980211
+      },
+      "ref": "137501047"
+    },
+    {
+      "relation_id": 3400700,
+      "name": "Barangay 48",
+      "center": {
+        "lat": 14.6424893,
+        "lon": 120.9823885
+      },
+      "ref": "137501048"
+    },
+    {
+      "relation_id": 4443464,
+      "name": "Barangay 10",
+      "center": {
+        "lat": 14.6546686,
+        "lon": 120.9706693
+      },
+      "ref": "137501010"
+    },
+    {
+      "relation_id": 4443465,
+      "name": "Barangay 11",
+      "center": {
+        "lat": 14.6536203,
+        "lon": 120.9707377
+      },
+      "ref": "137501011"
+    },
+    {
+      "relation_id": 4443466,
+      "name": "Barangay 12",
+      "center": {
+        "lat": 14.6533738,
+        "lon": 120.9664834
+      },
+      "ref": "137501012"
+    },
+    {
+      "relation_id": 4443467,
+      "name": "Barangay 5",
+      "center": {
+        "lat": 14.6566104,
+        "lon": 120.9727183
+      },
+      "ref": "137501005"
+    },
+    {
+      "relation_id": 4443468,
+      "name": "Barangay 6",
+      "center": {
+        "lat": 14.6573768,
+        "lon": 120.9705245
+      },
+      "ref": "137501006"
+    },
+    {
+      "relation_id": 4443469,
+      "name": "Barangay 7",
+      "center": {
+        "lat": 14.656273,
+        "lon": 120.970493
+      },
+      "ref": "137501007"
+    },
+    {
+      "relation_id": 4443470,
+      "name": "Barangay 8",
+      "center": {
+        "lat": 14.6571239,
+        "lon": 120.9656527
+      },
+      "ref": "137501008"
+    },
+    {
+      "relation_id": 4443471,
+      "name": "Barangay 9",
+      "center": {
+        "lat": 14.6533062,
+        "lon": 120.9733925
+      },
+      "ref": "137501009"
+    },
+    {
+      "relation_id": 4443536,
+      "name": "Barangay 13",
+      "center": {
+        "lat": 14.6520949,
+        "lon": 120.9726359
+      },
+      "ref": "137501013"
+    },
+    {
+      "relation_id": 4443537,
+      "name": "Barangay 14",
+      "center": {
+        "lat": 14.6497119,
+        "lon": 120.9669485
+      },
+      "ref": "137501014"
+    },
+    {
+      "relation_id": 4443538,
+      "name": "Barangay 15",
+      "center": {
+        "lat": 14.6494504,
+        "lon": 120.9736152
+      },
+      "ref": "137501015"
+    },
+    {
+      "relation_id": 4443539,
+      "name": "Barangay 16",
+      "center": {
+        "lat": 14.6503724,
+        "lon": 120.9701468
+      },
+      "ref": "137501016"
+    },
+    {
+      "relation_id": 4443540,
+      "name": "Barangay 17",
+      "center": {
+        "lat": 14.6489138,
+        "lon": 120.9745905
+      },
+      "ref": "137501017"
+    },
+    {
+      "relation_id": 4443541,
+      "name": "Barangay 18",
+      "center": {
+        "lat": 14.649134,
+        "lon": 120.9706117
+      },
+      "ref": "137501018"
+    },
+    {
+      "relation_id": 4443554,
+      "name": "Barangay 19",
+      "center": {
+        "lat": 14.6467218,
+        "lon": 120.974819
+      },
+      "ref": "137501019"
+    },
+    {
+      "relation_id": 4443555,
+      "name": "Barangay 20",
+      "center": {
+        "lat": 14.6473509,
+        "lon": 120.968796
+      },
+      "ref": "137501020"
+    },
+    {
+      "relation_id": 4443556,
+      "name": "Barangay 21",
+      "center": {
+        "lat": 14.6445886,
+        "lon": 120.9753953
+      },
+      "ref": "137501021"
+    },
+    {
+      "relation_id": 4443557,
+      "name": "Barangay 22",
+      "center": {
+        "lat": 14.6452955,
+        "lon": 120.9684268
+      },
+      "ref": "137501022"
+    },
+    {
+      "relation_id": 4443558,
+      "name": "Barangay 23",
+      "center": {
+        "lat": 14.6434855,
+        "lon": 120.9744427
+      },
+      "ref": "137501023"
+    },
+    {
+      "relation_id": 4443559,
+      "name": "Barangay 24",
+      "center": {
+        "lat": 14.6434841,
+        "lon": 120.9729991
+      },
+      "ref": "137501024"
+    },
+    {
+      "relation_id": 4443592,
+      "name": "Barangay 25",
+      "center": {
+        "lat": 14.6424134,
+        "lon": 120.9760682
+      },
+      "ref": "137501025"
+    },
+    {
+      "relation_id": 4443593,
+      "name": "Barangay 26",
+      "center": {
+        "lat": 14.6413538,
+        "lon": 120.9747584
+      },
+      "ref": "137501026"
+    },
+    {
+      "relation_id": 4443594,
+      "name": "Barangay 27",
+      "center": {
+        "lat": 14.6414062,
+        "lon": 120.972605
+      },
+      "ref": "137501027"
+    },
+    {
+      "relation_id": 4443595,
+      "name": "Barangay 28",
+      "center": {
+        "lat": 14.6402159,
+        "lon": 120.9665335
+      },
+      "ref": "137501028"
+    },
+    {
+      "relation_id": 4443596,
+      "name": "Barangay 29",
+      "center": {
+        "lat": 14.6402618,
+        "lon": 120.9763945
+      },
+      "ref": "137501029"
+    },
+    {
+      "relation_id": 4443597,
+      "name": "Barangay 30",
+      "center": {
+        "lat": 14.6391518,
+        "lon": 120.974143
+      },
+      "ref": "137501030"
+    },
+    {
+      "relation_id": 4443598,
+      "name": "Barangay 31",
+      "center": {
+        "lat": 14.6405842,
+        "lon": 120.9715058
+      },
+      "ref": "137501031"
+    },
+    {
+      "relation_id": 4443599,
+      "name": "Barangay 32",
+      "center": {
+        "lat": 14.6380224,
+        "lon": 120.9763173
+      },
+      "ref": "137501032"
+    },
+    {
+      "relation_id": 4443600,
+      "name": "Barangay 33",
+      "center": {
+        "lat": 14.6368316,
+        "lon": 120.9752776
+      },
+      "ref": "137501033"
+    },
+    {
+      "relation_id": 4443601,
+      "name": "Barangay 34",
+      "center": {
+        "lat": 14.6369084,
+        "lon": 120.9733452
+      },
+      "ref": "137501034"
+    },
+    {
+      "relation_id": 4443602,
+      "name": "Barangay 35",
+      "center": {
+        "lat": 14.6385569,
+        "lon": 120.9718005
+      },
+      "ref": "137501035"
+    },
+    {
+      "relation_id": 4445753,
+      "name": "Barangay 156",
+      "center": {
+        "lat": 14.6666665,
+        "lon": 121.0012686
+      },
+      "ref": "137501156"
+    },
+    {
+      "relation_id": 4445754,
+      "name": "Barangay 157",
+      "center": {
+        "lat": 14.6682632,
+        "lon": 121.0012435
+      },
+      "ref": "137501157"
+    },
+    {
+      "relation_id": 4445755,
+      "name": "Barangay 158",
+      "center": {
+        "lat": 14.6714697,
+        "lon": 121.0032199
+      },
+      "ref": "137501158"
+    },
+    {
+      "relation_id": 4445813,
+      "name": "Barangay 159",
+      "center": {
+        "lat": 14.6762024,
+        "lon": 121.0095522
+      },
+      "ref": "137501159"
+    },
+    {
+      "relation_id": 4445814,
+      "name": "Barangay 160",
+      "center": {
+        "lat": 14.6803943,
+        "lon": 121.0025672
+      },
+      "ref": "137501160"
+    },
+    {
+      "relation_id": 4445815,
+      "name": "Barangay 161",
+      "center": {
+        "lat": 14.6749426,
+        "lon": 120.9997362
+      },
+      "ref": "137501161"
+    },
+    {
+      "relation_id": 4445816,
+      "name": "Barangay 162",
+      "center": {
+        "lat": 14.6830721,
+        "lon": 121.005725
+      },
+      "ref": "137501162"
+    },
+    {
+      "relation_id": 4445817,
+      "name": "Barangay 163",
+      "center": {
+        "lat": 14.6828744,
+        "lon": 121.0145646
+      },
+      "ref": "137501163"
+    },
+    {
+      "relation_id": 4445818,
+      "name": "Barangay 164",
+      "center": {
+        "lat": 14.6886487,
+        "lon": 121.0176723
+      },
+      "ref": "137501164"
+    }
+  ],
+  "excluded_northern_named_relations": [
+    {
+      "relation_id": 8421448,
+      "name": "Barangay 339",
+      "center": {
+        "lat": 14.6136974,
+        "lon": 120.9835733
+      },
+      "ref": ""
+    },
+    {
+      "relation_id": 8421449,
+      "name": "Barangay 337",
+      "center": {
+        "lat": 14.614922,
+        "lon": 120.9836305
+      },
+      "ref": ""
+    },
+    {
+      "relation_id": 8421450,
+      "name": "Barangay 336",
+      "center": {
+        "lat": 14.6162748,
+        "lon": 120.9837086
+      },
+      "ref": ""
+    },
+    {
+      "relation_id": 8421451,
+      "name": "Barangay 341",
+      "center": {
+        "lat": 14.6162341,
+        "lon": 120.9856446
+      },
+      "ref": ""
+    },
+    {
+      "relation_id": 8421452,
+      "name": "Barangay 338",
+      "center": {
+        "lat": 14.614801,
+        "lon": 120.9855568
+      },
+      "ref": ""
+    },
+    {
+      "relation_id": 8421453,
+      "name": "Barangay 340",
+      "center": {
+        "lat": 14.6135326,
+        "lon": 120.9854453
+      },
+      "ref": ""
+    },
+    {
+      "relation_id": 8421454,
+      "name": "Barangay 342",
+      "center": {
+        "lat": 14.6139462,
+        "lon": 120.9874943
+      },
+      "ref": ""
+    },
+    {
+      "relation_id": 8421475,
+      "name": "Barangay 316",
+      "center": {
+        "lat": 14.6086672,
+        "lon": 120.9831918
+      },
+      "ref": ""
+    },
+    {
+      "relation_id": 8421476,
+      "name": "Barangay 315",
+      "center": {
+        "lat": 14.6085404,
+        "lon": 120.9850646
+      },
+      "ref": ""
+    },
+    {
+      "relation_id": 8421477,
+      "name": "Barangay 321",
+      "center": {
+        "lat": 14.6103237,
+        "lon": 120.9828289
+      },
+      "ref": ""
+    },
+    {
+      "relation_id": 8421478,
+      "name": "Barangay 322",
+      "center": {
+        "lat": 14.6102638,
+        "lon": 120.9837388
+      },
+      "ref": ""
+    },
+    {
+      "relation_id": 8421479,
+      "name": "Barangay 318",
+      "center": {
+        "lat": 14.6101947,
+        "lon": 120.9846405
+      },
+      "ref": ""
+    },
+    {
+      "relation_id": 8421480,
+      "name": "Barangay 319",
+      "center": {
+        "lat": 14.6101351,
+        "lon": 120.9856044
+      },
+      "ref": ""
+    },
+    {
+      "relation_id": 8421481,
+      "name": "Barangay 317",
+      "center": {
+        "lat": 14.6113642,
+        "lon": 120.9852836
+      },
+      "ref": ""
+    },
+    {
+      "relation_id": 8421482,
+      "name": "Barangay 320",
+      "center": {
+        "lat": 14.6114934,
+        "lon": 120.983408
+      },
+      "ref": ""
+    },
+    {
+      "relation_id": 8421483,
+      "name": "Barangay 325",
+      "center": {
+        "lat": 14.6125961,
+        "lon": 120.982994
+      },
+      "ref": ""
+    },
+    {
+      "relation_id": 8421484,
+      "name": "Barangay 324",
+      "center": {
+        "lat": 14.6125373,
+        "lon": 120.9839045
+      },
+      "ref": ""
+    },
+    {
+      "relation_id": 8421485,
+      "name": "Barangay 323",
+      "center": {
+        "lat": 14.6124275,
+        "lon": 120.9853684
+      },
+      "ref": ""
+    },
+    {
+      "relation_id": 8421512,
+      "name": "Barangay 462",
+      "center": {
+        "lat": 14.605956,
+        "lon": 120.9872723
+      },
+      "ref": ""
+    },
+    {
+      "relation_id": 8421513,
+      "name": "Barangay 463",
+      "center": {
+        "lat": 14.6071075,
+        "lon": 120.9865932
+      },
+      "ref": ""
+    },
+    {
+      "relation_id": 8421514,
+      "name": "Barangay 464",
+      "center": {
+        "lat": 14.6059384,
+        "lon": 120.9861178
+      },
+      "ref": ""
+    },
+    {
+      "relation_id": 8421515,
+      "name": "Barangay 465",
+      "center": {
+        "lat": 14.6080815,
+        "lon": 120.9876156
+      },
+      "ref": ""
+    },
+    {
+      "relation_id": 8421516,
+      "name": "Barangay 466",
+      "center": {
+        "lat": 14.6087088,
+        "lon": 120.9866368
+      },
+      "ref": ""
+    },
+    {
+      "relation_id": 8421517,
+      "name": "Barangay 467",
+      "center": {
+        "lat": 14.6075922,
+        "lon": 120.987072
+      },
+      "ref": ""
+    },
+    {
+      "relation_id": 8421518,
+      "name": "Barangay 468",
+      "center": {
+        "lat": 14.6065002,
+        "lon": 120.9881148
+      },
+      "ref": ""
+    },
+    {
+      "relation_id": 8421519,
+      "name": "Barangay 469",
+      "center": {
+        "lat": 14.6069889,
+        "lon": 120.9886689
+      },
+      "ref": ""
+    },
+    {
+      "relation_id": 8421520,
+      "name": "Barangay 470",
+      "center": {
+        "lat": 14.6103293,
+        "lon": 120.989591
+      },
+      "ref": ""
+    },
+    {
+      "relation_id": 8421521,
+      "name": "Barangay 471",
+      "center": {
+        "lat": 14.6112031,
+        "lon": 120.9871967
+      },
+      "ref": ""
+    },
+    {
+      "relation_id": 8814894,
+      "name": "Barangay 335",
+      "center": {
+        "lat": 14.6076701,
+        "lon": 120.9816667
+      },
+      "ref": ""
+    },
+    {
+      "relation_id": 8814895,
+      "name": "Barangay 329",
+      "center": {
+        "lat": 14.6077292,
+        "lon": 120.9808105
+      },
+      "ref": ""
+    },
+    {
+      "relation_id": 8814896,
+      "name": "Barangay 330",
+      "center": {
+        "lat": 14.6077931,
+        "lon": 120.9797658
+      },
+      "ref": ""
+    },
+    {
+      "relation_id": 8814897,
+      "name": "Barangay 314",
+      "center": {
+        "lat": 14.6059755,
+        "lon": 120.9803181
+      },
+      "ref": ""
+    },
+    {
+      "relation_id": 8814898,
+      "name": "Barangay 313",
+      "center": {
+        "lat": 14.604671,
+        "lon": 120.9801209
+      },
+      "ref": ""
+    },
+    {
+      "relation_id": 11025871,
+      "name": "Barangay 567",
+      "center": {
+        "lat": 14.6077441,
+        "lon": 121.0057415
+      },
+      "ref": ""
+    },
+    {
+      "relation_id": 11025872,
+      "name": "Barangay 565",
+      "center": {
+        "lat": 14.6082176,
+        "lon": 121.0060271
+      },
+      "ref": ""
+    },
+    {
+      "relation_id": 11025873,
+      "name": "Barangay 566",
+      "center": {
+        "lat": 14.6080123,
+        "lon": 121.0080267
+      },
+      "ref": ""
+    },
+    {
+      "relation_id": 11025874,
+      "name": "Barangay 568",
+      "center": {
+        "lat": 14.609113,
+        "lon": 121.0089087
+      },
+      "ref": ""
+    },
+    {
+      "relation_id": 11025875,
+      "name": "Barangay 560",
+      "center": {
+        "lat": 14.6099356,
+        "lon": 121.0095759
+      },
+      "ref": ""
+    },
+    {
+      "relation_id": 11025876,
+      "name": "Barangay 564",
+      "center": {
+        "lat": 14.6090568,
+        "lon": 121.0057039
+      },
+      "ref": ""
+    },
+    {
+      "relation_id": 11025877,
+      "name": "Barangay 563",
+      "center": {
+        "lat": 14.6093076,
+        "lon": 121.0059061
+      },
+      "ref": ""
+    },
+    {
+      "relation_id": 11025878,
+      "name": "Barangay 562",
+      "center": {
+        "lat": 14.6096379,
+        "lon": 121.0062064
+      },
+      "ref": ""
+    },
+    {
+      "relation_id": 11025879,
+      "name": "Barangay 561",
+      "center": {
+        "lat": 14.6100563,
+        "lon": 121.0065494
+      },
+      "ref": ""
+    },
+    {
+      "relation_id": 11025880,
+      "name": "Barangay 559",
+      "center": {
+        "lat": 14.610379,
+        "lon": 121.0068243
+      },
+      "ref": ""
+    },
+    {
+      "relation_id": 11025881,
+      "name": "Barangay 558",
+      "center": {
+        "lat": 14.6106145,
+        "lon": 121.0070584
+      },
+      "ref": ""
+    },
+    {
+      "relation_id": 11025882,
+      "name": "Barangay 557",
+      "center": {
+        "lat": 14.6108442,
+        "lon": 121.0073373
+      },
+      "ref": ""
+    },
+    {
+      "relation_id": 11025883,
+      "name": "Barangay 556",
+      "center": {
+        "lat": 14.6110944,
+        "lon": 121.0075983
+      },
+      "ref": ""
+    },
+    {
+      "relation_id": 11025884,
+      "name": "Barangay 555",
+      "center": {
+        "lat": 14.6114138,
+        "lon": 121.0079272
+      },
+      "ref": ""
+    },
+    {
+      "relation_id": 11073546,
+      "name": "Barangay 487",
+      "center": {
+        "lat": 14.6162019,
+        "lon": 120.992181
+      },
+      "ref": ""
+    },
+    {
+      "relation_id": 11378932,
+      "name": "Barangay 159",
+      "center": {
+        "lat": 14.6195356,
+        "lon": 120.9737107
+      },
+      "ref": ""
+    },
+    {
+      "relation_id": 11378933,
+      "name": "Barangay 157",
+      "center": {
+        "lat": 14.6181938,
+        "lon": 120.973877
+      },
+      "ref": ""
+    },
+    {
+      "relation_id": 11378934,
+      "name": "Barangay 156",
+      "center": {
+        "lat": 14.6183405,
+        "lon": 120.9730104
+      },
+      "ref": ""
+    },
+    {
+      "relation_id": 11378935,
+      "name": "Barangay 153",
+      "center": {
+        "lat": 14.6224656,
+        "lon": 120.9729057
+      },
+      "ref": ""
+    },
+    {
+      "relation_id": 11378936,
+      "name": "Barangay 152",
+      "center": {
+        "lat": 14.6224134,
+        "lon": 120.9741949
+      },
+      "ref": ""
+    },
+    {
+      "relation_id": 11378937,
+      "name": "Barangay 158",
+      "center": {
+        "lat": 14.6209153,
+        "lon": 120.9724669
+      },
+      "ref": ""
+    },
+    {
+      "relation_id": 11378939,
+      "name": "Barangay 154",
+      "center": {
+        "lat": 14.6189375,
+        "lon": 120.9718296
+      },
+      "ref": ""
+    },
+    {
+      "relation_id": 11378940,
+      "name": "Barangay 160",
+      "center": {
+        "lat": 14.6207513,
+        "lon": 120.9734964
+      },
+      "ref": ""
+    },
+    {
+      "relation_id": 11378941,
+      "name": "Barangay 155",
+      "center": {
+        "lat": 14.6208844,
+        "lon": 120.9740663
+      },
+      "ref": ""
+    },
+    {
+      "relation_id": 11378942,
+      "name": "Barangay 151",
+      "center": {
+        "lat": 14.6188162,
+        "lon": 120.9700749
+      },
+      "ref": ""
+    },
+    {
+      "relation_id": 11378943,
+      "name": "Barangay 150",
+      "center": {
+        "lat": 14.6200666,
+        "lon": 120.9694964
+      },
+      "ref": ""
+    },
+    {
+      "relation_id": 11378944,
+      "name": "Barangay 149",
+      "center": {
+        "lat": 14.6216992,
+        "lon": 120.9707156
+      },
+      "ref": ""
+    },
+    {
+      "relation_id": 11378945,
+      "name": "Barangay 147",
+      "center": {
+        "lat": 14.6236481,
+        "lon": 120.9676561
+      },
+      "ref": ""
+    },
+    {
+      "relation_id": 11378946,
+      "name": "Barangay 127",
+      "center": {
+        "lat": 14.634367,
+        "lon": 120.9654361
+      },
+      "ref": ""
+    },
+    {
+      "relation_id": 11378949,
+      "name": "Barangay 130",
+      "center": {
+        "lat": 14.6289791,
+        "lon": 120.9635143
+      },
+      "ref": ""
+    },
+    {
+      "relation_id": 11378950,
+      "name": "Barangay 128",
+      "center": {
+        "lat": 14.6324023,
+        "lon": 120.9521259
+      },
+      "ref": ""
+    },
+    {
+      "relation_id": 11378951,
+      "name": "Barangay 129",
+      "center": {
+        "lat": 14.6300942,
+        "lon": 120.9632569
+      },
+      "ref": ""
+    },
+    {
+      "relation_id": 11378952,
+      "name": "Barangay 133",
+      "center": {
+        "lat": 14.6270423,
+        "lon": 120.9645903
+      },
+      "ref": ""
+    },
+    {
+      "relation_id": 11378953,
+      "name": "Barangay 146",
+      "center": {
+        "lat": 14.6337425,
+        "lon": 120.9681363
+      },
+      "ref": ""
+    },
+    {
+      "relation_id": 11378954,
+      "name": "Barangay 135",
+      "center": {
+        "lat": 14.6341168,
+        "lon": 120.9695755
+      },
+      "ref": ""
+    },
+    {
+      "relation_id": 11378955,
+      "name": "Barangay 145",
+      "center": {
+        "lat": 14.6326569,
+        "lon": 120.9697499
+      },
+      "ref": ""
+    },
+    {
+      "relation_id": 11378956,
+      "name": "Barangay 143",
+      "center": {
+        "lat": 14.6315629,
+        "lon": 120.9703535
+      },
+      "ref": ""
+    },
+    {
+      "relation_id": 11378957,
+      "name": "Barangay 144",
+      "center": {
+        "lat": 14.6308319,
+        "lon": 120.9693871
+      },
+      "ref": ""
+    },
+    {
+      "relation_id": 11378958,
+      "name": "Barangay 142",
+      "center": {
+        "lat": 14.6333282,
+        "lon": 120.9670592
+      },
+      "ref": ""
+    },
+    {
+      "relation_id": 11378959,
+      "name": "Barangay 141",
+      "center": {
+        "lat": 14.6318204,
+        "lon": 120.9677539
+      },
+      "ref": ""
+    },
+    {
+      "relation_id": 11378960,
+      "name": "Barangay 140",
+      "center": {
+        "lat": 14.6314366,
+        "lon": 120.9668957
+      },
+      "ref": ""
+    },
+    {
+      "relation_id": 11378961,
+      "name": "Barangay 136",
+      "center": {
+        "lat": 14.6321644,
+        "lon": 120.9685654
+      },
+      "ref": ""
+    },
+    {
+      "relation_id": 11378962,
+      "name": "Barangay 139",
+      "center": {
+        "lat": 14.6303087,
+        "lon": 120.9678315
+      },
+      "ref": ""
+    },
+    {
+      "relation_id": 11378963,
+      "name": "Barangay 132",
+      "center": {
+        "lat": 14.6285357,
+        "lon": 120.9665166
+      },
+      "ref": ""
+    },
+    {
+      "relation_id": 11378964,
+      "name": "Barangay 137",
+      "center": {
+        "lat": 14.629331,
+        "lon": 120.9677918
+      },
+      "ref": ""
+    },
+    {
+      "relation_id": 11378965,
+      "name": "Barangay 131",
+      "center": {
+        "lat": 14.6313849,
+        "lon": 120.9656098
+      },
+      "ref": ""
+    },
+    {
+      "relation_id": 11378966,
+      "name": "Barangay 138",
+      "center": {
+        "lat": 14.6329016,
+        "lon": 120.9664611
+      },
+      "ref": ""
+    },
+    {
+      "relation_id": 11378967,
+      "name": "Barangay 125",
+      "center": {
+        "lat": 14.6332507,
+        "lon": 120.9661422
+      },
+      "ref": ""
+    },
+    {
+      "relation_id": 11378968,
+      "name": "Barangay 126",
+      "center": {
+        "lat": 14.6327029,
+        "lon": 120.9631108
+      },
+      "ref": ""
+    },
+    {
+      "relation_id": 11378969,
+      "name": "Barangay 148",
+      "center": {
+        "lat": 14.6237561,
+        "lon": 120.9699987
+      },
+      "ref": ""
+    },
+    {
+      "relation_id": 11378970,
+      "name": "Barangay 161",
+      "center": {
+        "lat": 14.6281668,
+        "lon": 120.9747021
+      },
+      "ref": ""
+    },
+    {
+      "relation_id": 11378971,
+      "name": "Barangay 165",
+      "center": {
+        "lat": 14.6260793,
+        "lon": 120.9743574
+      },
+      "ref": ""
+    },
+    {
+      "relation_id": 11378972,
+      "name": "Barangay 164",
+      "center": {
+        "lat": 14.625281,
+        "lon": 120.974192
+      },
+      "ref": ""
+    },
+    {
+      "relation_id": 11378973,
+      "name": "Barangay 162",
+      "center": {
+        "lat": 14.627065,
+        "lon": 120.9744982
+      },
+      "ref": ""
+    },
+    {
+      "relation_id": 11378974,
+      "name": "Barangay 163",
+      "center": {
+        "lat": 14.6241437,
+        "lon": 120.9739235
+      },
+      "ref": ""
+    },
+    {
+      "relation_id": 11378975,
+      "name": "Barangay 175",
+      "center": {
+        "lat": 14.6292706,
+        "lon": 120.9699663
+      },
+      "ref": ""
+    },
+    {
+      "relation_id": 11378976,
+      "name": "Barangay 174",
+      "center": {
+        "lat": 14.6272371,
+        "lon": 120.9724725
+      },
+      "ref": ""
+    },
+    {
+      "relation_id": 11378977,
+      "name": "Barangay 173",
+      "center": {
+        "lat": 14.6283701,
+        "lon": 120.9727573
+      },
+      "ref": ""
+    },
+    {
+      "relation_id": 11378978,
+      "name": "Barangay 176",
+      "center": {
+        "lat": 14.628037,
+        "lon": 120.9706346
+      },
+      "ref": ""
+    },
+    {
+      "relation_id": 11378979,
+      "name": "Barangay 167",
+      "center": {
+        "lat": 14.6247014,
+        "lon": 120.9719136
+      },
+      "ref": ""
+    },
+    {
+      "relation_id": 11378980,
+      "name": "Barangay 172",
+      "center": {
+        "lat": 14.6274979,
+        "lon": 120.9678503
+      },
+      "ref": ""
+    },
+    {
+      "relation_id": 11378981,
+      "name": "Barangay 171",
+      "center": {
+        "lat": 14.6259904,
+        "lon": 120.9680341
+      },
+      "ref": ""
+    },
+    {
+      "relation_id": 11378982,
+      "name": "Barangay 169",
+      "center": {
+        "lat": 14.6250935,
+        "lon": 120.9699318
+      },
+      "ref": ""
+    },
+    {
+      "relation_id": 11378983,
+      "name": "Barangay 166",
+      "center": {
+        "lat": 14.6260355,
+        "lon": 120.9721905
+      },
+      "ref": ""
+    },
+    {
+      "relation_id": 11378984,
+      "name": "Barangay 168",
+      "center": {
+        "lat": 14.6263239,
+        "lon": 120.9701556
+      },
+      "ref": ""
+    },
+    {
+      "relation_id": 11378985,
+      "name": "Barangay 170",
+      "center": {
+        "lat": 14.6270657,
+        "lon": 120.9692673
+      },
+      "ref": ""
+    },
+    {
+      "relation_id": 11378986,
+      "name": "Barangay 134",
+      "center": {
+        "lat": 14.6292463,
+        "lon": 120.9656748
+      },
+      "ref": ""
+    }
+  ],
+  "source": [
+    "https://overpass-api.de/api/interpreter",
+    "https://overpass.kumi.systems/api/interpreter"
+  ],
+  "status": "candidate_osm_geometry_requires_validation",
+  "notes": [
+    "OSM relation names and boundaries require comparison with official PSGC/barangay records.",
+    "This file is not a legal or authoritative administrative boundary."
+  ]
+}

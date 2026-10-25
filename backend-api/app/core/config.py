@@ -22,14 +22,21 @@ class Settings(BaseSettings):
     # WebSocket
     WS_HEARTBEAT_INTERVAL: int = 30
 
-    # SMTP Settings
-    SMTP_HOST: str
-    SMTP_PORT: int = 587
-    SMTP_USER: str
-    SMTP_PASSWORD: str
+    # Valhalla pedestrian routing (Dijkstra / A* on the road graph)
+    VALHALLA_URL: str = "https://valhalla1.openstreetmap.de/route"
+
+    # OSRM routing service
+    OSRM_URL: str = "https://router.project-osrm.org"
+
+    # GraphHopper routing service
+    GRAPHHOPPER_URL: str = "https://graphhopper.com/api/1"
+    GRAPHHOPPER_API_KEY: str = ""
+
+    # Brevo email API
+    BREVO_API_KEY: str
+    BREVO_API_URL: str 
     EMAILS_FROM_EMAIL: str
     EMAILS_FROM_NAME: str = "ResQ-Route Admin"
-    SMTP_TLS: bool = True
 
     model_config = SettingsConfigDict(
         env_file=".env",

@@ -2,7 +2,10 @@ import React from 'react'
 import { Menu } from 'react-admin'
 import { useNavigate } from 'react-router-dom'
 
-<img src="/resq_logo_with_label.png" alt="ResQ Route Logo" />
+// 1. Import distinct, recognizable icons from Material-UI
+import NightShelterIcon from '@mui/icons-material/NightShelter'
+import InventoryIcon from '@mui/icons-material/Inventory'
+import ReportProblemIcon from '@mui/icons-material/ReportProblem'
 
 const Sidebar = () => {
   const navigate = useNavigate()
@@ -13,13 +16,31 @@ const Sidebar = () => {
   }
 
   return (
-    <Menu>
-      <Menu.DashboardItem />
-      <Menu.ResourceItem name="shelters" />
-      <Menu.ResourceItem name="inventory" />
-      <Menu.ResourceItem name="incidents" />
-      <Menu.Item to="#" onClick={handleLogout} label="Logout" />
-    </Menu>
+  
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+
+      <Menu>
+        {/* Dashboard automatically gets its grid icon */}
+        <Menu.DashboardItem />
+        
+        {/* 3. Swap Menu.ResourceItem for Menu.Item to take full control of icons and text */}
+        <Menu.Item 
+          to="/shelters" 
+          primaryText="Shelters" 
+          leftIcon={<NightShelterIcon />} 
+        />
+        <Menu.Item 
+          to="/inventory" 
+          primaryText="Inventories" 
+          leftIcon={<InventoryIcon />} 
+        />
+        <Menu.Item 
+          to="/incidents" 
+          primaryText="Incidents" 
+          leftIcon={<ReportProblemIcon />} 
+        />
+      </Menu>
+    </div>
   )
 }
 

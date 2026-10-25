@@ -1,0 +1,32 @@
+{
+  "method": "weighted_partial_component_baseline",
+  "input_rows": 288,
+  "output_rows": 288,
+  "weights": {
+    "flood": 0.35,
+    "earthquake": 0.15,
+    "fire": 0.35,
+    "vulnerability": 0.15
+  },
+  "available_components": [
+    "flood",
+    "fire"
+  ],
+  "excluded_components": [
+    "earthquake",
+    "vulnerability"
+  ],
+  "available_component_weight": 0.7,
+  "flood_threshold_mm_24h": 50.0,
+  "score_range": {
+    "min": 0.07905,
+    "max": 0.475469
+  },
+  "is_probability": false,
+  "limitations": [
+    "The study area is a provisional bounding box, not an authoritative South Caloocan boundary.",
+    "Rainfall threshold is an uncalibrated configuration assumption.",
+    "Building density and inverse road length are proxies, not incident labels.",
+    "Earthquake and vulnerability components are unavailable and excluded from the denominator."
+  ]
+}
