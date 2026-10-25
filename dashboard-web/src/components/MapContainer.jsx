@@ -100,7 +100,11 @@ const normalizeRouteData = (route) => {
 const getRouteCoordinates = (route) => {
   if (!route) return []
   if (route.type === 'Feature') return route.geometry?.coordinates || []
-  if (route.type === 'FeatureCollection') return route.features?.flatMap((feature) => feature.geometry?.coordinates || []) || []
+  if (route.type === 'FeatureCollection') {
+    const selectedFeatures = route.features?.filter((feature) => feature.properties?.selected)
+    const features = selectedFeatures?.length ? selectedFeatures : route.features
+    return features?.flatMap((feature) => feature.geometry?.coordinates || []) || []
+  }
   return route.coordinates || []
 }
 
@@ -512,7 +516,16 @@ const MapContainer = ({
           if (fallbackTimer !== null) window.clearTimeout(fallbackTimer)
           map.resize()
           map.addSource('citizen-route', { type: 'geojson', data: normalizeRouteData(routeRef.current) })
-          map.addLayer({ id: 'citizen-route-line', type: 'line', source: 'citizen-route', paint: { 'line-color': '#50a8ff', 'line-width': 5, 'line-opacity': 0.9 } })
+          map.addLayer({
+            id: 'citizen-route-line',
+            type: 'line',
+            source: 'citizen-route',
+            paint: {
+              'line-color': ['coalesce', ['get', 'route_color'], '#50a8ff'],
+              'line-width': ['case', ['boolean', ['get', 'selected'], false], 6, 4],
+              'line-opacity': ['case', ['boolean', ['get', 'selected'], false], 0.96, 0.55],
+            },
+          })
           map.addSource('resq-road-hazard-zones', {
             type: 'geojson',
             data: roadHazardZonesRef.current,

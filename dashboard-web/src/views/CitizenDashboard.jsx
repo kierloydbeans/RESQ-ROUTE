@@ -181,6 +181,33 @@ const getApiErrorMessage = (detail, fallback) => {
   return fallback
 }
 
+const ROUTE_WARNING = 'PLEASE TAKE CAUTION. YOU ARE GOING THROUGH A HAZARDOUS AREA.'
+
+const toRouteFeatureCollection = (routes, selectedRouteId) => ({
+  type: 'FeatureCollection',
+  features: routes
+    .filter((route) => Array.isArray(route?.geometry?.coordinates) && route.geometry.coordinates.length >= 2)
+    .map((route) => ({
+      type: 'Feature',
+      properties: {
+        route_id: route.id,
+        route_status: route.route_status,
+        route_color: route.route_color,
+        selected: route.id === selectedRouteId,
+      },
+      geometry: route.geometry,
+    })),
+})
+
+const formatRouteMetric = (route) => {
+  const distance = Number(route?.distance_meters)
+  const duration = Number(route?.duration_seconds)
+  return [
+    Number.isFinite(distance) ? `${(distance / 1000).toFixed(1)} km` : null,
+    Number.isFinite(duration) ? `${Math.round(duration / 60)} min walk` : null,
+  ].filter(Boolean).join(' · ')
+}
+
 const getVerifiedCapacity = (center) => {
   if (center?.capacity === null || center?.capacity === undefined ||
     center?.current_occupancy === null || center?.current_occupancy === undefined ||
@@ -270,9 +297,32 @@ export const CitizenDashboard = ({ auth, onLogout }) => {
   const [isReportClosing, setIsReportClosing] = useState(false)
   const reportCloseTimeoutRef = useRef(null)
   const [evacuationRoute, setEvacuationRoute] = useState(null)
+  const [routeOptions, setRouteOptions] = useState([])
+  const [selectedRouteId, setSelectedRouteId] = useState(null)
   const [routeLoading, setRouteLoading] = useState(false)
   const [routeInfo, setRouteInfo] = useState(null)
   const [routeError, setRouteError] = useState('')
+
+  const selectedRoute = routeOptions.find((route) => route.id === selectedRouteId) || null
+
+  const clearRouteState = () => {
+    setEvacuationRoute(null)
+    setRouteOptions([])
+    setSelectedRouteId(null)
+    setRouteInfo(null)
+    setRouteError('')
+  }
+
+  const selectRouteOption = (route) => {
+    if (!route) return
+    setSelectedRouteId(route.id)
+    setEvacuationRoute(toRouteFeatureCollection(routeOptions, route.id))
+    setRouteInfo({
+      distance: formatRouteMetric(route).split(' · ')[0] || null,
+      duration: formatRouteMetric(route).split(' · ')[1] || null,
+      notice: route.warning_message || (route.intersects_hazard ? ROUTE_WARNING : null),
+    })
+  }
   const [searchQuery, setSearchQuery] = useState('')
   const [isShelterPanelCollapsed, setIsShelterPanelCollapsed] = useState(false)
   const [shelterSheetHeight, setShelterSheetHeight] = useState(null)
@@ -604,24 +654,35 @@ export const CitizenDashboard = ({ auth, onLogout }) => {
           destination_longitude: Number(center.longitude)
         })
       })
-      if (!res.ok) throw new Error(`Directions are unavailable right now (${res.status}).`)
-      const data = await res.json()
-      if (data.fallback || !Array.isArray(data.geometry?.coordinates) || data.geometry.coordinates.length < 2) {
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        throw new Error(getApiErrorMessage(
+          data.detail,
+          res.status === 504
+            ? 'Routing services timed out. Please try again.'
+            : `Directions are temporarily unavailable (${res.status}).`
+        ))
+      }
+      const options = Array.isArray(data.routes) && data.routes.length > 0
+        ? data.routes
+        : [{ ...data, id: 'primary-route', label: 'Walking route', route_status: data.route_status || 'safe' }]
+      const initialRoute = options.find((route) => route.id === data.selected_route_id)
+        || options.find((route) => route.route_status === 'safe')
+        || options[0]
+      if (!initialRoute || !Array.isArray(initialRoute.geometry?.coordinates) || initialRoute.geometry.coordinates.length < 2) {
         throw new Error('No walking route is available for this center right now.')
       }
-      setEvacuationRoute(data.geometry)
+      setRouteOptions(options)
+      setSelectedRouteId(initialRoute.id)
+      setEvacuationRoute(toRouteFeatureCollection(options, initialRoute.id))
+      const metrics = formatRouteMetric(initialRoute).split(' · ')
       setRouteInfo({
-        distance: data.distance_meters !== null && data.distance_meters !== undefined && Number.isFinite(Number(data.distance_meters))
-          ? `${(Number(data.distance_meters) / 1000).toFixed(1)} km`
-          : null,
-        duration: data.duration_seconds !== null && data.duration_seconds !== undefined && Number.isFinite(Number(data.duration_seconds))
-          ? `${Math.round(Number(data.duration_seconds) / 60)} min walk`
-          : null,
-        notice: data.original_route_hazard ? 'Original route goes through a road hazard. Taking another route.' : null,
+        distance: metrics[0] || null,
+        duration: metrics[1] || null,
+        notice: initialRoute.warning_message || (initialRoute.intersects_hazard ? ROUTE_WARNING : null),
       })
     } catch (error) {
-      setEvacuationRoute(null)
-      setRouteInfo(null)
+      clearRouteState()
       setRouteError(error instanceof Error ? error.message : 'Directions are unavailable right now.')
     } finally {
       setRouteLoading(false)
@@ -634,9 +695,7 @@ export const CitizenDashboard = ({ auth, onLogout }) => {
     detailCloseTimeoutRef.current = window.setTimeout(() => {
       setSelectedCenter(null)
       setIsDetailClosing(false)
-      setEvacuationRoute(null)
-      setRouteInfo(null)
-      setRouteError('')
+      clearRouteState()
     }, 260)
   }
 
@@ -646,8 +705,7 @@ export const CitizenDashboard = ({ auth, onLogout }) => {
     reportCloseTimeoutRef.current = window.setTimeout(() => {
       if (clearShelterSelection) {
         setSelectedCenter(null)
-        setEvacuationRoute(null)
-        setRouteInfo(null)
+        clearRouteState()
       }
       setActiveTab('shelters')
       setIsReportClosing(false)
@@ -668,8 +726,7 @@ export const CitizenDashboard = ({ auth, onLogout }) => {
     setSelectedCenter(center)
     setDetailSheetState('partial')
     setRouteError('')
-    setRouteInfo(null)
-    setEvacuationRoute(null)
+    clearRouteState()
     setCenterRequestKey((requestKey) => requestKey + 1)
   }
 
@@ -1670,6 +1727,31 @@ export const CitizenDashboard = ({ auth, onLogout }) => {
 
                 {routeError && <p className="shelter-route-error" role="alert">{routeError}</p>}
                 {routeInfo?.notice && <p className="shelter-route-notice" role="status">{routeInfo.notice}</p>}
+                {routeOptions.length > 1 && (
+                  <section className="shelter-route-options" aria-label="Available route options">
+                    <h3>Compare routes</h3>
+                    {routeOptions.map((route) => (
+                      <button
+                        key={route.id}
+                        type="button"
+                        className={`shelter-route-option${route.id === selectedRouteId ? ' selected' : ''}`}
+                        onClick={() => selectRouteOption(route)}
+                      >
+                        <span className="route-option-swatch" style={{ backgroundColor: route.route_color || '#2563eb' }} aria-hidden="true" />
+                        <span className="route-option-copy">
+                          <strong>{route.label || 'Walking route'}</strong>
+                          <small>{formatRouteMetric(route) || 'Route details unavailable'}</small>
+                        </span>
+                        <em className={route.intersects_hazard ? 'hazardous' : 'safe'}>{route.intersects_hazard ? 'HAZARDOUS' : 'SAFE'}</em>
+                      </button>
+                    ))}
+                  </section>
+                )}
+                {selectedRoute && (selectedRoute.route_status === 'hazardous' || selectedRoute.route_status === 'fallback') && (
+                  <div className="shelter-emergency-warning" role="alert" aria-live="assertive">
+                    {selectedRoute.warning_message || ROUTE_WARNING}
+                  </div>
+                )}
 
                 <section className="shelter-detail-section">
                   <h3>Address</h3>

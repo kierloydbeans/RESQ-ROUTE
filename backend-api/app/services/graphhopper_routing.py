@@ -275,6 +275,57 @@ def format_routing_error(error: Exception) -> str:
     return f"{type(error).__name__}: routing host did not respond (connection timed out)"
 
 
+EMERGENCY_ROUTE_WARNING = "PLEASE TAKE CAUTION. YOU ARE GOING THROUGH A HAZARDOUS AREA."
+
+
+def _route_variant(
+    *,
+    route_id: str,
+    label: str,
+    tier: int,
+    route_status: str,
+    intersects_hazard: bool,
+    geometry: Dict[str, Any],
+    distance_meters: Optional[float],
+    duration_seconds: Optional[float],
+    engine: str,
+    algorithm: str,
+    avoided_hazards: Sequence[Dict[str, Any]] = (),
+    warning_message: Optional[str] = None,
+    route_color: str = "#2563eb",
+) -> Dict[str, Any]:
+    return {
+        "id": route_id,
+        "label": label,
+        "tier": tier,
+        "route_status": route_status,
+        "intersects_hazard": intersects_hazard,
+        "warning_message": warning_message,
+        "route_color": route_color,
+        "engine": engine,
+        "algorithm": algorithm,
+        "costing": "pedestrian",
+        "distance_meters": distance_meters,
+        "duration_seconds": duration_seconds,
+        "geometry": geometry,
+        "avoided_hazards": list(avoided_hazards),
+    }
+
+
+def _route_response(primary: Dict[str, Any], variants: Sequence[Dict[str, Any]]) -> Dict[str, Any]:
+    return {
+        **primary,
+        "routes": list(variants),
+        "rerouted": primary["id"] == "safe-reroute",
+        "fallback": primary["route_status"] == "fallback",
+        "message": primary.get("message") or "Walking route calculated.",
+        "route_status": primary["route_status"],
+        "intersects_hazard": primary["intersects_hazard"],
+        "warning_message": primary["warning_message"],
+        "selected_route_id": primary["id"],
+    }
+
+
 async def request_graphhopper_route(
     origin_latitude: float,
     origin_longitude: float,
@@ -303,7 +354,7 @@ async def request_graphhopper_route(
     if custom_model:
         payload["custom_model"] = custom_model
 
-    timeout = httpx.Timeout(60.0, connect=30.0)
+    timeout = httpx.Timeout(10.0, connect=5.0)
     headers = {
         "User-Agent": "RESQ-Route/1.0 (evacuation-routing)",
         "Accept": "application/json",
@@ -373,82 +424,117 @@ async def route_citizen(
     custom_model, excluded_zones = build_hazard_exclusion_model(active_hazards, noah_layers)
 
     try:
-        path = await request_graphhopper_route(
-            origin_latitude,
-            origin_longitude,
-            destination_latitude,
-            destination_longitude,
+        direct = await request_graphhopper_route(
+            origin_latitude, origin_longitude, destination_latitude, destination_longitude
+        )
+        direct_coordinates = extract_geometry(direct)
+        if len(direct_coordinates) < 2:
+            raise ValueError("GraphHopper returned no road route geometry")
+    except (httpx.HTTPError, ValueError, OSError):
+        if not active_hazards and not noah_layers:
+            raise ValueError("Routing service did not return a usable route")
+        geometry = straight_line_geometry(
+            origin_latitude, origin_longitude, destination_latitude, destination_longitude
+        )
+        fallback = _route_variant(
+            route_id="emergency-fallback",
+            label="Emergency fallback route",
+            tier=3,
+            route_status="fallback",
+            intersects_hazard=True,
+            warning_message=EMERGENCY_ROUTE_WARNING,
+            geometry=geometry,
+            distance_meters=haversine_meters(origin_latitude, origin_longitude, destination_latitude, destination_longitude),
+            duration_seconds=None,
+            engine="fallback",
+            algorithm="straight_line",
+            route_color="#ef4444",
+        )
+        return _route_response(fallback, [fallback])
+
+    blocking_roads = hazards_on_route(direct_coordinates, active_hazards)
+    blocking_layers = [layer for layer in noah_layers if layer_near_route(direct_coordinates, layer)]
+    direct_geometry = {"type": "LineString", "coordinates": direct_coordinates}
+    direct_variant = _route_variant(
+        route_id="direct-hazardous" if blocking_roads or blocking_layers else "safe-direct",
+        label="Direct hazardous route" if blocking_roads or blocking_layers else "Safe direct route",
+        tier=2 if blocking_roads or blocking_layers else 1,
+        route_status="hazardous" if blocking_roads or blocking_layers else "safe",
+        intersects_hazard=bool(blocking_roads or blocking_layers),
+        warning_message=EMERGENCY_ROUTE_WARNING if blocking_roads or blocking_layers else None,
+        geometry=direct_geometry,
+        distance_meters=direct.get("distance", 0),
+        duration_seconds=direct.get("time", 0) / 1000,
+        engine="graphhopper",
+        algorithm="dijkstra",
+        route_color="#ef4444" if blocking_roads or blocking_layers else "#2563eb",
+    )
+    if not blocking_roads and not blocking_layers:
+        return _route_response(direct_variant, [direct_variant])
+
+    safe_variant = None
+    try:
+        safe_path = await request_graphhopper_route(
+            origin_latitude, origin_longitude, destination_latitude, destination_longitude,
             custom_model=custom_model if excluded_zones else None,
         )
-        coordinates = extract_geometry(path)
-        if len(coordinates) < 2:
-            raise ValueError("GraphHopper returned no route geometry")
-        return {
-            "engine": "graphhopper",
-            "algorithm": "dijkstra",
-            "costing": "pedestrian",
-            "rerouted": bool(excluded_zones),
-            "fallback": False,
-            "distance_meters": path.get("distance", 0),
-            "duration_seconds": path.get("time", 0) / 1000,
-            "geometry": {"type": "LineString", "coordinates": coordinates},
-            "avoided_hazards": excluded_zones,
-            "message": f"Route calculated with {len(excluded_zones)} active hazard exclusion zone(s).",
-        }
-    except (httpx.HTTPError, ValueError, OSError):
-        # Free GraphHopper plans reject custom models. Use a normal road route
-        # to identify only the hazards this trip actually needs to avoid.
-        baseline = await request_graphhopper_route(
-            origin_latitude,
-            origin_longitude,
-            destination_latitude,
-            destination_longitude,
-        )
-        baseline_coordinates = extract_geometry(baseline)
-        if len(baseline_coordinates) < 2:
-            raise ValueError("GraphHopper returned no road route geometry")
-        blocking_roads = hazards_on_route(baseline_coordinates, active_hazards)
-        blocking_layers = [layer for layer in noah_layers if layer_near_route(baseline_coordinates, layer)]
-        if not blocking_roads and not blocking_layers:
-            return {
-                "engine": "graphhopper",
-                "algorithm": "dijkstra",
-                "costing": "pedestrian",
-                "rerouted": False,
-                "fallback": False,
-                "distance_meters": baseline.get("distance", 0),
-                "duration_seconds": baseline.get("time", 0) / 1000,
-                "geometry": {"type": "LineString", "coordinates": baseline_coordinates},
-                "avoided_hazards": [],
-                "message": "No active hazard intersects this road route.",
-            }
-
-        valhalla_trip = await request_valhalla_route(
-            origin_latitude,
-            origin_longitude,
-            destination_latitude,
-            destination_longitude,
-            exclude_polygons=build_valhalla_exclusion_polygons(blocking_roads, blocking_layers),
-        )
-        coordinates = extract_valhalla_geometry(valhalla_trip)
-        if len(coordinates) < 2:
-            raise ValueError("Valhalla returned no road route geometry")
-        if hazards_on_route(coordinates, active_hazards) or any(
-            layer_near_route(coordinates, layer) for layer in noah_layers
+        safe_coordinates = extract_geometry(safe_path)
+        if len(safe_coordinates) >= 2 and not hazards_on_route(safe_coordinates, active_hazards) and not any(
+            layer_near_route(safe_coordinates, layer) for layer in noah_layers
         ):
-            raise ValueError("No route avoiding all active hazards was found")
-        _, avoided = build_hazard_exclusion_model(blocking_roads, blocking_layers)
-        summary = valhalla_trip.get("summary") or {}
-        return {
-            "engine": "valhalla",
-            "algorithm": "dijkstra_astar",
-            "costing": "pedestrian",
-            "rerouted": True,
-            "fallback": False,
-            "distance_meters": float(summary.get("length") or 0) * 1000,
-            "duration_seconds": float(summary.get("time") or 0),
-            "geometry": {"type": "LineString", "coordinates": coordinates},
-            "avoided_hazards": avoided,
-            "original_route_hazard": bool(blocking_roads),
-            "message": "Road route calculated with active hazard polygons excluded.",
-        }
+            safe_variant = _route_variant(
+                route_id="safe-reroute", label="Safe rerouted route", tier=2,
+                route_status="safe", intersects_hazard=False, warning_message=None,
+                geometry={"type": "LineString", "coordinates": safe_coordinates},
+                distance_meters=safe_path.get("distance", 0), duration_seconds=safe_path.get("time", 0) / 1000,
+                engine="graphhopper", algorithm="dijkstra", avoided_hazards=excluded_zones,
+                route_color="#facc15",
+            )
+    except (httpx.HTTPError, ValueError, OSError):
+        safe_variant = None
+
+    if safe_variant is None:
+        try:
+            valhalla_trip = await request_valhalla_route(
+                origin_latitude, origin_longitude, destination_latitude, destination_longitude,
+                exclude_polygons=build_valhalla_exclusion_polygons(blocking_roads, blocking_layers),
+            )
+            coordinates = extract_valhalla_geometry(valhalla_trip)
+            if len(coordinates) >= 2 and not hazards_on_route(coordinates, active_hazards) and not any(
+                layer_near_route(coordinates, layer) for layer in noah_layers
+            ):
+                _, avoided = build_hazard_exclusion_model(blocking_roads, blocking_layers)
+                summary = valhalla_trip.get("summary") or {}
+                safe_variant = _route_variant(
+                    route_id="safe-reroute", label="Safe rerouted route", tier=2,
+                    route_status="safe", intersects_hazard=False, warning_message=None,
+                    geometry={"type": "LineString", "coordinates": coordinates},
+                    distance_meters=float(summary.get("length") or 0) * 1000,
+                    duration_seconds=float(summary.get("time") or 0),
+                    engine="valhalla", algorithm="dijkstra_astar", avoided_hazards=avoided,
+                    route_color="#facc15",
+                )
+        except (httpx.HTTPError, ValueError, OSError):
+            safe_variant = None
+
+    if safe_variant is not None:
+        response = _route_response(safe_variant, [safe_variant, direct_variant])
+        response["message"] = "Safe reroute and direct hazardous route are available for comparison."
+        response["rerouted"] = True
+        response["fallback"] = False
+        response["original_route_hazard"] = True
+        return response
+
+    fallback = _route_variant(
+        route_id="emergency-fallback", label="Emergency fallback route", tier=3,
+        route_status="fallback", intersects_hazard=True, warning_message=EMERGENCY_ROUTE_WARNING,
+        geometry=direct_geometry, distance_meters=direct.get("distance", 0),
+        duration_seconds=direct.get("time", 0) / 1000, engine="graphhopper",
+        algorithm="dijkstra", route_color="#ef4444",
+    )
+    response = _route_response(fallback, [fallback])
+    response["message"] = "No clean reroute was available. Emergency fallback route shown."
+    response["rerouted"] = False
+    response["fallback"] = True
+    response["original_route_hazard"] = True
+    return response

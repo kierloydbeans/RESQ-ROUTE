@@ -210,6 +210,21 @@
 .shelter-route-summary { color: #93c5fd; background: rgba(37, 99, 235, 0.12); }
 [data-theme='light'] .shelter-route-error { color: #b91c1c; }
 [data-theme='light'] .shelter-route-summary { color: #1d4ed8; }
+.shelter-route-options { display: grid; gap: 7px; margin: 0; }
+.shelter-route-options h3 { margin: 0; color: var(--text-color, #e7edf5); font-size: 11px; letter-spacing: .06em; text-transform: uppercase; }
+.shelter-route-option { display: flex; align-items: center; gap: 9px; width: 100%; padding: 9px 10px; border: 1px solid var(--ops-border, #334155); border-radius: 8px; background: var(--ops-surface-2, rgba(15, 23, 42, .7)); color: inherit; text-align: left; cursor: pointer; }
+.shelter-route-option:hover, .shelter-route-option.selected { border-color: #60a5fa; }
+.route-option-swatch { flex: 0 0 9px; width: 9px; height: 9px; border-radius: 50%; }
+.route-option-copy { display: grid; min-width: 0; flex: 1; gap: 2px; }
+.route-option-copy strong { font-size: 12px; }
+.route-option-copy small { color: #94a3b8; font-size: 11px; }
+.shelter-route-option em { color: #22c55e; font-size: 10px; font-style: normal; font-weight: 800; }
+.shelter-route-option em.hazardous { color: #f87171; }
+.shelter-emergency-warning { margin: 0; padding: 12px; border: 2px solid #fca5a5; border-radius: 8px; background: #991b1b; color: #fff; font-size: 12px; font-weight: 900; line-height: 1.45; text-align: center; letter-spacing: .02em; }
+[data-theme='light'] .shelter-route-options h3 { color: #172033; }
+[data-theme='light'] .shelter-route-option { background: #f8fafc; border-color: #cbd5e1; color: #172033; }
+[data-theme='light'] .route-option-copy small { color: #475569; }
+[data-theme='light'] .shelter-emergency-warning { background: #b91c1c; color: #fff; }
 .shelter-btn-pill { display: flex; align-items: center; justify-content: center; gap: 6px; height: 38px; border-radius: 10px; border: 1px solid rgba(156, 163, 175, 0.35); background: var(--btn-bg, #fff); color: inherit; font-size: 13px; font-weight: 600; cursor: pointer; transition: background 0.15s ease; }
 .shelter-btn-pill:hover { background: rgba(156, 163, 175, 0.12); }
 .shelter-btn-pill.saved { color: #2563eb; border-color: #2563eb; }

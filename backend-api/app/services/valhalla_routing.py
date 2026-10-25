@@ -220,7 +220,7 @@ async def request_valhalla_route(
     if not url:
         raise ValueError("VALHALLA_URL is empty")
 
-    timeout = httpx.Timeout(60.0, connect=30.0)
+    timeout = httpx.Timeout(10.0, connect=5.0)
     headers = {"User-Agent": "RESQ-Route/1.0 (evacuation-routing)", "Accept": "application/json"}
     errors: List[str] = []
 
