@@ -12,7 +12,7 @@ class ShaderErrorBoundary extends Component {
   }
 }
 
-const ShaderLayer = () => {
+const ShaderLayer = ({ animated }) => {
   const [shaderModule, setShaderModule] = useState(null)
 
   useEffect(() => {
@@ -43,7 +43,7 @@ const ShaderLayer = () => {
       >
         <ShaderGradient
           type="plane"
-          animate="on"
+          animate={animated ? 'on' : 'off'}
           uSpeed={0.18}
           uStrength={1.2}
           uDensity={1.2}
@@ -64,9 +64,9 @@ const ShaderLayer = () => {
   )
 }
 
-const GradientBackground = ({ animated = false }) => (
-  <div className={`gradient-background ${animated ? 'gradient-background-shader' : 'gradient-background-fixed'}`} aria-hidden="true">
-    {animated && <ShaderLayer />}
+const GradientBackground = ({ animated = false, shader = false, className = '' }) => (
+  <div className={`gradient-background ${animated ? 'gradient-background-shader' : shader ? 'gradient-background-static-shader' : 'gradient-background-fixed'} ${className}`.trim()} aria-hidden="true">
+    {(animated || shader) && <ShaderLayer animated={animated} />}
   </div>
 )
 

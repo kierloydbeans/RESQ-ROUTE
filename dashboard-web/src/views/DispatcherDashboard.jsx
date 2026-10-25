@@ -99,6 +99,7 @@ const vehicleMarkerColors = { available: '#00d6a0', in_transit: '#2563eb', maint
 const isCriticalAlert = (alert) => String(alert?.severity || '').toLowerCase() === 'critical'
 const isRecoveringRescuer = (rescuer) => String(rescuer?.status || '').toLowerCase() === 'recovering'
 const isAvailableRescuer = (rescuer) => String(rescuer?.status || '').toLowerCase() === 'available'
+const isDisplayableRescuer = (rescuer) => isAvailableRescuer(rescuer) || isRecoveringRescuer(rescuer)
 const getEligibleAssignmentRescuers = (rescuers, alert) => {
   if (isCriticalAlert(alert)) return rescuers
   const availableRescuers = rescuers.filter(isAvailableRescuer)
@@ -209,8 +210,11 @@ export const Dashboard = ({ onLogout }) => {
   const [pendingRoadHazards, setPendingRoadHazards] = useState({ type: 'FeatureCollection', features: [] })
   const [roadHazardReviewing, setRoadHazardReviewing] = useState(null)
   const [roadHazardReviewError, setRoadHazardReviewError] = useState('')
+  const [selectedRoadHazard, setSelectedRoadHazard] = useState(null)
   const [hazardLayers, setHazardLayers] = useState([])
   const [hazardLayerPublishing, setHazardLayerPublishing] = useState(null)
+  const [showNoahHazards, setShowNoahHazards] = useState(true)
+  const [showRoadHazards, setShowRoadHazards] = useState(true)
   const [routeRerouted, setRouteRerouted] = useState(false)
   const [rescuers, setRescuers] = useState([])
   const [selectedRescuerId, setSelectedRescuerId] = useState('')
@@ -826,7 +830,10 @@ export const Dashboard = ({ onLogout }) => {
         headers: { ...getAuthHeaders(), 'Content-Type': 'application/json' },
         body: JSON.stringify({ approved }),
       })
-      if (!response.ok) throw new Error(`Review failed (${response.status}).`)
+      if (!response.ok) {
+        const responseData = await response.json().catch(() => null)
+        throw new Error(responseData?.detail || `Review failed (${response.status}).`)
+      }
       const feature = await response.json()
       setPendingRoadHazards((current) => ({
         ...current,
@@ -838,6 +845,21 @@ export const Dashboard = ({ onLogout }) => {
     } finally {
       setRoadHazardReviewing(null)
     }
+  }
+
+  const handleMapMarkerClick = (marker) => {
+    if (marker.kind !== 'road-hazard') return
+    const pendingId = String(marker.id || '').startsWith('pending-road-')
+      ? String(marker.id).replace('pending-road-', '')
+      : null
+    const pendingFeature = pendingId
+      ? pendingRoadHazards.features.find((feature) => String(feature.id) === pendingId)
+      : null
+    const hazard = roadHazards.find((item) => String(item.id) === String(marker.id))
+    setSelectedRoadHazard({
+      id: hazard?.id || pendingFeature?.id || pendingId || marker.id,
+      ...(hazard || pendingFeature?.properties || {}),
+    })
   }
 
   useEffect(() => {
@@ -1146,6 +1168,9 @@ export const Dashboard = ({ onLogout }) => {
   const mediumHazardLayers = hazardLayers.filter((layer) => String(layer.hazard_level).toLowerCase() === 'medium')
   const highHazardLayers = hazardLayers.filter((layer) => String(layer.hazard_level).toLowerCase() === 'high')
   const visibleHazardLayers = hazardLayers.filter((layer) => ['medium', 'high'].includes(String(layer.hazard_level).toLowerCase()))
+  const renderedHazardLayers = showNoahHazards ? visibleHazardLayers : []
+  const renderedRoadHazardZones = showRoadHazards ? roadHazardZones : { type: 'FeatureCollection', features: [] }
+  const renderedPendingRoadHazards = showRoadHazards ? pendingRoadHazards : { type: 'FeatureCollection', features: [] }
   const allMediumHazardsPublished = mediumHazardLayers.length > 0 && mediumHazardLayers.every((layer) => layer.is_published)
   const allHighHazardsPublished = highHazardLayers.length > 0 && highHazardLayers.every((layer) => layer.is_published)
 
@@ -1452,6 +1477,8 @@ export const Dashboard = ({ onLogout }) => {
   }))
 
   const hazardMarkers = roadHazards.filter((hazard) => hazard.is_active !== false && !hazard.is_resolved).map((hazard) => ({
+    id: hazard.id,
+    kind: 'road-hazard',
     position: [hazard.longitude, hazard.latitude],
     label: `${hazard.road_name || 'Road hazard'} · ${String(hazard.hazard_type).replace(/_/g, ' ')} (${hazard.radius_meters}m)`,
     color: '#ea580c',
@@ -1461,6 +1488,7 @@ export const Dashboard = ({ onLogout }) => {
 
   const pendingHazardMarkers = pendingRoadHazards.features.map(({ id, properties }) => ({
     id: `pending-road-${id}`,
+    kind: 'road-hazard',
     position: [properties.longitude, properties.latitude],
     label: `${properties.road_name || 'Road hazard'} · Pending review`,
     color: '#f59e0b',
@@ -1532,6 +1560,7 @@ export const Dashboard = ({ onLogout }) => {
     handle.addEventListener('pointerup', onPointerUp)
   }
 
+  const activeRescuerCount = rescueUnits.rescuers.filter(isDisplayableRescuer).length
   const sortedRescuers = [...rescueUnits.rescuers].sort((first, second) => {
     if (unitSort === 'name') return (first.full_name || first.username || '').localeCompare(second.full_name || second.username || '')
     return (first.status || '').localeCompare(second.status || '')
@@ -1959,6 +1988,22 @@ export const Dashboard = ({ onLogout }) => {
             <button className="map-hazard-publish-button" type="button" onClick={() => setIsRoadHazardFormOpen((open) => !open)}>
               Report Road Hazard
             </button>
+            {selectedRoadHazard && (
+              <article className="road-hazard-selected-report" aria-label={`Road hazard report ${selectedRoadHazard.id}`}>
+                <div className="road-hazard-selected-heading">
+                  <h3>Road hazard report #{selectedRoadHazard.id}</h3>
+                  <button type="button" onClick={() => setSelectedRoadHazard(null)} aria-label="Close hazard report details">×</button>
+                </div>
+                <dl>
+                  <div><dt>Type</dt><dd>{String(selectedRoadHazard.hazard_type || '—').replace(/_/g, ' ')}</dd></div>
+                  <div><dt>Severity</dt><dd>{selectedRoadHazard.severity || '—'}</dd></div>
+                  <div><dt>Status</dt><dd>{selectedRoadHazard.review_status || (selectedRoadHazard.is_resolved ? 'Resolved' : 'Active')}</dd></div>
+                  <div><dt>Road</dt><dd>{selectedRoadHazard.road_name || 'Unspecified road'}</dd></div>
+                  <div><dt>Location</dt><dd>{selectedRoadHazard.latitude ?? '—'}, {selectedRoadHazard.longitude ?? '—'}</dd></div>
+                  <div><dt>Description</dt><dd>{selectedRoadHazard.description || 'No description provided.'}</dd></div>
+                </dl>
+              </article>
+            )}
             {pendingRoadHazards.features.length > 0 && (
               <section className="road-hazard-review-queue" aria-label="Pending road hazard reports">
                 <h3>Road hazards awaiting review ({pendingRoadHazards.features.length})</h3>
@@ -2040,7 +2085,17 @@ export const Dashboard = ({ onLogout }) => {
                 <span><i className="legend-swatch road-hazard" /> ACTIVE ROAD HAZARD</span>
                 <span><i className="legend-swatch pending-road-hazard" /> PENDING ROAD HAZARD</span>
               </div>
-              <MapContainer hazardLayers={visibleHazardLayers} roadHazardZones={roadHazardZones} pendingRoadHazardZones={pendingRoadHazards} markers={[...mapMarkers, ...activeRouteMarkers]} center={focusedAlertLocation} focusMarkerId={focusedAlertId} selectedAlertCategory={selectedMapAlertCategory} centerRequestKey={focusRequestKey} route={activeEvacuationRoute?.geometry} trackDeviceLocation={false} />
+              <MapContainer hazardLayers={renderedHazardLayers} roadHazardZones={renderedRoadHazardZones} pendingRoadHazardZones={renderedPendingRoadHazards} markers={[...mapMarkers.filter((marker) => showRoadHazards || marker.kind !== 'road-hazard'), ...activeRouteMarkers]} onMarkerClick={handleMapMarkerClick} center={focusedAlertLocation} focusMarkerId={focusedAlertId} selectedAlertCategory={selectedMapAlertCategory} centerRequestKey={focusRequestKey} route={activeEvacuationRoute?.geometry} trackDeviceLocation={false} />
+              <div className="ops-map-layer-controls" role="group" aria-label="Map layers">
+                <button type="button" className={`ops-map-layer-button${showNoahHazards ? ' active' : ''}`} aria-pressed={showNoahHazards} onClick={() => setShowNoahHazards((visible) => !visible)} title={`${showNoahHazards ? 'Hide' : 'Show'} UP NOAH disaster hazards`}>
+                  <span className="ops-map-layer-swatch noah" aria-hidden="true" />
+                  {showNoahHazards ? 'Hide' : 'Show'} UP NOAH Disaster hazards
+                </button>
+                <button type="button" className={`ops-map-layer-button${showRoadHazards ? ' active' : ''}`} aria-pressed={showRoadHazards} onClick={() => setShowRoadHazards((visible) => !visible)} title={`${showRoadHazards ? 'Hide' : 'Show'} public road hazards`}>
+                  <span className="ops-map-layer-swatch road" aria-hidden="true" />
+                  {showRoadHazards ? 'Hide' : 'Show'} road hazards
+                </button>
+              </div>
               <button className="map-resize-handle" onPointerDown={startMapResize} aria-label="Drag to resize map" title="Drag to resize map">↕</button>
             </div>
           </section>
@@ -2050,12 +2105,12 @@ export const Dashboard = ({ onLogout }) => {
         {hasRightRail && <aside className="right-rail">
           {/* 1. TOP: Average Response */}
           {renderedPanels.averageResponse && <section className={`metric-card response-card ${getPanelAnimationClass('averageResponse')}`}>
-            <small>AVERAGE RESPONSE</small>
+            <small>7-DAY AVERAGE RESPONSE</small>
             <strong>{operationMetrics?.average_response_minutes == null ? '—' : `${Number(operationMetrics.average_response_minutes).toFixed(1)} min`}</strong>
             <span>
               {operationMetrics?.average_response_minutes == null
                 ? 'No resolved operations in the 7-day window'
-                : `Database mean from ${operationMetrics.response_samples} resolved operation${operationMetrics.response_samples === 1 ? '' : 's'}`}
+                : `7-day database mean from ${operationMetrics.response_samples} resolved operation${operationMetrics.response_samples === 1 ? '' : 's'}`}
             </span>
           </section>}
 
@@ -2098,7 +2153,7 @@ export const Dashboard = ({ onLogout }) => {
             <div className="unit-panel-heading">
               <PanelTitle
                 title="RESCUER PROFILES"
-                badge={`${rescueUnits.rescuers.length} ACTIVE`}
+                badge={`${activeRescuerCount} ACTIVE`}
                 onClick={() => openModal('units')}
               />
               <button

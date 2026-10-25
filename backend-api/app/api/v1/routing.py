@@ -1,7 +1,9 @@
 from typing import Any, Dict
 
 from fastapi import APIRouter, Depends, HTTPException
-from sqlmodel import Session, SQLModel, select
+from fastapi import status
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlmodel import SQLModel, select
 
 from app.db.session import get_session
 from app.models.road_hazard import RoadHazardReport
@@ -23,7 +25,7 @@ class WalkingRouteRequest(SQLModel):
 @router.post("/calculate")
 async def create_walking_route(
     request: WalkingRouteRequest,
-    session: Session = Depends(get_session),
+    session: AsyncSession = Depends(get_session),
 ) -> Dict[str, Any]:
     await expire_stale_road_hazards(session)
     result = await session.execute(
@@ -48,5 +50,13 @@ async def create_walking_route(
             hazards=hazards,
             noah_layers=noah_layers,
         )
+    except TimeoutError as error:
+        raise HTTPException(
+            status_code=status.HTTP_504_GATEWAY_TIMEOUT,
+            detail={"code": "ROUTING_TIMEOUT", "message": "Routing services timed out. Please try again."},
+        ) from error
     except Exception as error:
-        raise HTTPException(status_code=502, detail=f"Unable to calculate walking route: {error}") from error
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={"code": "ROUTING_UNAVAILABLE", "message": "Walking directions are temporarily unavailable. Please try again."},
+        ) from error

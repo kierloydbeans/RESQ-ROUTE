@@ -12,6 +12,7 @@ import LandingPage from './views/LandingPage'
 import Register from './views/Register'
 import RescuerDashboard from './views/RescuerDashboard'
 import ResetPassword from './views/ResetPassword'
+import CitizenDashboard from './views/CitizenDashboard'
 import { theme } from './theme'
 import { ThemeProvider, useTheme } from './ThemeContext'
 import { SlidersHorizontal, Sparkles } from 'lucide-react'
@@ -150,6 +151,7 @@ function App() {
           <Route path="/login/:role?" element={<Login />} />
           <Route path="/register" element={<Register />} />
           <Route path="/reset-password" element={<ResetPassword />} />
+          <Route path="/explore" element={<CitizenDashboard auth={null} />} />
           <Route path="/rescuer" element={<ProtectedRescuer />} />
           <Route path="/*" element={<ProtectedAdmin />} />
         </Routes>

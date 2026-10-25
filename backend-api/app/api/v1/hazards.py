@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.dialects.postgresql import insert as pg_insert
-from sqlalchemy.exc import OperationalError, ProgrammingError
+from sqlalchemy.exc import DBAPIError, OperationalError, ProgrammingError
 from sqlmodel import Session, select
 from typing import List, Optional
 from app.models.report import Report, ReportCreate, ReportRead, ReportUpdate, SeverityLevel
@@ -141,7 +141,16 @@ async def review_road_hazard(
         request,
         f"Road hazard {hazard_id} {'approved' if payload.approved else 'rejected'}",
     )
-    await session.commit()
+    try:
+        await session.commit()
+    except DBAPIError as error:
+        await session.rollback()
+        if "statement timeout" in str(error).lower() or "querycanceled" in str(error).lower():
+            raise HTTPException(
+                status_code=503,
+                detail="Hazard review is temporarily busy. Please retry in a few seconds.",
+            ) from error
+        raise
     await session.refresh(hazard)
     feature = road_hazard_feature(hazard)
     await telemetry_manager.broadcast({"type": "road_hazard_updated", "data": feature})

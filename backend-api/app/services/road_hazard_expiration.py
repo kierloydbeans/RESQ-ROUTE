@@ -1,6 +1,6 @@
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import update
+from sqlalchemy import text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.road_hazard import RoadHazardReport
@@ -26,6 +26,16 @@ def calculate_road_hazard_expiration(hazard_type: str, reported_at: datetime) ->
 
 
 async def expire_stale_road_hazards(session: AsyncSession) -> None:
+    # Routing, map refreshes, and hazard review can all invoke this helper at
+    # the same time.  Keep only one expiration sweep active per database
+    # transaction so concurrent requests do not queue behind the same table
+    # update and hit PostgreSQL's statement timeout.
+    lock_result = await session.execute(
+        text("SELECT pg_try_advisory_xact_lock(hashtextextended('road_hazard_expiration', 0))")
+    )
+    if not lock_result.scalar():
+        return
+
     now = datetime.now(timezone.utc).replace(tzinfo=None)
     result = await session.execute(
         update(RoadHazardReport)

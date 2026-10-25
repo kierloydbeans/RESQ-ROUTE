@@ -1,4 +1,4 @@
-import React from 'react'
+import React, { useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import {
   ArrowRight,
@@ -18,6 +18,32 @@ import Logo from '../components/Logo'
 import './LandingPage.css'
 
 const LandingPage = () => {
+  const mapArtRef = useRef(null)
+  const [markerPositions, setMarkerPositions] = useState({
+    alert: { x: 15.8, y: 18.5 },
+    shelter: { x: 71.3, y: 46.9 },
+    you: { x: 87, y: 43.2 }
+  })
+  const [draggingMarker, setDraggingMarker] = useState(null)
+
+  const handleMarkerPointerDown = (event, marker) => {
+    if (!mapArtRef.current) return
+    event.preventDefault()
+    event.stopPropagation()
+    event.currentTarget.setPointerCapture?.(event.pointerId)
+    setDraggingMarker(marker)
+  }
+
+  const handleMarkerPointerMove = (event) => {
+    if (!draggingMarker || !mapArtRef.current) return
+    const bounds = mapArtRef.current.getBoundingClientRect()
+    const x = Math.min(94, Math.max(3, ((event.clientX - bounds.left) / bounds.width) * 100))
+    const y = Math.min(88, Math.max(3, ((event.clientY - bounds.top) / bounds.height) * 100))
+    setMarkerPositions((current) => ({ ...current, [draggingMarker]: { x, y } }))
+  }
+
+  const stopMarkerDrag = () => setDraggingMarker(null)
+
   const handleSectionNavigation = (event) => {
     const link = event.target.closest('a[href^="#"]')
     const targetId = link?.getAttribute('href')?.slice(1)
@@ -47,7 +73,7 @@ const LandingPage = () => {
         </nav>
         <div className="landing-header-actions">
           <Link className="landing-sign-in" to="/login">Sign in</Link>
-          <Link className="landing-button landing-button-yellow" to="/login/citizen">
+          <Link className="landing-button landing-button-yellow" to="/explore">
             Open RESQ-ROUTE <ArrowUpRight size={16} />
           </Link>
         </div>
@@ -62,7 +88,7 @@ const LandingPage = () => {
             and response teams stay informed, coordinated, and ready.
           </p>
           <div className="landing-hero-actions">
-            <Link className="landing-button landing-button-blue" to="/login/citizen">
+            <Link className="landing-button landing-button-blue" to="/explore">
               Find help near you <ArrowRight size={17} />
             </Link>
             <a className="landing-text-link" href="#how-it-works">
@@ -81,7 +107,13 @@ const LandingPage = () => {
               <span><span className="landing-live-dot" /> LIVE RESPONSE VIEW</span>
               <span className="landing-map-region">COMMUNITY MAP</span>
             </div>
-            <div className="landing-map-art">
+            <div
+              ref={mapArtRef}
+              className={`landing-map-art${draggingMarker ? ' is-dragging-marker' : ''}`}
+              onPointerMove={handleMarkerPointerMove}
+              onPointerUp={stopMarkerDrag}
+              onPointerCancel={stopMarkerDrag}
+            >
               <div className="landing-map-grid" />
               <svg className="landing-map-roads" viewBox="0 0 520 390" preserveAspectRatio="none" aria-hidden="true">
                 <path d="M-20 83 C80 114 112 58 207 94 S364 140 540 74" />
@@ -93,12 +125,43 @@ const LandingPage = () => {
               </svg>
               <div className="landing-map-area landing-map-area-a" />
               <div className="landing-map-area landing-map-area-b" />
-              <div className="landing-map-route"><span /><span /><span /></div>
-              <div className="landing-map-pin landing-map-pin-alert"><Siren size={17} /></div>
-              <div className="landing-map-pin landing-map-pin-shelter"><HeartHandshake size={17} /></div>
-              <div className="landing-map-pin landing-map-pin-you"><span /></div>
-              <div className="landing-map-label landing-map-label-alert">Community alert</div>
-              <div className="landing-map-label landing-map-label-shelter">Evacuation center</div>
+              <svg className="landing-map-route" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
+                <path
+                  d={`M ${markerPositions.alert.x + 3} ${markerPositions.alert.y + 3} C ${markerPositions.alert.x + 18} ${markerPositions.alert.y + 12}, ${markerPositions.shelter.x - 18} ${markerPositions.shelter.y - 12}, ${markerPositions.shelter.x + 3} ${markerPositions.shelter.y + 3}`}
+                />
+              </svg>
+              <div
+                className={`landing-map-pin landing-map-pin-alert${draggingMarker === 'alert' ? ' is-dragging' : ''}`}
+                style={{ left: `${markerPositions.alert.x}%`, top: `${markerPositions.alert.y}%`, right: 'auto' }}
+                role="button"
+                tabIndex={0}
+                aria-label="Drag community alert marker"
+                onPointerDown={(event) => handleMarkerPointerDown(event, 'alert')}
+              ><Siren size={17} /></div>
+              <div
+                className={`landing-map-pin landing-map-pin-shelter${draggingMarker === 'shelter' ? ' is-dragging' : ''}`}
+                style={{ left: `${markerPositions.shelter.x}%`, top: `${markerPositions.shelter.y}%`, right: 'auto' }}
+                role="button"
+                tabIndex={0}
+                aria-label="Drag evacuation center marker"
+                onPointerDown={(event) => handleMarkerPointerDown(event, 'shelter')}
+              ><HeartHandshake size={17} /></div>
+              <div
+                className={`landing-map-pin landing-map-pin-you${draggingMarker === 'you' ? ' is-dragging' : ''}`}
+                style={{ left: `${markerPositions.you.x}%`, top: `${markerPositions.you.y}%`, right: 'auto' }}
+                role="button"
+                tabIndex={0}
+                aria-label="Drag your location marker"
+                onPointerDown={(event) => handleMarkerPointerDown(event, 'you')}
+              ><span /></div>
+              <div
+                className="landing-map-label landing-map-label-alert"
+                style={{ left: `${Math.min(82, markerPositions.alert.x + 7)}%`, top: `${Math.max(2, markerPositions.alert.y - 7)}%`, right: 'auto' }}
+              >Community alert</div>
+              <div
+                className="landing-map-label landing-map-label-shelter"
+                style={{ left: `${Math.max(4, markerPositions.shelter.x - 10)}%`, top: `${Math.min(82, markerPositions.shelter.y + 7)}%`, right: 'auto' }}
+              >Evacuation center</div>
               <div className="landing-map-legend">
                 <span><i className="legend-alert" /> Alert</span>
                 <span><i className="legend-shelter" /> Safe center</span>

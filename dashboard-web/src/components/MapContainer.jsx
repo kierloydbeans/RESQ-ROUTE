@@ -100,19 +100,130 @@ const normalizeRouteData = (route) => {
 const getRouteCoordinates = (route) => {
   if (!route) return []
   if (route.type === 'Feature') return route.geometry?.coordinates || []
-  if (route.type === 'FeatureCollection') return route.features?.flatMap((feature) => feature.geometry?.coordinates || []) || []
+  if (route.type === 'FeatureCollection') {
+    const selectedFeatures = route.features?.filter((feature) => feature.properties?.selected)
+    const features = selectedFeatures?.length ? selectedFeatures : route.features
+    return features?.flatMap((feature) => feature.geometry?.coordinates || []) || []
+  }
   return route.coordinates || []
 }
 
 const escapeHtml = (value) => String(value ?? '').replace(/[&<>'"]/g, (character) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' })[character])
 
-const formatPopupDetails = (marker) => {
+const reverseGeocodeCache = new Map()
+const REVERSE_GEOCODE_CACHE_KEY = 'resq-nominatim-reverse-geocode-v1'
+
+const coordinateFallback = (latitude, longitude) => {
+  const latitudeDirection = latitude >= 0 ? 'N' : 'S'
+  const longitudeDirection = longitude >= 0 ? 'E' : 'W'
+  return `${Math.abs(latitude).toFixed(4)}° ${latitudeDirection}, ${Math.abs(longitude).toFixed(4)}° ${longitudeDirection}`
+}
+
+const getMarkerCoordinates = (marker) => {
+  const [longitude, latitude] = normalizeCoordinates(marker?.position)
+  return Number.isFinite(latitude) && Number.isFinite(longitude) ? { latitude, longitude } : null
+}
+
+const isCoordinateText = (value) => /^-?\d+(?:\.\d+)?\s*,\s*-?\d+(?:\.\d+)?$/.test(String(value || '').trim())
+
+const getStoredLocation = (details) => {
+  const friendly = [details.address, details.location_name, details.barangay, details.road]
+    .find((value) => value && !/^unspecified road$/i.test(String(value)) && !isCoordinateText(value))
+  return friendly ? String(friendly) : null
+}
+
+const loadReverseGeocodeCache = () => {
+  try {
+    const stored = JSON.parse(window.localStorage.getItem(REVERSE_GEOCODE_CACHE_KEY) || '{}')
+    Object.entries(stored).forEach(([key, value]) => reverseGeocodeCache.set(key, value))
+  } catch {}
+}
+
+const saveReverseGeocode = (key, value) => {
+  reverseGeocodeCache.set(key, value)
+  try {
+    const stored = Object.fromEntries([...reverseGeocodeCache.entries()].filter(([, address]) => address))
+    window.localStorage.setItem(REVERSE_GEOCODE_CACHE_KEY, JSON.stringify(stored))
+  } catch {}
+}
+
+const formatNominatimAddress = (address) => {
+  if (!address) return null
+  const road = address.road || address.pedestrian || address.footway
+  const barangay = address.neighbourhood || address.suburb || address.quarter || address.village
+  const city = address.city || address.town || address.municipality || address.county
+  return [road, barangay, city]
+    .filter(Boolean)
+    .filter((value, index, values) => values.indexOf(value) === index)
+    .join(', ') || address.display_name?.split(',').slice(0, 3).join(', ')
+}
+
+const fetchReverseGeocodedLocation = async (marker) => {
+  const coordinates = getMarkerCoordinates(marker)
+  if (!coordinates) return null
+  const key = `${coordinates.latitude.toFixed(6)},${coordinates.longitude.toFixed(6)}`
+  if (!reverseGeocodeCache.size) loadReverseGeocodeCache()
+  if (reverseGeocodeCache.has(key)) return reverseGeocodeCache.get(key)
+
+  const controller = new AbortController()
+  const timeout = window.setTimeout(() => controller.abort(), 5000)
+  try {
+    const params = new URLSearchParams({
+      format: 'json',
+      lat: String(coordinates.latitude),
+      lon: String(coordinates.longitude),
+      zoom: '18',
+      addressdetails: '1',
+    })
+    const response = await fetch(`https://nominatim.openstreetmap.org/reverse?${params}`, {
+      signal: controller.signal,
+      headers: { Accept: 'application/json', 'Accept-Language': 'en' },
+    })
+    if (!response.ok) throw new Error(`Nominatim returned ${response.status}`)
+    const data = await response.json()
+    const address = formatNominatimAddress(data.address)
+    saveReverseGeocode(key, address)
+    return address
+  } catch {
+    reverseGeocodeCache.set(key, null)
+    return null
+  } finally {
+    window.clearTimeout(timeout)
+  }
+}
+
+const formatPopupDetails = (marker, resolvedLocation = null) => {
   const details = marker.details || {}
+  const coordinates = getMarkerCoordinates(marker)
+  const storedLocation = getStoredLocation(details)
+  const readableLocation = storedLocation || resolvedLocation || (coordinates
+    ? coordinateFallback(coordinates.latitude, coordinates.longitude)
+    : 'Location unavailable')
   const rows = Object.entries(details)
     .filter(([, value]) => value !== null && value !== undefined && value !== '')
-    .map(([label, value]) => `<div class="map-popup-row"><span>${escapeHtml(label.replace(/_/g, ' '))}</span><b>${escapeHtml(value)}</b></div>`)
+    .map(([label, value]) => {
+      const displayValue = label === 'location' && isCoordinateText(value) ? readableLocation : value
+      return `<div class="map-popup-row"><span>${escapeHtml(label.replace(/_/g, ' '))}</span><b>${escapeHtml(displayValue)}</b></div>`
+    })
     .join('')
   return `<div class="map-popup"><strong>${escapeHtml(marker.label || 'Map marker')}</strong>${rows}</div>`
+}
+
+const enrichPopupLocation = async (popup, marker) => {
+  const details = marker.details || {}
+  if (getStoredLocation(details) || !getMarkerCoordinates(marker)) return
+  const location = await fetchReverseGeocodedLocation(marker)
+  if (location && popup.isOpen()) {
+    popup.setHTML(formatPopupDetails(marker, location))
+    enhancePopupCloseButton(popup)
+  }
+}
+
+const enhancePopupCloseButton = (popup) => {
+  const closeButton = popup.getElement()?.querySelector('.maplibregl-popup-close-button')
+  if (!closeButton) return
+  closeButton.setAttribute('aria-label', 'Close map details')
+  closeButton.setAttribute('title', 'Close details')
 }
 
 const createMarkerElement = (color = '#dc2626', icon = null) => {
@@ -148,7 +259,8 @@ const MapContainer = ({
   pendingRoadHazardZones = { type: 'FeatureCollection', features: [] },
   centerRequestKey = 0,
   pinnedLocation = null, 
-  onMapClick, 
+  onMapClick,
+  onMarkerClick,
   trackDeviceLocation = true 
 }) => {
   const mapContainerRef = useRef(null)
@@ -173,12 +285,14 @@ const MapContainer = ({
   const roadHazardZonesRef = useRef(roadHazardZones)
   const pendingRoadHazardZonesRef = useRef(pendingRoadHazardZones)
   const onMapClickRef = useRef(onMapClick)
+  const onMarkerClickRef = useRef(onMarkerClick)
   const markersSignature = JSON.stringify(markers)
   const centerSignature = JSON.stringify(center)
   const hazardLayersSignature = JSON.stringify(hazardLayers)
   const roadHazardZonesSignature = JSON.stringify(roadHazardZones)
   const pendingRoadHazardZonesSignature = JSON.stringify(pendingRoadHazardZones)
   pinnedLocationRef.current = pinnedLocation
+  onMarkerClickRef.current = onMarkerClick
 
   const showDeviceLocation = (map, longitude, latitude) => {
     const position = [longitude, latitude]
@@ -422,9 +536,26 @@ const MapContainer = ({
       element.classList.toggle('is-full-shelter', marker.kind === 'shelter' && marker.isFull === true)
       element.classList.toggle('is-alert-marker', isAlertMarker)
       element.classList.toggle('is-shelter-highlighted', isShelterHighlighted)
+      if (onMarkerClickRef.current) {
+        const openMarker = () => onMarkerClickRef.current?.(marker)
+        const handleShelterKeyDown = (event) => {
+          if (event.key === 'Enter' || event.key === ' ') {
+            event.preventDefault()
+            openMarker()
+          }
+        }
+        element.addEventListener('click', openMarker)
+        element.addEventListener('keydown', handleShelterKeyDown)
+      }
+      const popup = new maplibregl.Popup({ offset: 25, closeOnClick: false, closeOnMove: false, closeButton: true })
+        .setHTML(formatPopupDetails(marker))
+      popup.on('open', () => {
+        enhancePopupCloseButton(popup)
+        void enrichPopupLocation(popup, marker)
+      })
       const markerInstance = new maplibregl.Marker({ element, anchor: 'center' })
         .setLngLat([lng, lat])
-        .setPopup(new maplibregl.Popup({ offset: 25, closeOnClick: false, closeOnMove: false, closeButton: true }).setHTML(formatPopupDetails(marker)))
+        .setPopup(popup)
         .addTo(map)
       const entry = { marker: markerInstance, signature, removalTimer: null }
       markerInstancesRef.current.set(key, entry)
@@ -512,7 +643,16 @@ const MapContainer = ({
           if (fallbackTimer !== null) window.clearTimeout(fallbackTimer)
           map.resize()
           map.addSource('citizen-route', { type: 'geojson', data: normalizeRouteData(routeRef.current) })
-          map.addLayer({ id: 'citizen-route-line', type: 'line', source: 'citizen-route', paint: { 'line-color': '#50a8ff', 'line-width': 5, 'line-opacity': 0.9 } })
+          map.addLayer({
+            id: 'citizen-route-line',
+            type: 'line',
+            source: 'citizen-route',
+            paint: {
+              'line-color': ['coalesce', ['get', 'route_color'], '#50a8ff'],
+              'line-width': ['case', ['boolean', ['get', 'selected'], false], 6, 4],
+              'line-opacity': ['case', ['boolean', ['get', 'selected'], false], 0.96, 0.55],
+            },
+          })
           map.addSource('resq-road-hazard-zones', {
             type: 'geojson',
             data: roadHazardZonesRef.current,

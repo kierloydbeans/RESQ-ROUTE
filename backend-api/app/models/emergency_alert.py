@@ -27,6 +27,7 @@ class EmergencyAlertBase(SQLModel):
     assigned_rescuer_name: Optional[str] = None
     assigned_vehicle_ids: Optional[str] = None
     assignment_note: Optional[str] = None
+    image_url: Optional[str] = Field(default=None, max_length=2048)
 
 
 class EmergencyAlert(EmergencyAlertBase, table=True):

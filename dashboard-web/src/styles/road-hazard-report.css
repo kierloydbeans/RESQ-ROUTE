@@ -22,5 +22,15 @@
 .road-hazard-review-item button:last-child { border-color: #dc2626; }
 .road-hazard-review-item button:disabled { opacity: .5; cursor: wait; }
 .road-hazard-review-error { margin: 0; padding: 8px; color: #fca5a5; font-size: 12px; }
+.road-hazard-selected-report { display: grid; gap: 8px; margin: 10px; padding: 12px; border: 1px solid #f97316; border-radius: 8px; background: rgba(234, 88, 12, .12); }
+.road-hazard-selected-heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.road-hazard-selected-heading h3 { margin: 0; font-size: 13px; text-transform: uppercase; }
+.road-hazard-selected-heading button { border: 0; background: transparent; color: inherit; font-size: 20px; cursor: pointer; }
+.road-hazard-selected-report dl { display: grid; gap: 5px; margin: 0; font-size: 12px; }
+.road-hazard-selected-report dl > div { display: grid; grid-template-columns: 82px 1fr; gap: 8px; }
+.road-hazard-selected-report dt { color: #94a3b8; text-transform: uppercase; }
+.road-hazard-selected-report dd { margin: 0; overflow-wrap: anywhere; }
+[data-theme='light'] .road-hazard-selected-report { color: #152033; background: #fff7ed; border-color: #f97316; }
+[data-theme='light'] .road-hazard-selected-report dt { color: #64748b; }
 [data-theme='light'] .road-hazard-review-queue { color: #152033; background: #f8fafc; }
 [data-theme='light'] .road-hazard-review-item button { color: #152033; background: #fff; }

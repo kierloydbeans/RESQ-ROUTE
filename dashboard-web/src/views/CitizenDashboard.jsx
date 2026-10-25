@@ -1,11 +1,12 @@
 import React, { useEffect, useRef, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { useWebSocket } from '../hooks/useWebSocket'
 import { useActiveRoadHazards } from '../hooks/useActiveRoadHazards'
 import { WS_URL } from '../dataProvider'
 import MapContainer from '../components/MapContainer'
 import RoadHazardReportForm from '../components/RoadHazardReportForm'
 import Logo from '../components/Logo'
-import { Accessibility, CheckCircle2, CircleHelp, Clock3, Construction, Menu, QrCode, UploadCloud } from 'lucide-react'
+import { Accessibility, CheckCircle2, CircleHelp, Clock3, Construction, LockKeyhole, Menu, QrCode, UploadCloud } from 'lucide-react'
 import QRCode from 'qrcode'
 import 'maplibre-gl/dist/maplibre-gl.css'
 import "../styles/citizen-console.css";
@@ -181,6 +182,33 @@ const getApiErrorMessage = (detail, fallback) => {
   return fallback
 }
 
+const ROUTE_WARNING = 'PLEASE TAKE CAUTION. YOU ARE GOING THROUGH A HAZARDOUS AREA.'
+
+const toRouteFeatureCollection = (routes, selectedRouteId) => ({
+  type: 'FeatureCollection',
+  features: routes
+    .filter((route) => Array.isArray(route?.geometry?.coordinates) && route.geometry.coordinates.length >= 2)
+    .map((route) => ({
+      type: 'Feature',
+      properties: {
+        route_id: route.id,
+        route_status: route.route_status,
+        route_color: route.route_color,
+        selected: route.id === selectedRouteId,
+      },
+      geometry: route.geometry,
+    })),
+})
+
+const formatRouteMetric = (route) => {
+  const distance = Number(route?.distance_meters)
+  const duration = Number(route?.duration_seconds)
+  return [
+    Number.isFinite(distance) ? `${(distance / 1000).toFixed(1)} km` : null,
+    Number.isFinite(duration) ? `${Math.round(duration / 60)} min walk` : null,
+  ].filter(Boolean).join(' · ')
+}
+
 const getVerifiedCapacity = (center) => {
   if (center?.capacity === null || center?.capacity === undefined ||
     center?.current_occupancy === null || center?.current_occupancy === undefined ||
@@ -250,6 +278,7 @@ const getReadablePinnedLocation = (location, centers) => {
 }
 
 export const CitizenDashboard = ({ auth, onLogout }) => {
+  const navigate = useNavigate()
   const [latestGps, setLatestGps] = useState(null)
   const [isQrDialogOpen, setIsQrDialogOpen] = useState(false)
   const [evacuationQr, setEvacuationQr] = useState('')
@@ -270,9 +299,32 @@ export const CitizenDashboard = ({ auth, onLogout }) => {
   const [isReportClosing, setIsReportClosing] = useState(false)
   const reportCloseTimeoutRef = useRef(null)
   const [evacuationRoute, setEvacuationRoute] = useState(null)
+  const [routeOptions, setRouteOptions] = useState([])
+  const [selectedRouteId, setSelectedRouteId] = useState(null)
   const [routeLoading, setRouteLoading] = useState(false)
   const [routeInfo, setRouteInfo] = useState(null)
   const [routeError, setRouteError] = useState('')
+
+  const selectedRoute = routeOptions.find((route) => route.id === selectedRouteId) || null
+
+  const clearRouteState = () => {
+    setEvacuationRoute(null)
+    setRouteOptions([])
+    setSelectedRouteId(null)
+    setRouteInfo(null)
+    setRouteError('')
+  }
+
+  const selectRouteOption = (route) => {
+    if (!route) return
+    setSelectedRouteId(route.id)
+    setEvacuationRoute(toRouteFeatureCollection(routeOptions, route.id))
+    setRouteInfo({
+      distance: formatRouteMetric(route).split(' · ')[0] || null,
+      duration: formatRouteMetric(route).split(' · ')[1] || null,
+      notice: route.warning_message || (route.intersects_hazard ? ROUTE_WARNING : null),
+    })
+  }
   const [searchQuery, setSearchQuery] = useState('')
   const [isShelterPanelCollapsed, setIsShelterPanelCollapsed] = useState(false)
   const [shelterSheetHeight, setShelterSheetHeight] = useState(null)
@@ -298,9 +350,13 @@ export const CitizenDashboard = ({ auth, onLogout }) => {
   const familyMemberKeyRef = useRef(0)
   const [savedShelterIds, setSavedShelterIds] = useState([])
   const [copyFeedback, setCopyFeedback] = useState('')
+  const [isAuthPromptOpen, setIsAuthPromptOpen] = useState(false)
   const profileMenuRef = useRef(null)
+  const sharedCenterHandledRef = useRef(null)
 
   const [pinnedLocation, setPinnedLocation] = useState(null)
+  const [showNoahHazards, setShowNoahHazards] = useState(true)
+  const [showRoadHazards, setShowRoadHazards] = useState(true)
 
   const [selectedIncident, setSelectedIncident] = useState('flood')
   const [selectedSeverity, setSelectedSeverity] = useState('high')
@@ -472,6 +528,11 @@ export const CitizenDashboard = ({ auth, onLogout }) => {
     }
   }
 
+  const clearPinnedLocation = () => {
+    setPinnedLocation(null)
+    if (activeTab === 'alert') setAlertStatus('Dropped pin cleared.')
+  }
+
   const formattedPhtTime = new Intl.DateTimeFormat('en-PH', {
     timeZone: 'Asia/Manila',
     hour: '2-digit',
@@ -491,6 +552,25 @@ export const CitizenDashboard = ({ auth, onLogout }) => {
   const isWithinQrCheckInRange = Number.isFinite(selectedCenterDistanceMeters) &&
     selectedCenterDistanceMeters < 50 &&
     Date.now() - latestGps?.timestamp < 30_000
+
+  useEffect(() => {
+    if (!auth?.token) return
+    const pendingAction = localStorage.getItem('resq-route-pending-action')
+    if (!pendingAction) return
+    localStorage.removeItem('resq-route-pending-action')
+    if (pendingAction === 'report-emergency') handleOpenReport()
+    if (pendingAction === 'report-road-hazard') setActiveTab('road-hazard')
+  }, [auth?.token])
+
+  useEffect(() => {
+    const sharedCenterId = new URLSearchParams(window.location.search).get('center')
+    if (!sharedCenterId || sharedCenterHandledRef.current === sharedCenterId) return
+    const sharedCenter = centers.find((center) => String(center.id) === sharedCenterId)
+    if (!sharedCenter) return
+    sharedCenterHandledRef.current = sharedCenterId
+    setActiveTab('shelters')
+    handleSelectCenter(sharedCenter)
+  }, [centers])
 
   useEffect(() => {
     if (isQrDialogOpen && !isWithinQrCheckInRange) {
@@ -604,24 +684,35 @@ export const CitizenDashboard = ({ auth, onLogout }) => {
           destination_longitude: Number(center.longitude)
         })
       })
-      if (!res.ok) throw new Error(`Directions are unavailable right now (${res.status}).`)
-      const data = await res.json()
-      if (data.fallback || !Array.isArray(data.geometry?.coordinates) || data.geometry.coordinates.length < 2) {
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        throw new Error(getApiErrorMessage(
+          data.detail,
+          res.status === 504
+            ? 'Routing services timed out. Please try again.'
+            : `Directions are temporarily unavailable (${res.status}).`
+        ))
+      }
+      const options = Array.isArray(data.routes) && data.routes.length > 0
+        ? data.routes
+        : [{ ...data, id: 'primary-route', label: 'Walking route', route_status: data.route_status || 'safe' }]
+      const initialRoute = options.find((route) => route.id === data.selected_route_id)
+        || options.find((route) => route.route_status === 'safe')
+        || options[0]
+      if (!initialRoute || !Array.isArray(initialRoute.geometry?.coordinates) || initialRoute.geometry.coordinates.length < 2) {
         throw new Error('No walking route is available for this center right now.')
       }
-      setEvacuationRoute(data.geometry)
+      setRouteOptions(options)
+      setSelectedRouteId(initialRoute.id)
+      setEvacuationRoute(toRouteFeatureCollection(options, initialRoute.id))
+      const metrics = formatRouteMetric(initialRoute).split(' · ')
       setRouteInfo({
-        distance: data.distance_meters !== null && data.distance_meters !== undefined && Number.isFinite(Number(data.distance_meters))
-          ? `${(Number(data.distance_meters) / 1000).toFixed(1)} km`
-          : null,
-        duration: data.duration_seconds !== null && data.duration_seconds !== undefined && Number.isFinite(Number(data.duration_seconds))
-          ? `${Math.round(Number(data.duration_seconds) / 60)} min walk`
-          : null,
-        notice: data.original_route_hazard ? 'Original route goes through a road hazard. Taking another route.' : null,
+        distance: metrics[0] || null,
+        duration: metrics[1] || null,
+        notice: initialRoute.warning_message || (initialRoute.intersects_hazard ? ROUTE_WARNING : null),
       })
     } catch (error) {
-      setEvacuationRoute(null)
-      setRouteInfo(null)
+      clearRouteState()
       setRouteError(error instanceof Error ? error.message : 'Directions are unavailable right now.')
     } finally {
       setRouteLoading(false)
@@ -634,9 +725,7 @@ export const CitizenDashboard = ({ auth, onLogout }) => {
     detailCloseTimeoutRef.current = window.setTimeout(() => {
       setSelectedCenter(null)
       setIsDetailClosing(false)
-      setEvacuationRoute(null)
-      setRouteInfo(null)
-      setRouteError('')
+      clearRouteState()
     }, 260)
   }
 
@@ -646,8 +735,7 @@ export const CitizenDashboard = ({ auth, onLogout }) => {
     reportCloseTimeoutRef.current = window.setTimeout(() => {
       if (clearShelterSelection) {
         setSelectedCenter(null)
-        setEvacuationRoute(null)
-        setRouteInfo(null)
+        clearRouteState()
       }
       setActiveTab('shelters')
       setIsReportClosing(false)
@@ -665,11 +753,11 @@ export const CitizenDashboard = ({ auth, onLogout }) => {
   const handleSelectCenter = (center) => {
     window.clearTimeout(detailCloseTimeoutRef.current)
     setIsDetailClosing(false)
+    setIsShelterPanelCollapsed(false)
     setSelectedCenter(center)
     setDetailSheetState('partial')
     setRouteError('')
-    setRouteInfo(null)
-    setEvacuationRoute(null)
+    clearRouteState()
     setCenterRequestKey((requestKey) => requestKey + 1)
   }
 
@@ -730,29 +818,50 @@ export const CitizenDashboard = ({ auth, onLogout }) => {
     )
   }
 
+  const requestAuthenticatedAction = (action) => {
+    if (auth?.token) return true
+    localStorage.setItem('resq-route-pending-action', action)
+    setIsAuthPromptOpen(true)
+    return false
+  }
+
+  const handleOpenEmergencyReport = () => {
+    if (!requestAuthenticatedAction('report-emergency')) return
+    handleOpenReport()
+  }
+
+  const handleOpenRoadHazardReport = () => {
+    if (!requestAuthenticatedAction('report-road-hazard')) return
+    setActiveTab('road-hazard')
+  }
+
   const handleShare = async (center) => {
     const capacity = getVerifiedCapacity(center)
     const status = center.is_active === false
       ? 'Closed'
       : isCenterFull(center) ? 'Full'
         : isCenterAvailable(center) ? 'Accepting evacuees' : 'Not verified'
+    const shareUrl = new URL(window.location.href)
+    shareUrl.searchParams.set('center', String(center.id))
+    const shareLink = shareUrl.toString()
     const text = [
       center.name,
       center.address || 'Address not provided',
       `Availability: ${status}`,
       capacity ? `Capacity: ${capacity.occupancy} of ${capacity.capacity} occupied` : 'Capacity: Not verified',
+      `Open in ResQ-Route: ${shareLink}`,
       `Map: https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${center.latitude},${center.longitude}`)}`
     ].join('\n')
     try {
       if (navigator.share) {
-        await navigator.share({ title: center.name, text })
+        await navigator.share({ title: center.name, text, url: shareLink })
       } else if (navigator.clipboard?.writeText) {
-        await navigator.clipboard.writeText(text)
+        await navigator.clipboard.writeText(shareLink)
       } else {
         setCopyFeedback('Sharing unavailable')
         return
       }
-      setCopyFeedback(navigator.share ? 'Shared' : 'Copied')
+      setCopyFeedback(navigator.share ? 'Shared link' : 'Link copied')
       window.setTimeout(() => setCopyFeedback(''), 2500)
     } catch (error) {
       if (error instanceof DOMException && error.name === 'AbortError') return
@@ -809,6 +918,21 @@ export const CitizenDashboard = ({ auth, onLogout }) => {
     } finally {
       setIsQrLoading(false)
     }
+  }
+
+  const downloadEvacuationQr = () => {
+    if (!evacuationQr) return
+    const filename = `resq-route-evacuation-check-in-${(selectedCenter?.name || 'center')
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-|-$/g, '') || 'center'}.png`
+    const link = document.createElement('a')
+    link.href = evacuationQr
+    link.download = filename
+    document.body.appendChild(link)
+    link.click()
+    link.remove()
   }
 
   const uploadAlertMedia = async (alertId, files, mediaUploadToken) => {
@@ -933,10 +1057,20 @@ export const CitizenDashboard = ({ auth, onLogout }) => {
   })
 
   const hazardMarkers = roadHazards.filter((h) => h.is_active !== false && !h.is_resolved).map((h) => ({
+    id: h.id,
+    kind: 'road-hazard',
     position: [h.longitude, h.latitude],
-    label: `${h.road_name || 'Hazard'}`,
+    label: `${h.road_name || 'Road hazard'} · ${String(h.hazard_type || 'hazard').replace(/_/g, ' ')}`,
     color: '#d93025',
-    icon: '!'
+    icon: '!',
+    details: {
+      type: String(h.hazard_type || 'hazard').replace(/_/g, ' '),
+      severity: h.severity || 'Unknown',
+      status: h.is_resolved ? 'Resolved' : h.is_active === false ? 'Inactive' : 'Active',
+      road: h.road_name || 'Unspecified road',
+      location: `${h.latitude}, ${h.longitude}`,
+      description: h.description || 'No description provided.',
+    },
   }))
 
   const isSaved = selectedCenter && savedShelterIds.includes(selectedCenter.id)
@@ -1017,13 +1151,18 @@ export const CitizenDashboard = ({ auth, onLogout }) => {
     })
 
   return (
-    <div className="citizen-map-layout" style={shelterSheetHeight === null ? undefined : { '--shelter-sheet-height': `${shelterSheetHeight}px` }}>
+    <div className={`citizen-map-layout${!auth?.token ? ' citizen-explore-entry' : ''}`} style={shelterSheetHeight === null ? undefined : { '--shelter-sheet-height': `${shelterSheetHeight}px` }}>
       {/* 1. Background Map */}
       <div className={`citizen-map-canvas ${activeTab === 'shelters' && isShelterPanelCollapsed ? 'panel-collapsed' : ''}`}>
         <MapContainer
-          hazardLayers={publishedHazardLayers}
-          roadHazardZones={roadHazardZones}
-          markers={[...centerMarkers, ...hazardMarkers]}
+          hazardLayers={showNoahHazards ? publishedHazardLayers : []}
+          roadHazardZones={showRoadHazards ? roadHazardZones : { type: 'FeatureCollection', features: [] }}
+          markers={[...centerMarkers, ...(showRoadHazards ? hazardMarkers : [])]}
+          onMarkerClick={(marker) => {
+            if (marker.kind !== 'shelter') return
+            const center = centers.find((candidate) => String(candidate.id) === String(marker.id))
+            if (center) handleSelectCenter(center)
+          }}
           route={evacuationRoute}
           center={selectedCenter ? [selectedCenter.longitude, selectedCenter.latitude] : null}
           centerRequestKey={centerRequestKey}
@@ -1039,6 +1178,33 @@ export const CitizenDashboard = ({ auth, onLogout }) => {
           <span><i className="legend-full" aria-hidden="true" /> Full / closed</span>
           <span><i className="legend-unverified" aria-hidden="true" /> Not verified</span>
           <span><i className="legend-selected" aria-hidden="true" /> Selected</span>
+        </div>
+        <div className="citizen-map-layer-controls" role="group" aria-label="Map layers">
+          <button
+            type="button"
+            className={`citizen-map-layer-button${showNoahHazards ? ' active' : ''}`}
+            aria-pressed={showNoahHazards}
+            onClick={() => setShowNoahHazards((visible) => !visible)}
+            title={`${showNoahHazards ? 'Hide' : 'Show'} UP NOAH disaster hazards`}
+          >
+            <span className="layer-swatch noah" aria-hidden="true" />
+            {showNoahHazards ? 'Hide' : 'Show'} UP NOAH Disaster Hazards
+          </button>
+          <button
+            type="button"
+            className={`citizen-map-layer-button${showRoadHazards ? ' active' : ''}`}
+            aria-pressed={showRoadHazards}
+            onClick={() => setShowRoadHazards((visible) => !visible)}
+            title={`${showRoadHazards ? 'Hide' : 'Show'} public road hazards`}
+          >
+            <span className="layer-swatch road" aria-hidden="true" />
+            {showRoadHazards ? 'Hide' : 'Show'} road hazards
+          </button>
+          {pinnedLocation && (
+            <button type="button" className="citizen-map-layer-button clear-pin" onClick={clearPinnedLocation} title="Remove dropped pin">
+              × Clear dropped pin
+            </button>
+          )}
         </div>
       </div>
 
@@ -1063,13 +1229,13 @@ export const CitizenDashboard = ({ auth, onLogout }) => {
             </button>
             <button
               className={`citizen-chip alert-chip ${activeTab === 'alert' ? 'active' : ''}`}
-              onClick={handleOpenReport}
+              onClick={handleOpenEmergencyReport}
             >
               <Icons.Alert /> Report Emergency
             </button>
             <button
               className={`citizen-chip road-hazard-chip ${activeTab === 'road-hazard' ? 'active' : ''}`}
-              onClick={() => setActiveTab('road-hazard')}
+              onClick={handleOpenRoadHazardReport}
             >
               <Construction size={18} aria-hidden="true" /> Report Road Hazard
             </button>
@@ -1327,6 +1493,23 @@ export const CitizenDashboard = ({ auth, onLogout }) => {
         </div>
       )}
 
+      {isAuthPromptOpen && (
+        <div className="citizen-auth-prompt-backdrop" role="presentation">
+          <section className="citizen-auth-prompt" role="dialog" aria-modal="true" aria-labelledby="citizen-auth-prompt-title">
+            <button type="button" className="citizen-auth-prompt-close" aria-label="Close authentication prompt" onClick={() => setIsAuthPromptOpen(false)}>
+              <Icons.Close />
+            </button>
+            <div className="citizen-auth-prompt-icon"><LockKeyhole size={22} aria-hidden="true" /></div>
+            <h2 id="citizen-auth-prompt-title">Sign in to continue</h2>
+            <p>Please log in or sign up to submit an official report and help keep your community safe.</p>
+            <div className="citizen-auth-prompt-actions">
+              <button type="button" onClick={() => navigate('/login/citizen')}>Log in</button>
+              <button type="button" className="secondary" onClick={() => navigate('/register')}>Sign up</button>
+            </div>
+          </section>
+        </div>
+      )}
+
       {isQrDialogOpen && (
         <div
           className="citizen-qr-backdrop"
@@ -1358,6 +1541,9 @@ export const CitizenDashboard = ({ auth, onLogout }) => {
             ) : evacuationQr ? (
               <>
                 <img className="citizen-qr-image" src={evacuationQr} alt="QR code containing your account and household check-in information" />
+                <button type="button" className="citizen-qr-download" onClick={downloadEvacuationQr}>
+                  Download QR for offline use
+                </button>
                 <p className="citizen-qr-guidance">Show this code to the evacuation center coordinator to help record your household’s arrival.</p>
               </>
             ) : null}
@@ -1430,7 +1616,7 @@ export const CitizenDashboard = ({ auth, onLogout }) => {
                   <button
                     type="button"
                     className="pinned-location-clear-btn"
-                    onClick={() => setPinnedLocation(null)}
+                    onClick={clearPinnedLocation}
                   >
                     Clear
                   </button>
@@ -1670,6 +1856,31 @@ export const CitizenDashboard = ({ auth, onLogout }) => {
 
                 {routeError && <p className="shelter-route-error" role="alert">{routeError}</p>}
                 {routeInfo?.notice && <p className="shelter-route-notice" role="status">{routeInfo.notice}</p>}
+                {routeOptions.length > 1 && (
+                  <section className="shelter-route-options" aria-label="Available route options">
+                    <h3>Compare routes</h3>
+                    {routeOptions.map((route) => (
+                      <button
+                        key={route.id}
+                        type="button"
+                        className={`shelter-route-option${route.id === selectedRouteId ? ' selected' : ''}`}
+                        onClick={() => selectRouteOption(route)}
+                      >
+                        <span className="route-option-swatch" style={{ backgroundColor: route.route_color || '#2563eb' }} aria-hidden="true" />
+                        <span className="route-option-copy">
+                          <strong>{route.label || 'Walking route'}</strong>
+                          <small>{formatRouteMetric(route) || 'Route details unavailable'}</small>
+                        </span>
+                        <em className={route.intersects_hazard ? 'hazardous' : 'safe'}>{route.intersects_hazard ? 'HAZARDOUS' : 'SAFE'}</em>
+                      </button>
+                    ))}
+                  </section>
+                )}
+                {selectedRoute && (selectedRoute.route_status === 'hazardous' || selectedRoute.route_status === 'fallback') && (
+                  <div className="shelter-emergency-warning" role="alert" aria-live="assertive">
+                    {selectedRoute.warning_message || ROUTE_WARNING}
+                  </div>
+                )}
 
                 <section className="shelter-detail-section">
                   <h3>Address</h3>
@@ -1778,7 +1989,9 @@ export const CitizenDashboard = ({ auth, onLogout }) => {
                     <span>Call Center</span>
                   </a>
                 )}
-                <button type="button" className={`shelter-secondary-action ${isSaved ? 'saved' : ''}`} onClick={() => toggleSaveShelter(selectedCenter.id)}>
+                <button type="button" className={`shelter-secondary-action ${isSaved ? 'saved' : ''}`} onClick={() => {
+                  if (requestAuthenticatedAction('save-center')) toggleSaveShelter(selectedCenter.id)
+                }}>
                   <Icons.Save saved={isSaved} />
                   <span>{isSaved ? 'Saved' : 'Save'}</span>
                 </button>
