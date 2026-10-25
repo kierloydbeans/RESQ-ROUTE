@@ -63,6 +63,7 @@
 }
 .gradient-background { position: absolute; inset: 0; z-index: 0; overflow: hidden; pointer-events: none; }
 .gradient-background-fixed { background: linear-gradient(135deg, #c52222 0%, #a36b16 100%); }
+.gradient-background-static-shader { background: linear-gradient(135deg, #c52222 0%, #a36b16 100%); }
 .gradient-background-shader::before { position: absolute; inset: -35%; content: ''; background: conic-gradient(from 0deg at 50% 50%, #c52222, #f4b21b, #a36b16, #e04b2d, #c52222); animation: shader-gradient-drift 12s linear infinite; opacity: .9; }
 .gradient-shader-canvas, .gradient-shader-canvas canvas { display: block; width: 100% !important; height: 100% !important; }
 :root[data-theme='dark'] .gradient-background-shader::before { opacity: .72; }

@@ -1,11 +1,12 @@
 import React, { useEffect, useRef, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { useWebSocket } from '../hooks/useWebSocket'
 import { useActiveRoadHazards } from '../hooks/useActiveRoadHazards'
 import { WS_URL } from '../dataProvider'
 import MapContainer from '../components/MapContainer'
 import RoadHazardReportForm from '../components/RoadHazardReportForm'
 import Logo from '../components/Logo'
-import { Accessibility, CheckCircle2, CircleHelp, Clock3, Construction, Menu, QrCode, UploadCloud } from 'lucide-react'
+import { Accessibility, CheckCircle2, CircleHelp, Clock3, Construction, LockKeyhole, Menu, QrCode, UploadCloud } from 'lucide-react'
 import QRCode from 'qrcode'
 import 'maplibre-gl/dist/maplibre-gl.css'
 import "../styles/citizen-console.css";
@@ -277,6 +278,7 @@ const getReadablePinnedLocation = (location, centers) => {
 }
 
 export const CitizenDashboard = ({ auth, onLogout }) => {
+  const navigate = useNavigate()
   const [latestGps, setLatestGps] = useState(null)
   const [isQrDialogOpen, setIsQrDialogOpen] = useState(false)
   const [evacuationQr, setEvacuationQr] = useState('')
@@ -348,7 +350,9 @@ export const CitizenDashboard = ({ auth, onLogout }) => {
   const familyMemberKeyRef = useRef(0)
   const [savedShelterIds, setSavedShelterIds] = useState([])
   const [copyFeedback, setCopyFeedback] = useState('')
+  const [isAuthPromptOpen, setIsAuthPromptOpen] = useState(false)
   const profileMenuRef = useRef(null)
+  const sharedCenterHandledRef = useRef(null)
 
   const [pinnedLocation, setPinnedLocation] = useState(null)
   const [showNoahHazards, setShowNoahHazards] = useState(true)
@@ -548,6 +552,25 @@ export const CitizenDashboard = ({ auth, onLogout }) => {
   const isWithinQrCheckInRange = Number.isFinite(selectedCenterDistanceMeters) &&
     selectedCenterDistanceMeters < 50 &&
     Date.now() - latestGps?.timestamp < 30_000
+
+  useEffect(() => {
+    if (!auth?.token) return
+    const pendingAction = localStorage.getItem('resq-route-pending-action')
+    if (!pendingAction) return
+    localStorage.removeItem('resq-route-pending-action')
+    if (pendingAction === 'report-emergency') handleOpenReport()
+    if (pendingAction === 'report-road-hazard') setActiveTab('road-hazard')
+  }, [auth?.token])
+
+  useEffect(() => {
+    const sharedCenterId = new URLSearchParams(window.location.search).get('center')
+    if (!sharedCenterId || sharedCenterHandledRef.current === sharedCenterId) return
+    const sharedCenter = centers.find((center) => String(center.id) === sharedCenterId)
+    if (!sharedCenter) return
+    sharedCenterHandledRef.current = sharedCenterId
+    setActiveTab('shelters')
+    handleSelectCenter(sharedCenter)
+  }, [centers])
 
   useEffect(() => {
     if (isQrDialogOpen && !isWithinQrCheckInRange) {
@@ -795,29 +818,50 @@ export const CitizenDashboard = ({ auth, onLogout }) => {
     )
   }
 
+  const requestAuthenticatedAction = (action) => {
+    if (auth?.token) return true
+    localStorage.setItem('resq-route-pending-action', action)
+    setIsAuthPromptOpen(true)
+    return false
+  }
+
+  const handleOpenEmergencyReport = () => {
+    if (!requestAuthenticatedAction('report-emergency')) return
+    handleOpenReport()
+  }
+
+  const handleOpenRoadHazardReport = () => {
+    if (!requestAuthenticatedAction('report-road-hazard')) return
+    setActiveTab('road-hazard')
+  }
+
   const handleShare = async (center) => {
     const capacity = getVerifiedCapacity(center)
     const status = center.is_active === false
       ? 'Closed'
       : isCenterFull(center) ? 'Full'
         : isCenterAvailable(center) ? 'Accepting evacuees' : 'Not verified'
+    const shareUrl = new URL(window.location.href)
+    shareUrl.searchParams.set('center', String(center.id))
+    const shareLink = shareUrl.toString()
     const text = [
       center.name,
       center.address || 'Address not provided',
       `Availability: ${status}`,
       capacity ? `Capacity: ${capacity.occupancy} of ${capacity.capacity} occupied` : 'Capacity: Not verified',
+      `Open in ResQ-Route: ${shareLink}`,
       `Map: https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${center.latitude},${center.longitude}`)}`
     ].join('\n')
     try {
       if (navigator.share) {
-        await navigator.share({ title: center.name, text })
+        await navigator.share({ title: center.name, text, url: shareLink })
       } else if (navigator.clipboard?.writeText) {
-        await navigator.clipboard.writeText(text)
+        await navigator.clipboard.writeText(shareLink)
       } else {
         setCopyFeedback('Sharing unavailable')
         return
       }
-      setCopyFeedback(navigator.share ? 'Shared' : 'Copied')
+      setCopyFeedback(navigator.share ? 'Shared link' : 'Link copied')
       window.setTimeout(() => setCopyFeedback(''), 2500)
     } catch (error) {
       if (error instanceof DOMException && error.name === 'AbortError') return
@@ -1107,7 +1151,7 @@ export const CitizenDashboard = ({ auth, onLogout }) => {
     })
 
   return (
-    <div className="citizen-map-layout" style={shelterSheetHeight === null ? undefined : { '--shelter-sheet-height': `${shelterSheetHeight}px` }}>
+    <div className={`citizen-map-layout${!auth?.token ? ' citizen-explore-entry' : ''}`} style={shelterSheetHeight === null ? undefined : { '--shelter-sheet-height': `${shelterSheetHeight}px` }}>
       {/* 1. Background Map */}
       <div className={`citizen-map-canvas ${activeTab === 'shelters' && isShelterPanelCollapsed ? 'panel-collapsed' : ''}`}>
         <MapContainer
@@ -1185,13 +1229,13 @@ export const CitizenDashboard = ({ auth, onLogout }) => {
             </button>
             <button
               className={`citizen-chip alert-chip ${activeTab === 'alert' ? 'active' : ''}`}
-              onClick={handleOpenReport}
+              onClick={handleOpenEmergencyReport}
             >
               <Icons.Alert /> Report Emergency
             </button>
             <button
               className={`citizen-chip road-hazard-chip ${activeTab === 'road-hazard' ? 'active' : ''}`}
-              onClick={() => setActiveTab('road-hazard')}
+              onClick={handleOpenRoadHazardReport}
             >
               <Construction size={18} aria-hidden="true" /> Report Road Hazard
             </button>
@@ -1445,6 +1489,23 @@ export const CitizenDashboard = ({ auth, onLogout }) => {
                 </footer>
               </form>
             )}
+          </section>
+        </div>
+      )}
+
+      {isAuthPromptOpen && (
+        <div className="citizen-auth-prompt-backdrop" role="presentation">
+          <section className="citizen-auth-prompt" role="dialog" aria-modal="true" aria-labelledby="citizen-auth-prompt-title">
+            <button type="button" className="citizen-auth-prompt-close" aria-label="Close authentication prompt" onClick={() => setIsAuthPromptOpen(false)}>
+              <Icons.Close />
+            </button>
+            <div className="citizen-auth-prompt-icon"><LockKeyhole size={22} aria-hidden="true" /></div>
+            <h2 id="citizen-auth-prompt-title">Sign in to continue</h2>
+            <p>Please log in or sign up to submit an official report and help keep your community safe.</p>
+            <div className="citizen-auth-prompt-actions">
+              <button type="button" onClick={() => navigate('/login/citizen')}>Log in</button>
+              <button type="button" className="secondary" onClick={() => navigate('/register')}>Sign up</button>
+            </div>
           </section>
         </div>
       )}
@@ -1928,7 +1989,9 @@ export const CitizenDashboard = ({ auth, onLogout }) => {
                     <span>Call Center</span>
                   </a>
                 )}
-                <button type="button" className={`shelter-secondary-action ${isSaved ? 'saved' : ''}`} onClick={() => toggleSaveShelter(selectedCenter.id)}>
+                <button type="button" className={`shelter-secondary-action ${isSaved ? 'saved' : ''}`} onClick={() => {
+                  if (requestAuthenticatedAction('save-center')) toggleSaveShelter(selectedCenter.id)
+                }}>
                   <Icons.Save saved={isSaved} />
                   <span>{isSaved ? 'Saved' : 'Save'}</span>
                 </button>

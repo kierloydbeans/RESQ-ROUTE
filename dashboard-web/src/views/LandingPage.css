@@ -90,6 +90,10 @@ body:has(.landing-page) .global-theme-toggle.is-active { border-color: var(--lan
 .landing-button-yellow { background: var(--landing-yellow); color: #12243a; box-shadow: 0 6px 18px rgba(255, 211, 61, .1); }
 .landing-button-yellow:hover { background: #ffdf67; box-shadow: 0 8px 22px rgba(255, 211, 61, .2); }
 .landing-button-blue { background: #3978bd; color: #fff; box-shadow: 0 8px 24px rgba(32, 96, 163, .2); }
+.landing-button-yellow,
+.landing-button-blue { background: linear-gradient(110deg, #c52222, #a36b16); color: #fff; }
+.landing-button-yellow:hover,
+.landing-button-blue:hover { background: linear-gradient(110deg, #d32c2c, #b5791a); }
 .landing-button-blue:hover { background: #4789d0; }
 .landing-hero-content {
   position: relative;
@@ -116,6 +120,9 @@ body:has(.landing-page) .global-theme-toggle.is-active { border-color: var(--lan
 .landing-eyebrow > span { width: 7px; height: 7px; border-radius: 50%; background: var(--landing-yellow); box-shadow: 0 0 12px rgba(255, 211, 61, .8); }
 .landing-hero h1 { margin: 23px 0 20px; color: #fff; font-size: clamp(44px, 5.2vw, 68px); font-weight: 750; letter-spacing: -.055em; line-height: 1.08; }
 .landing-hero h1 > span { color: var(--landing-yellow); }
+.landing-hero h1 > span,
+.landing-intro h2 span,
+.landing-capabilities h2 span { background: linear-gradient(110deg, #f07a43, #f4b21b); -webkit-background-clip: text; background-clip: text; color: transparent; }
 .landing-hero-lede { max-width: 500px; margin: 0; color: #c0d0e1; font-size: 15px; line-height: 1.8; }
 .landing-hero-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 23px; margin-top: 29px; }
 .landing-text-link { display: inline-flex; align-items: center; gap: 6px; color: #e3edf8; font-size: 12px; font-weight: 650; }
@@ -145,12 +152,12 @@ body:has(.landing-page) .global-theme-toggle.is-active { border-color: var(--lan
 .landing-map-area { position: absolute; border: 1px solid rgba(116, 176, 227, .15); border-radius: 48% 52% 39% 61%; background: rgba(79, 131, 182, .08); }
 .landing-map-area-a { top: 31px; left: 32px; width: 165px; height: 109px; transform: rotate(-19deg); }
 .landing-map-area-b { right: 24px; bottom: 37px; width: 195px; height: 115px; transform: rotate(14deg); }
-.landing-map-route { position: absolute; top: 108px; left: 111px; width: 208px; height: 87px; border-top: 3px dashed #ffd33d; border-right: 3px dashed #ffd33d; border-radius: 0 55% 0 0; transform: rotate(12deg); filter: drop-shadow(0 0 5px rgba(255, 211, 61, .35)); }
-.landing-map-route > span { position: absolute; width: 4px; height: 4px; border-radius: 50%; background: #ffe995; }
-.landing-map-route > span:nth-child(1) { top: -4px; left: 3px; }
-.landing-map-route > span:nth-child(2) { top: -4px; left: 98px; }
-.landing-map-route > span:nth-child(3) { right: -4px; bottom: 5px; }
-.landing-map-pin { position: absolute; z-index: 1; display: grid; width: 34px; height: 34px; place-items: center; border: 1px solid rgba(255,255,255,.65); border-radius: 50% 50% 50% 5px; box-shadow: 0 4px 15px rgba(0,0,0,.24); transform: rotate(-45deg); }
+.landing-map-route { position: absolute; inset: 0; z-index: 0; width: 100%; height: 100%; overflow: visible; pointer-events: none; filter: drop-shadow(0 0 5px rgba(255, 211, 61, .35)); }
+.landing-map-route path { fill: none; stroke: #ffd33d; stroke-width: 1.1; stroke-dasharray: 3.5 2.5; stroke-linecap: round; vector-effect: non-scaling-stroke; }
+.landing-map-pin { position: absolute; z-index: 1; display: grid; width: 34px; height: 34px; place-items: center; border: 1px solid rgba(255,255,255,.65); border-radius: 50% 50% 50% 5px; box-shadow: 0 4px 15px rgba(0,0,0,.24); transform: rotate(-45deg); cursor: grab; touch-action: none; user-select: none; transition: box-shadow .18s ease, filter .18s ease; }
+.landing-map-pin:focus-visible { outline: 2px solid #ffe995; outline-offset: 3px; }
+.landing-map-pin.is-dragging { z-index: 4; cursor: grabbing; filter: brightness(1.12); box-shadow: 0 8px 22px rgba(0,0,0,.38), 0 0 0 5px rgba(255,233,149,.2); animation: none; }
+.landing-map-art.is-dragging-marker { cursor: grabbing; }
 .landing-map-pin svg { transform: rotate(45deg); }
 .landing-map-pin-alert { top: 72px; left: 82px; background: #f06c61; color: white; }
 .landing-map-pin-shelter { top: 183px; right: 115px; background: #2ea989; color: white; }
@@ -177,7 +184,7 @@ body:has(.landing-page) .global-theme-toggle.is-active { border-color: var(--lan
 .landing-hero-bottom { position: relative; z-index: 1; display: flex; justify-content: space-between; max-width: 1280px; margin: -18px auto 0; padding-bottom: 29px; color: #91a9c0; font-size: 8px; font-weight: 750; letter-spacing: .15em; }
 .landing-hero-bottom a { color: #b1c3d5; }.landing-hero-bottom a span { margin-left: 8px; color: var(--landing-yellow); font-size: 14px; }
 
-.landing-intro { max-width: 1120px; margin: 0 auto; padding: 81px 32px 83px; }
+.landing-intro { position: relative; z-index: 1; max-width: 1120px; margin: 0 auto; padding: 81px 32px 83px; scroll-margin-top: 0; overflow: visible; }
 .landing-intro .landing-section-kicker, .landing-capabilities .landing-section-kicker { color: #53739a; }
 .landing-intro-grid { display: grid; grid-template-columns: 1.1fr .9fr; align-items: end; gap: 45px; margin-top: 22px; }
 .landing-intro h2, .landing-capabilities h2 { margin: 0; color: var(--landing-ink); font-size: clamp(32px, 4vw, 45px); font-weight: 740; letter-spacing: -.045em; line-height: 1.15; }
@@ -337,8 +344,8 @@ body:has(.landing-page) .global-theme-toggle.is-active {
 .landing-map-roads path { stroke: rgba(191, 202, 218, .18); }
 .landing-map-roads path:nth-child(2n) { stroke: rgba(191, 202, 218, .1); }
 .landing-map-area { border-color: rgba(242, 62, 79, .13); background: rgba(242, 62, 79, .045); }
-.landing-map-route { border-color: #f07a43; filter: drop-shadow(0 0 5px rgba(240, 122, 67, .32)); }
-.landing-map-route > span { background: #ffd1a1; }
+.landing-map-route { filter: drop-shadow(0 0 5px rgba(240, 122, 67, .32)); }
+.landing-map-route path { stroke: #f07a43; }
 .landing-map-pin-alert { background: #c52222; }
 .landing-map-pin-shelter { background: #a36b16; }
 .landing-map-pin-you { background: #f07a43; }
@@ -527,8 +534,8 @@ body:has(.landing-page) .global-theme-toggle:active {
 :root[data-theme='light'] .landing-map-roads path { stroke: rgba(71, 87, 103, .2); }
 :root[data-theme='light'] .landing-map-roads path:nth-child(2n) { stroke: rgba(71, 87, 103, .12); }
 :root[data-theme='light'] .landing-map-area { border-color: rgba(197, 34, 34, .15); background: rgba(197, 34, 34, .04); }
-:root[data-theme='light'] .landing-map-route { border-color: #c52222; filter: drop-shadow(0 0 5px rgba(197, 34, 34, .22)); }
-:root[data-theme='light'] .landing-map-route > span { background: #f6c59f; }
+:root[data-theme='light'] .landing-map-route { filter: drop-shadow(0 0 5px rgba(197, 34, 34, .22)); }
+:root[data-theme='light'] .landing-map-route path { stroke: #c52222; }
 :root[data-theme='light'] .landing-map-label { border-color: #d5dde5; background: rgba(255, 255, 255, .94); color: #344454; }
 :root[data-theme='light'] .landing-map-legend { border-color: #d5dde5; background: rgba(255, 255, 255, .9); color: #526273; }
 :root[data-theme='light'] .landing-map-footer-icon { background: #fce9e4; color: #c52222; }
@@ -574,3 +581,12 @@ body:has(.landing-page) .global-theme-toggle:active {
 :root[data-theme='light'] .landing-footer p,
 :root[data-theme='light'] .landing-footer > div a { color: #607080; }
 :root[data-theme='light'] .landing-footer > small { border-top-color: #cbd5df; color: #778397; }
+
+/* Keep the shader-inspired accent treatment static on landing-page controls and highlights. */
+.landing-page .landing-button-yellow,
+.landing-page .landing-button-blue { background: linear-gradient(110deg, #c52222, #a36b16); color: #fff; }
+.landing-page .landing-button-yellow:hover,
+.landing-page .landing-button-blue:hover { background: linear-gradient(110deg, #d32c2c, #b5791a); }
+.landing-page .landing-hero h1 > span,
+.landing-page .landing-intro h2 span,
+.landing-page .landing-capabilities h2 span { background: linear-gradient(110deg, #f07a43, #f4b21b); -webkit-background-clip: text; background-clip: text; color: transparent; }
