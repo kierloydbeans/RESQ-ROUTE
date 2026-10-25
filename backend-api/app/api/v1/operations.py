@@ -25,7 +25,11 @@ async def get_operation_metrics(
     current_user: dict = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
 ):
-    """Return dispatcher-defined rescue KPIs from resolved emergency alerts."""
+    """Return rescue KPIs for resolved emergency alerts in the requested window.
+
+    The dispatcher requests the default seven-day window, so the average
+    response metric is never calculated from the all-time alert history.
+    """
     await _require_active_user(current_user, session)
 
     result = await session.execute(

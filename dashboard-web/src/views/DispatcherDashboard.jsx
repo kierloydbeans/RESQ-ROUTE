@@ -2105,12 +2105,12 @@ export const Dashboard = ({ onLogout }) => {
         {hasRightRail && <aside className="right-rail">
           {/* 1. TOP: Average Response */}
           {renderedPanels.averageResponse && <section className={`metric-card response-card ${getPanelAnimationClass('averageResponse')}`}>
-            <small>AVERAGE RESPONSE</small>
+            <small>7-DAY AVERAGE RESPONSE</small>
             <strong>{operationMetrics?.average_response_minutes == null ? '—' : `${Number(operationMetrics.average_response_minutes).toFixed(1)} min`}</strong>
             <span>
               {operationMetrics?.average_response_minutes == null
                 ? 'No resolved operations in the 7-day window'
-                : `Database mean from ${operationMetrics.response_samples} resolved operation${operationMetrics.response_samples === 1 ? '' : 's'}`}
+                : `7-day database mean from ${operationMetrics.response_samples} resolved operation${operationMetrics.response_samples === 1 ? '' : 's'}`}
             </span>
           </section>}
 
