@@ -876,6 +876,21 @@ export const CitizenDashboard = ({ auth, onLogout }) => {
     }
   }
 
+  const downloadEvacuationQr = () => {
+    if (!evacuationQr) return
+    const filename = `resq-route-evacuation-check-in-${(selectedCenter?.name || 'center')
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-|-$/g, '') || 'center'}.png`
+    const link = document.createElement('a')
+    link.href = evacuationQr
+    link.download = filename
+    document.body.appendChild(link)
+    link.click()
+    link.remove()
+  }
+
   const uploadAlertMedia = async (alertId, files, mediaUploadToken) => {
     setIsUploadingMedia(true)
     try {
@@ -1465,6 +1480,9 @@ export const CitizenDashboard = ({ auth, onLogout }) => {
             ) : evacuationQr ? (
               <>
                 <img className="citizen-qr-image" src={evacuationQr} alt="QR code containing your account and household check-in information" />
+                <button type="button" className="citizen-qr-download" onClick={downloadEvacuationQr}>
+                  Download QR for offline use
+                </button>
                 <p className="citizen-qr-guidance">Show this code to the evacuation center coordinator to help record your household’s arrival.</p>
               </>
             ) : null}

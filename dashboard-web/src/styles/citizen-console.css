@@ -404,6 +404,8 @@
 .citizen-qr-dialog h2 { margin: 15px 0 4px; font-size: 20px; }
 .citizen-qr-center-name { margin: 0 0 18px; color: var(--ops-muted); font-size: 13px; }
 .citizen-qr-image { width: 280px; max-width: 100%; height: auto; padding: 10px; border-radius: 12px; background: #fff; image-rendering: pixelated; }
+.citizen-qr-download { width: 280px; max-width: 100%; min-height: 42px; margin-top: 14px; padding: 10px 14px; border: 1px solid var(--citizen-accent); border-radius: 10px; background: var(--citizen-accent); color: #fff; font-size: 13px; font-weight: 700; cursor: pointer; transition: background .16s ease, transform .16s ease, box-shadow .16s ease; }
+.citizen-qr-download:hover, .citizen-qr-download:focus-visible { background: var(--citizen-accent-strong); box-shadow: 0 5px 14px rgba(0, 0, 0, .18); outline: none; transform: translateY(-1px); }
 .citizen-qr-guidance { max-width: 290px; margin: 16px 0 0; color: var(--ops-muted); font-size: 12px; line-height: 1.55; }
 .citizen-qr-loading { display: grid; width: 280px; height: 280px; place-items: center; border-radius: 12px; background: var(--ops-surface-2); color: var(--ops-muted); font-size: 13px; }
 .citizen-qr-error { max-width: 300px; padding: 12px; border-radius: 9px; background: rgba(220, 38, 38, .1); color: #dc2626; font-size: 13px; line-height: 1.5; }
