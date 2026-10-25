@@ -1044,6 +1044,7 @@ async def upload_alert_media(
             raise HTTPException(status_code=403, detail="You can only upload media to your own SOS alert")
 
     storage_path = f"{alert_id}/{uuid4().hex}{extension}"
+    public_url = None
     supabase_url_parts = urlsplit(settings.SUPABASE_URL)
     supabase_url_path = supabase_url_parts.path.rstrip("/")
     if supabase_url_path == "/rest/v1":
@@ -1071,6 +1072,21 @@ async def upload_alert_media(
                 file_options={"content-type": content_type, "upsert": "false"},
             )
         )
+        if content_type.startswith("image/"):
+            public_url_response = await run_in_threadpool(lambda: storage.get_public_url(storage_path))
+            if isinstance(public_url_response, str):
+                public_url = public_url_response
+            elif isinstance(public_url_response, dict):
+                public_url = (
+                    public_url_response.get("publicUrl")
+                    or public_url_response.get("public_url")
+                    or public_url_response.get("data", {}).get("publicUrl")
+                    or public_url_response.get("data", {}).get("public_url")
+                )
+            else:
+                public_url = getattr(public_url_response, "public_url", None) or getattr(public_url_response, "publicUrl", None)
+            if not public_url:
+                raise RuntimeError("Supabase Storage did not return a public URL")
     except HTTPException:
         raise
     except Exception as error:
@@ -1079,7 +1095,18 @@ async def upload_alert_media(
     finally:
         await file.close()
 
-    return {"bucket": SOS_ALERT_MEDIA_BUCKET, "path": storage_path, "content_type": content_type}
+    if public_url:
+        alert.image_url = public_url
+        await session.commit()
+        await session.refresh(alert)
+
+    return {
+        "bucket": SOS_ALERT_MEDIA_BUCKET,
+        "path": storage_path,
+        "content_type": content_type,
+        "public_url": public_url,
+        "image_url": alert.image_url,
+    }
 
 
 @router.get("/alerts", response_model=list[EmergencyAlertRead])
