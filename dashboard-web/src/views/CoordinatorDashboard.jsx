@@ -1,6 +1,7 @@
 import React, { useEffect, useState, useMemo, useRef } from 'react'
 import { useWebSocket } from '../hooks/useWebSocket'
 import Logo from '../components/Logo'
+import CenterImageManager from '../components/CenterImageManager'
 import {
   createCoordinatorInventoryItem,
   fetchCoordinatorCenterInventory,
@@ -1133,6 +1134,14 @@ const exportCoordinatorReportPdf = async () => {
                               <span>ELDERLY</span>
                             </div>
                           </div>
+                          {selectedCenterId === center.id && (
+                            <CenterImageManager
+                              centerId={center.id}
+                              token={auth?.token || auth?.access_token}
+                              imageUrl={center.image_url}
+                              onChange={(nextImageUrl) => setCenters((current) => current.map((item) => item.id === center.id ? { ...item, image_url: nextImageUrl } : item))}
+                            />
+                          )}
                         </div>
                       )
                     })

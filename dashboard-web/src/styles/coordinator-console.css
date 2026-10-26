@@ -2408,3 +2408,89 @@ body[data-theme="light"],
     padding-left: 3px;
   }
 }
+.coord-center-image-manager {
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid var(--coord-border, #25324a);
+}
+
+.coord-center-image-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+
+.coord-center-image-heading > div {
+  display: grid;
+  gap: 2px;
+}
+
+.coord-center-image-heading strong {
+  color: var(--coord-text, #e7edf5);
+  font-size: 10px;
+  letter-spacing: .08em;
+}
+
+.coord-center-image-heading small {
+  color: var(--coord-muted, #94a3b8);
+  font-size: 10px;
+}
+
+.coord-center-image-upload,
+.coord-center-image-actions button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  border: 1px solid #334155;
+  border-radius: 4px;
+  background: #172033;
+  color: #dbeafe;
+  cursor: pointer;
+  font: 600 10px var(--coord-mono, ui-monospace, monospace);
+}
+
+.coord-center-image-upload { padding: 6px 8px; }
+.coord-center-image-upload:disabled,
+.coord-center-image-actions button:disabled { opacity: .5; cursor: not-allowed; }
+.coord-center-image-upload:hover:not(:disabled),
+.coord-center-image-actions button:hover:not(:disabled) { border-color: #38bdf8; color: #7dd3fc; }
+
+.coord-center-image-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.coord-center-image-tile {
+  position: relative;
+  aspect-ratio: 16 / 9;
+  overflow: hidden;
+  border: 1px solid #334155;
+  border-radius: 6px;
+  background: #0f172a;
+}
+
+.coord-center-image-tile img { width: 100%; height: 100%; display: block; object-fit: cover; }
+
+.coord-center-image-actions {
+  position: absolute;
+  right: 5px;
+  bottom: 5px;
+  display: flex;
+  gap: 4px;
+}
+
+.coord-center-image-actions button { width: 24px; height: 22px; padding: 0; background: rgba(15, 23, 42, .9); }
+
+.coord-center-image-empty {
+  grid-column: 1 / -1;
+  padding: 12px;
+  border: 1px dashed #334155;
+  border-radius: 6px;
+  color: #94a3b8;
+  font-size: 10px;
+  text-align: center;
+}

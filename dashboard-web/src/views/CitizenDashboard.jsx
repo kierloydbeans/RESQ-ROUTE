@@ -5,6 +5,7 @@ import { useActiveRoadHazards } from '../hooks/useActiveRoadHazards'
 import { WS_URL } from '../dataProvider'
 import MapContainer from '../components/MapContainer'
 import RoadHazardReportForm from '../components/RoadHazardReportForm'
+import { parseImageUrls } from '../components/CenterImageManager'
 import Logo from '../components/Logo'
 import { Accessibility, CheckCircle2, CircleHelp, Clock3, Construction, LockKeyhole, Menu, QrCode, UploadCloud } from 'lucide-react'
 import QRCode from 'qrcode'
@@ -1936,14 +1937,14 @@ export const CitizenDashboard = ({ auth, onLogout }) => {
 
                 <section className="shelter-detail-section">
                   <h3>Photos</h3>
-                  {selectedCenter.image_url ? (
-                    <img className="shelter-exterior-photo" src={selectedCenter.image_url} alt={`Exterior or entrance of ${selectedCenter.name}`} />
+                  {parseImageUrls(selectedCenter.image_url).length > 0 ? (
+                    <img className="shelter-exterior-photo" src={parseImageUrls(selectedCenter.image_url)[0]} alt={`Exterior or entrance of ${selectedCenter.name}`} />
                   ) : (
                     <p>No exterior photo provided.</p>
                   )}
-                  {[selectedCenter.image_url_2, selectedCenter.image_url_3].filter(Boolean).length > 0 && (
+                  {parseImageUrls(selectedCenter.image_url).slice(1).length > 0 && (
                     <div className="shelter-interior-gallery">
-                      {[selectedCenter.image_url_2, selectedCenter.image_url_3].filter(Boolean).map((imageUrl, index) => (
+                      {parseImageUrls(selectedCenter.image_url).slice(1).map((imageUrl, index) => (
                         <img key={`${selectedCenter.id}-interior-${index}`} src={imageUrl} alt={`${selectedCenter.name} additional view ${index + 1}`} />
                       ))}
                     </div>

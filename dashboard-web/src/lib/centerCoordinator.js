@@ -29,6 +29,11 @@ const request = async (path, token, options = {}) => {
 }
 
 export const fetchAssignedCenter = (token) => request('center', token)
+export const uploadAssignedCenterImage = (token, file) => {
+  const body = new FormData()
+  body.append('file', file)
+  return request('center/images', token, { method: 'POST', body })
+}
 export const fetchAssignedCenterEvacuees = (token) => request('evacuees', token)
 export const fetchAssignedCenterInventory = (token) => request('inventory', token)
 export const checkInEvacuationHousehold = (token, payload) =>

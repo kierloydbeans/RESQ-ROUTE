@@ -3,6 +3,7 @@ import { BrowserQRCodeReader } from '@zxing/browser'
 import { useWebSocket } from '../hooks/useWebSocket'
 import { Activity, ChevronDown, LogOut, MapPin, Package, QrCode, Users } from 'lucide-react'
 import Logo from '../components/Logo'
+import CenterImageManager from '../components/CenterImageManager'
 import {
   fetchAssignedCenter,
   fetchAssignedCenterEvacuees,
@@ -434,6 +435,12 @@ const CenterCoordinatorDashboard = ({ auth, onLogout }) => {
                           <div key={index}><SkeletonLine className="coord-skeleton-metric" /><SkeletonLine className="coord-skeleton-label" /></div>
                         ))}
                       </div>
+                      <CenterImageManager
+                        centerId={center.id || centerId}
+                        token={token}
+                        imageUrl={center.image_url}
+                        onChange={(nextImageUrl) => setCenter((current) => ({ ...current, image_url: nextImageUrl }))}
+                      />
                     </article>
                   ) : center ? (
                     <article className="coord-site-card center-coordinator-site-card">

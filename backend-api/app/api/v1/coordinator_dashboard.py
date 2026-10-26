@@ -35,7 +35,7 @@ async def get_coordinator_dashboard_data(
         text(
             """
             SELECT id, name, address, latitude, longitude, capacity,
-                   current_occupancy, is_active, created_at, updated_at
+                   current_occupancy, is_active, image_url, created_at, updated_at
             FROM public.center
             ORDER BY name
             LIMIT 100
