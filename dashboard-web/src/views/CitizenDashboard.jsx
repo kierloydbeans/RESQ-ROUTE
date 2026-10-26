@@ -394,6 +394,9 @@ export const CitizenDashboard = ({ auth, onLogout }) => {
   const { isConnected, lastMessage } = useWebSocket(WS_URL)
   const { collection: roadHazardZones, hazards: roadHazards, applyFeature: applyRoadHazard } = useActiveRoadHazards(lastMessage, isConnected)
   const displayName = profileUser?.full_name || profileUser?.username || 'Resident'
+  const displayRole = String(profileUser?.role || profileUser?.user_role || 'citizen')
+    .replace(/[_-]+/g, ' ')
+    .replace(/\b\w/g, (letter) => letter.toUpperCase())
   const [currentTime, setCurrentTime] = useState(() => new Date())
 
   useEffect(() => {
@@ -1236,10 +1239,14 @@ export const CitizenDashboard = ({ auth, onLogout }) => {
       <div
         className={`citizen-map-top-controls ${activeTab === 'shelters' && isShelterPanelCollapsed ? 'shelter-panel-collapsed' : ''}`}
       >
+        <a className="citizen-map-brand" href="/" aria-label="RESQ-ROUTE home">
+          <img src="/resq_logo.png" alt="RESQ-ROUTE" />
+        </a>
         <div className="citizen-top-bar">
           <div className="citizen-chip-row">
             <button
               className={`citizen-chip ${activeTab === 'shelters' ? 'active' : ''}`}
+              title="Evacuation Centers"
               onClick={() => {
                 if (activeTab === 'alert' || activeTab === 'road-hazard') {
                   handleCloseReport({ clearShelterSelection: true })
@@ -1249,23 +1256,25 @@ export const CitizenDashboard = ({ auth, onLogout }) => {
                 }
               }}
             >
-              <Icons.Shelter /> Evacuation Centers
+              <Icons.Shelter /> <span>Evacuation Centers</span>
             </button>
             <button
               className={`citizen-chip alert-chip ${activeTab === 'alert' ? 'active' : ''}`}
+              title="Report Emergency"
               onClick={handleOpenEmergencyReport}
             >
-              <Icons.Alert /> Report Emergency
+              <Icons.Alert /> <span>Report Emergency</span>
             </button>
             <button
               className={`citizen-chip road-hazard-chip ${activeTab === 'road-hazard' ? 'active' : ''}`}
+              title="Report Road Hazard"
               onClick={handleOpenRoadHazardReport}
             >
-              <Construction size={18} aria-hidden="true" /> Report Road Hazard
+              <Construction size={18} aria-hidden="true" /> <span>Report Road Hazard</span>
             </button>
-            <div className="citizen-network-badge">
+            <div className="citizen-network-badge" title={isConnected ? 'Live Telemetry' : 'Offline'}>
               <span className={`dot ${isConnected ? 'online' : 'offline'}`} />
-              {isConnected ? 'Live Telemetry' : 'Offline'}
+              <span className="citizen-network-label">{isConnected ? 'Live Telemetry' : 'Offline'}</span>
             </div>
           </div>
         </div>
@@ -1274,6 +1283,12 @@ export const CitizenDashboard = ({ auth, onLogout }) => {
         <div className="citizen-top-right-controls">
           {onLogout && (
             <div className="citizen-profile-menu" ref={profileMenuRef}>
+              <div className="citizen-profile-identity" aria-label={`${displayName}, ${displayRole}`}>
+                <div className="citizen-profile-identity-copy">
+                  <strong>{displayName}</strong>
+                  <span>{displayRole}</span>
+                </div>
+              </div>
               <button
                 type="button"
                 className="citizen-profile-avatar-btn"
@@ -1653,8 +1668,9 @@ export const CitizenDashboard = ({ auth, onLogout }) => {
                   <button
                     key={key}
                     type="button"
-                    className={`report-type-pill ${selectedIncident === key ? 'active' : ''}`}
+                    className={`report-type-pill ${key} ${selectedIncident === key ? 'active' : ''}`}
                     onClick={() => setSelectedIncident(key)}
+                    aria-pressed={selectedIncident === key}
                   >
                     <Icon />
                     <span>{label}</span>

@@ -7,10 +7,17 @@ import os
 from typing import Any, Dict, Mapping, Optional
 
 from groq import Groq
+from app.core.config import settings
 
 
-GROQ_API_KEY = os.environ.get("GROQ_API_KEY")
-GROQ_MODEL = "llama3-70b-8192"
+GROQ_API_KEY = os.environ.get("GROQ_API_KEY") or settings.GROQ_API_KEY
+# llama3-70b-8192 was decommissioned by Groq. Keep the model configurable so
+# a provider lifecycle change only requires an environment update.
+GROQ_MODEL = (
+    os.environ.get("GROQ_MODEL")
+    or settings.GROQ_MODEL
+    or "openai/gpt-oss-120b"
+)
 groq_client = Groq(api_key=GROQ_API_KEY, timeout=15.0) if GROQ_API_KEY else None
 
 

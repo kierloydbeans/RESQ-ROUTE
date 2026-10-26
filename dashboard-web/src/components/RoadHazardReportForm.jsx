@@ -1,16 +1,16 @@
 import { useEffect, useRef, useState } from 'react'
 import { BASE_URL } from '../dataProvider'
-import { Camera, UploadCloud } from 'lucide-react'
+import { AlertTriangle, Camera, CircleHelp, Construction, Flame, Mountain, UploadCloud, Waves, Zap } from 'lucide-react'
 import '../styles/road-hazard-report.css'
 
 const HAZARD_TYPES = [
-  ['flood', 'Flood'],
-  ['debris', 'Debris'],
-  ['fire', 'Fire'],
-  ['landslide', 'Landslide'],
-  ['collapsed_road', 'Collapsed road'],
-  ['downed_power_line', 'Downed power line'],
-  ['other', 'Other'],
+  { value: 'flood', label: 'Flood', Icon: Waves },
+  { value: 'debris', label: 'Debris', Icon: Construction },
+  { value: 'fire', label: 'Fire', Icon: Flame },
+  { value: 'landslide', label: 'Landslide', Icon: Mountain },
+  { value: 'collapsed_road', label: 'Collapsed road', Icon: Construction },
+  { value: 'downed_power_line', label: 'Downed power line', Icon: Zap },
+  { value: 'other', label: 'Other', Icon: CircleHelp },
 ]
 
 const ROAD_LOOKUP_CACHE_KEY = 'resq-nominatim-reverse-geocode-v1'
@@ -236,28 +236,67 @@ export default function RoadHazardReportForm({ initialLocation, reporterName = '
   }
 
   return (
-    <form className="road-hazard-report-form" onSubmit={submit}>
-      <div className="road-hazard-report-heading">
-        <div><h2>Report Road Hazard</h2><p>Pin the map or enter the affected location.</p></div>
-        {onClose && <button type="button" onClick={onClose} aria-label="Close road hazard report">×</button>}
+    <form className="report-incident-card road-hazard-report-form" onSubmit={submit}>
+      <div className="report-header-row">
+        <div>
+          <h2 className="report-header-title">Report road hazard</h2>
+          <p className="report-header-subtitle">Pin the map or enter the affected location.</p>
+        </div>
+        {onClose && (
+          <button type="button" className="report-close-btn" onClick={onClose} aria-label="Close road hazard report">
+            ×
+          </button>
+        )}
       </div>
-      <label>Hazard type
-        <select name="hazard_type" value={form.hazard_type} onChange={update}>
-          {HAZARD_TYPES.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
-        </select>
-      </label>
-      <label>Description
-        <textarea name="description" required minLength={1} rows={3} value={form.description} onChange={update} placeholder="What is blocking or endangering this road?" />
-      </label>
+
+      <label className="report-section-label">Hazard type</label>
+      <div className="report-type-grid road-hazard-type-grid" role="group" aria-label="Choose hazard type">
+        {HAZARD_TYPES.map(({ value, label, Icon }) => (
+          <button
+            key={value}
+            type="button"
+            className={`report-type-pill road-hazard-type-pill ${value} ${form.hazard_type === value ? 'active' : ''}`}
+            onClick={() => setForm((current) => ({ ...current, hazard_type: value }))}
+            aria-pressed={form.hazard_type === value}
+          >
+            <Icon size={18} aria-hidden="true" />
+            <span>{label}</span>
+          </button>
+        ))}
+      </div>
+
+      <label className="report-section-label" htmlFor="road-hazard-description">Details / landmark</label>
+      <textarea
+        id="road-hazard-description"
+        className="report-textarea"
+        name="description"
+        required
+        minLength={1}
+        rows={3}
+        value={form.description}
+        onChange={update}
+        placeholder="What is blocking or endangering this road?"
+      />
+
+      <label className="report-section-label">Severity level</label>
+      <div className="report-severity-grid" role="group" aria-label="Choose hazard severity">
+        {['low', 'medium', 'high', 'critical'].map((value) => (
+          <button
+            key={value}
+            type="button"
+            className={`report-severity-button ${value} ${form.severity === value ? 'active' : ''}`}
+            onClick={() => setForm((current) => ({ ...current, severity: value }))}
+            aria-pressed={form.severity === value}
+          >
+            {value[0].toUpperCase() + value.slice(1)}
+          </button>
+        ))}
+      </div>
+
       <div className="road-hazard-report-grid">
         <label>Latitude<input name="latitude" type="number" step="any" min="-90" max="90" required value={form.latitude} onChange={update} /></label>
         <label>Longitude<input name="longitude" type="number" step="any" min="-180" max="180" required value={form.longitude} onChange={update} /></label>
         <label>Radius (m)<input name="radius_meters" type="number" min="10" max="2000" required value={form.radius_meters} onChange={update} /></label>
-        <label>Severity
-          <select name="severity" value={form.severity} onChange={update}>
-            {['low', 'medium', 'high', 'critical'].map((value) => <option key={value} value={value}>{value}</option>)}
-          </select>
-        </label>
       </div>
       <label>Road name<input className={roadLookupLoading ? 'is-loading' : ''} name="road_name" value={form.road_name} onChange={update} placeholder={roadLookupLoading ? 'Looking up road name…' : 'Filled from location'} aria-busy={roadLookupLoading} /></label>
       <label>Reporter name<input name="reporter_name" value={form.reporter_name} readOnly aria-readonly="true" placeholder="Optional" /></label>
@@ -293,7 +332,10 @@ export default function RoadHazardReportForm({ initialLocation, reporterName = '
         </div>
       )}
       {cameraError && <p className="road-hazard-report-status" role="alert">{cameraError}</p>}
-      <button className="road-hazard-submit" type="submit" disabled={submitting}>{submitting ? 'Publishing…' : 'Publish Road Hazard'}</button>
+      <button className="report-sos-submit road-hazard-submit" type="submit" disabled={submitting}>
+        <AlertTriangle size={18} aria-hidden="true" />
+        <span>{submitting ? 'Publishing…' : 'Publish road hazard'}</span>
+      </button>
       {status && <p className={`road-hazard-report-status${mediaUploading ? ' is-busy' : ''}`} role="status">{status}</p>}
     </form>
   )

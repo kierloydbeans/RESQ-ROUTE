@@ -3,6 +3,7 @@ import math
 from typing import Any, Awaitable, Callable, Dict, List, Optional, Sequence, Tuple
 
 import httpx
+from shapely.geometry import LineString, Polygon, shape
 
 from app.core.config import settings
 from app.models.hazard_map_layer import HazardMapLayer
@@ -10,9 +11,14 @@ from app.models.road_hazard import RoadHazardReport
 from app.services.greedy_escape import find_escape_plan, haversine_meters
 from app.services.groq_spatial_fallback import choose_ai_escape_waypoint
 from app.services.mid_route_hazard import first_hazard_interception, resolve_cardinal_escape
-from app.services.valhalla_routing import decode_polyline6, request_valhalla_route
+from app.services.valhalla_routing import (
+    build_valhalla_exclusion_polygons as build_simplified_valhalla_exclusion_polygons,
+    decode_polyline6,
+    request_valhalla_route,
+)
 
 Coordinate = Tuple[float, float]
+ROUTING_HAZARD_CORRIDOR_METERS = 100
 
 
 def haversine_meters(latitude_a: float, longitude_a: float, latitude_b: float, longitude_b: float) -> float:
@@ -94,6 +100,80 @@ def layer_polygon(layer: HazardMapLayer) -> Optional[List[List[float]]]:
     return ring if len(ring) >= 4 else None
 
 
+def route_corridor_geometry(
+    origin_latitude: float,
+    origin_longitude: float,
+    destination_latitude: float,
+    destination_longitude: float,
+    buffer_meters: float = ROUTING_HAZARD_CORRIDOR_METERS,
+) -> Any:
+    """Return a conservative lon/lat corridor around the requested journey."""
+
+    center_latitude = (origin_latitude + destination_latitude) / 2
+    meters_per_degree = 111320 * max(math.cos(math.radians(center_latitude)), 0.1)
+    buffer_degrees = buffer_meters / meters_per_degree
+    return LineString([
+        (origin_longitude, origin_latitude),
+        (destination_longitude, destination_latitude),
+    ]).buffer(buffer_degrees)
+
+
+def hazards_in_route_corridor(
+    origin_latitude: float,
+    origin_longitude: float,
+    destination_latitude: float,
+    destination_longitude: float,
+    hazards: Sequence[RoadHazardReport],
+    buffer_meters: float = ROUTING_HAZARD_CORRIDOR_METERS,
+) -> List[RoadHazardReport]:
+    corridor = route_corridor_geometry(
+        origin_latitude,
+        origin_longitude,
+        destination_latitude,
+        destination_longitude,
+        buffer_meters,
+    )
+    return [
+        hazard
+        for hazard in hazards
+        if corridor.intersects(Polygon(exclusion_polygon(
+            hazard.latitude,
+            hazard.longitude,
+            max(1, hazard.radius_meters),
+        )))
+    ]
+
+
+def noah_layers_in_route_corridor(
+    origin_latitude: float,
+    origin_longitude: float,
+    destination_latitude: float,
+    destination_longitude: float,
+    layers: Sequence[HazardMapLayer],
+    buffer_meters: float = ROUTING_HAZARD_CORRIDOR_METERS,
+) -> List[HazardMapLayer]:
+    corridor = route_corridor_geometry(
+        origin_latitude,
+        origin_longitude,
+        destination_latitude,
+        destination_longitude,
+        buffer_meters,
+    )
+    relevant: List[HazardMapLayer] = []
+    for layer in layers:
+        geometry = layer.geometry or {}
+        if geometry.get("type") == "Feature":
+            geometry = geometry.get("geometry") or {}
+        if not geometry.get("type"):
+            continue
+        try:
+            if corridor.intersects(shape(geometry)):
+                relevant.append(layer)
+        except (TypeError, ValueError):
+            continue
+    return relevant
+
+
 def build_hazard_exclusion_model(
     road_hazards: Sequence[RoadHazardReport],
     noah_layers: Sequence[HazardMapLayer],
@@ -145,18 +225,7 @@ def build_valhalla_exclusion_polygons(
     road_hazards: Sequence[RoadHazardReport],
     noah_layers: Sequence[HazardMapLayer],
 ) -> List[List[List[float]]]:
-    polygons: List[List[List[float]]] = []
-    for hazard in road_hazards:
-        polygons.append(exclusion_polygon(
-            hazard.latitude,
-            hazard.longitude,
-            max(1, hazard.radius_meters),
-        ))
-    for layer in noah_layers:
-        polygon = layer_polygon(layer)
-        if polygon:
-            polygons.append(polygon)
-    return polygons
+    return build_simplified_valhalla_exclusion_polygons(road_hazards, noah_layers)
 
 
 def extract_valhalla_geometry(trip: Dict[str, Any]) -> List[List[float]]:
@@ -527,6 +596,20 @@ async def route_citizen(
         hazard for hazard in hazards
         if hazard.is_active and not hazard.is_resolved
     ]
+    active_hazards = hazards_in_route_corridor(
+        origin_latitude,
+        origin_longitude,
+        destination_latitude,
+        destination_longitude,
+        active_hazards,
+    )
+    noah_layers = noah_layers_in_route_corridor(
+        origin_latitude,
+        origin_longitude,
+        destination_latitude,
+        destination_longitude,
+        noah_layers,
+    )
     cardinal_scan: List[Dict[str, Any]] = []
 
     custom_model, excluded_zones = build_hazard_exclusion_model(active_hazards, noah_layers)

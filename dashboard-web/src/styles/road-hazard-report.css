@@ -1,35 +1,44 @@
-.road-hazard-report-form { display: grid; gap: 12px; padding: 16px; color: #e7edf5; background: #101827; border: 1px solid #334155; border-radius: 12px; }
-.road-hazard-report-heading { display: flex; justify-content: space-between; gap: 12px; align-items: flex-start; }
-.road-hazard-report-heading h2 { margin: 0; font-size: 18px; }
-.road-hazard-report-heading p { margin: 4px 0 0; color: #a9b5c7; font-size: 12px; }
-.road-hazard-report-heading button { border: 0; background: transparent; color: inherit; font-size: 24px; cursor: pointer; }
-.road-hazard-report-form label { display: grid; gap: 4px; font-size: 12px; font-weight: 600; }
-.road-hazard-report-form input, .road-hazard-report-form select, .road-hazard-report-form textarea { width: 100%; min-width: 0; padding: 9px; color: #e7edf5; background: #1e293b; border: 1px solid #475569; border-radius: 7px; font: inherit; }
+.road-hazard-report-form { display: flex; flex-direction: column; gap: 14px; padding: 16px; color: #202124; background: #fff; border: 1px solid #e0e0e0; border-radius: 12px; }
+.road-hazard-report-form label:not(.report-section-label) { display: grid; gap: 4px; font-size: 12px; font-weight: 600; }
+.road-hazard-report-form input, .road-hazard-report-form textarea { width: 100%; min-width: 0; padding: 9px; color: #202124; background: #f8fafc; border: 1px solid #cbd5e1; border-radius: 7px; font: inherit; }
+.road-hazard-report-form input:focus, .road-hazard-report-form textarea:focus { border-color: #1a73e8; outline: 2px solid rgba(26, 115, 232, .14); }
+.road-hazard-type-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.road-hazard-type-grid .report-type-pill { min-height: 68px; }
+.road-hazard-type-pill.flood { color: #1683b8; }
+.road-hazard-type-pill.debris { color: #a16207; }
+.road-hazard-type-pill.fire { color: #dc2626; }
+.road-hazard-type-pill.landslide { color: #92400e; }
+.road-hazard-type-pill.collapsed_road { color: #b45309; }
+.road-hazard-type-pill.downed_power_line { color: #7c3aed; }
+.road-hazard-type-pill.other { color: #64748b; }
+.road-hazard-type-pill.flood.active { background: #e0f2fe; border-color: #38bdf8; }
+.road-hazard-type-pill.debris.active { background: #fef3c7; border-color: #f59e0b; }
+.road-hazard-type-pill.fire.active { background: #fee2e2; border-color: #ef4444; }
+.road-hazard-type-pill.landslide.active { background: #ffedd5; border-color: #c2410c; }
+.road-hazard-type-pill.collapsed_road.active { background: #ffedd5; border-color: #f97316; }
+.road-hazard-type-pill.downed_power_line.active { background: #f3e8ff; border-color: #8b5cf6; }
+.road-hazard-type-pill.other.active { background: #f1f5f9; border-color: #64748b; }
 .road-hazard-report-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
-.road-hazard-submit { padding: 10px; border: 0; border-radius: 7px; color: white; background: #dc2626; font-weight: 700; cursor: pointer; }
+.road-hazard-submit { width: 100%; }
 .road-hazard-submit:disabled { opacity: .6; cursor: wait; }
 .road-hazard-media-input { display: none; }
 .road-hazard-attachment-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
-.road-hazard-attachment-actions button, .road-hazard-media-selection button { padding: 8px; border: 1px solid #475569; border-radius: 7px; color: #e7edf5; background: #1e293b; font: inherit; cursor: pointer; }
+.road-hazard-attachment-actions button, .road-hazard-media-selection button { padding: 8px; border: 1px solid #cbd5e1; border-radius: 7px; color: #202124; background: #fff; font: inherit; cursor: pointer; }
 .road-hazard-attachment-actions button:hover, .road-hazard-media-selection button:hover { border-color: #f23e4f; }
 .road-hazard-attachment-actions button:disabled { opacity: .6; cursor: wait; }
-.road-hazard-media-selection { display: grid; gap: 5px; padding: 8px; border: 1px solid #334155; font-size: 11px; }
+.road-hazard-media-selection { display: grid; gap: 5px; padding: 8px; border: 1px solid #e0e0e0; font-size: 11px; }
 .road-hazard-media-selection p { margin: 0; color: #a9b5c7; }
 .road-hazard-media-selection div { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .road-hazard-media-selection span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .road-hazard-media-selection button { padding: 3px 7px; font-size: 11px; }
-.road-hazard-camera-panel { display: grid; gap: 8px; padding: 8px; border: 1px solid #334155; }
+.road-hazard-camera-panel { display: grid; gap: 8px; padding: 8px; border: 1px solid #e0e0e0; }
 .road-hazard-camera-preview { display: block; width: 100%; max-height: 260px; object-fit: cover; background: #020617; }
 .road-hazard-camera-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
-.road-hazard-camera-actions button { padding: 8px; border: 1px solid #475569; border-radius: 7px; color: #e7edf5; background: #1e293b; font: inherit; font-weight: 700; cursor: pointer; }
+.road-hazard-camera-actions button { padding: 8px; border: 1px solid #cbd5e1; border-radius: 7px; color: #202124; background: #fff; font: inherit; font-weight: 700; cursor: pointer; }
 .road-hazard-camera-actions button:last-child { border-color: #dc2626; background: #dc2626; }
 .road-hazard-report-status { margin: 0; font-size: 12px; line-height: 1.4; }
 .road-hazard-report-status.is-busy { animation: report-upload-idle 1.2s ease-in-out infinite; }
 .road-hazard-report-status.is-busy::after { content: '...'; display: inline-block; width: 18px; overflow: hidden; animation: report-upload-dots 1.2s steps(4, end) infinite; }
-[data-theme='light'] .road-hazard-report-form { color: #152033; background: #fff; border-color: #cbd5e1; }
-[data-theme='light'] .road-hazard-report-form input, [data-theme='light'] .road-hazard-report-form select, [data-theme='light'] .road-hazard-report-form textarea { color: #152033; background: #f8fafc; }
-[data-theme='light'] .road-hazard-attachment-actions button, [data-theme='light'] .road-hazard-media-selection button { color: #152033; background: #fff; border-color: #cbd5e1; }
-[data-theme='light'] .road-hazard-camera-actions button:first-child { color: #152033; background: #fff; border-color: #cbd5e1; }
 .road-hazard-review-queue { display: grid; gap: 8px; padding: 10px; max-height: 240px; overflow: auto; color: #e7edf5; background: #101827; }
 .road-hazard-review-queue h3 { margin: 0; font-size: 13px; }
 .road-hazard-review-item { display: grid; gap: 4px; padding: 9px; border: 1px solid #475569; border-radius: 8px; font-size: 12px; }

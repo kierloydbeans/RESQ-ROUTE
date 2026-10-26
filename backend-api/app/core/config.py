@@ -1,3 +1,5 @@
+from pathlib import Path
+
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from typing import Optional, Union, List
 
@@ -31,6 +33,10 @@ class Settings(BaseSettings):
     # GraphHopper routing service
     GRAPHHOPPER_URL: str = "https://graphhopper.com/api/1"
     GRAPHHOPPER_API_KEY: str = ""
+    GROQ_API_KEY: Optional[str] = None
+    # Override when Groq retires or replaces a model. The fallback service
+    # supplies the current production default when this is unset.
+    GROQ_MODEL: Optional[str] = None
 
     # Brevo email API
     BREVO_API_KEY: str
@@ -39,7 +45,7 @@ class Settings(BaseSettings):
     EMAILS_FROM_NAME: str = "ResQ-Route Admin"
 
     model_config = SettingsConfigDict(
-        env_file=".env",
+        env_file=Path(__file__).resolve().parents[2] / ".env",
         env_file_encoding="utf-8",
         extra="ignore"
     )

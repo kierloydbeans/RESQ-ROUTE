@@ -1,15 +1,19 @@
-import json
 import math
 import socket
 from contextlib import contextmanager
-from typing import Any, Dict, List, Optional, Sequence, Tuple
+from math import ceil
+from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 
 import httpx
+from shapely.geometry import GeometryCollection, MultiPolygon, Polygon, box, shape
+from shapely.ops import unary_union
 
 from app.core.config import settings
 from app.models.road_hazard import RoadHazardReport
 
 Coordinate = Tuple[float, float]
+VALHALLA_MAX_CIRCUMFERENCE_METERS = 10000.0
+VALHALLA_SAFE_CIRCUMFERENCE_METERS = 9000.0
 
 
 def haversine_meters(latitude_a: float, longitude_a: float, latitude_b: float, longitude_b: float) -> float:
@@ -76,6 +80,163 @@ def exclusion_polygon(latitude: float, longitude: float, radius_meters: float, s
         point_latitude, point_longitude = destination_point(latitude, longitude, radius_meters, bearing)
         ring.append({"lat": point_latitude, "lon": point_longitude})
     return ring
+
+
+def _polygon_ring(geometry: Polygon) -> List[List[float]]:
+    """Convert a Shapely exterior ring into Valhalla's [lon, lat] format."""
+
+    return [[float(longitude), float(latitude)] for longitude, latitude in geometry.exterior.coords]
+
+
+def _polygon_geometries(geometry: Any) -> Iterable[Polygon]:
+    """Yield polygon components from Polygon/MultiPolygon/GeometryCollection values."""
+
+    if isinstance(geometry, Polygon):
+        yield geometry
+    elif isinstance(geometry, MultiPolygon):
+        yield from geometry.geoms
+    elif isinstance(geometry, GeometryCollection):
+        for component in geometry.geoms:
+            yield from _polygon_geometries(component)
+
+
+def _ring_perimeter_meters(geometry: Polygon) -> float:
+    coordinates = list(geometry.exterior.coords)
+    return sum(
+        haversine_meters(
+            coordinates[index][1],
+            coordinates[index][0],
+            coordinates[index + 1][1],
+            coordinates[index + 1][0],
+        )
+        for index in range(len(coordinates) - 1)
+    )
+
+
+def _split_oversized_polygon(
+    geometry: Polygon,
+    simplify_tolerance: float,
+    *,
+    cell_size_degrees: float = 0.01,
+    depth: int = 0,
+) -> List[Polygon]:
+    """Keep each Valhalla ring below its circumference cap.
+
+    Simplification is attempted first. Large NOAH polygons can still have a
+    perimeter above Valhalla's limit after simplification, so those polygons
+    are clipped into small geographic tiles. Clipping preserves the excluded
+    area while ensuring every submitted ring is independently acceptable.
+    """
+
+    compact = geometry.simplify(simplify_tolerance, preserve_topology=True)
+    components = list(_polygon_geometries(compact))
+    if not components:
+        return []
+
+    result: List[Polygon] = []
+    for component in components:
+        if _ring_perimeter_meters(component) <= VALHALLA_SAFE_CIRCUMFERENCE_METERS:
+            result.append(component)
+            continue
+
+        if depth >= 4:
+            # A finer final simplification is safer than sending a ring that
+            # Valhalla will reject at 10,000 m.
+            final = component.simplify(max(simplify_tolerance, 0.002), preserve_topology=True)
+            if _ring_perimeter_meters(final) <= VALHALLA_SAFE_CIRCUMFERENCE_METERS:
+                result.append(final)
+            continue
+
+        min_longitude, min_latitude, max_longitude, max_latitude = component.bounds
+        columns = max(1, ceil((max_longitude - min_longitude) / cell_size_degrees))
+        rows = max(1, ceil((max_latitude - min_latitude) / cell_size_degrees))
+        for column in range(columns):
+            cell_min_longitude = min_longitude + column * cell_size_degrees
+            for row in range(rows):
+                cell_min_latitude = min_latitude + row * cell_size_degrees
+                clipped = component.intersection(
+                    box(
+                        cell_min_longitude,
+                        cell_min_latitude,
+                        min(cell_min_longitude + cell_size_degrees, max_longitude),
+                        min(cell_min_latitude + cell_size_degrees, max_latitude),
+                    )
+                )
+                for clipped_polygon in _polygon_geometries(clipped):
+                    result.extend(
+                        _split_oversized_polygon(
+                            clipped_polygon,
+                            simplify_tolerance,
+                            cell_size_degrees=cell_size_degrees / 2,
+                            depth=depth + 1,
+                        )
+                    )
+    return result
+
+
+def _geojson_to_geometry(value: Any) -> Any:
+    if isinstance(value, Mapping):
+        geometry = value.get("geometry") if value.get("type") == "Feature" else value
+        if isinstance(geometry, Mapping) and geometry.get("type"):
+            return shape(geometry)
+    geometry = getattr(value, "geometry", None)
+    if isinstance(geometry, Mapping) and geometry.get("type"):
+        return shape(geometry)
+    return None
+
+
+def build_valhalla_exclusion_polygons(
+    hazards: Sequence[RoadHazardReport],
+    extra_geometries: Sequence[Any] = (),
+    *,
+    simplify_tolerance: float = 0.0001,
+) -> List[List[List[float]]]:
+    """Build compact, merged GeoJSON polygon rings for Valhalla POST payloads.
+
+    Road hazards are stored as center/radius records, so they are first converted
+    to small lon/lat polygons. Existing GeoJSON hazard layers are accepted as
+    ``extra_geometries``. All valid shapes are dissolved before simplification;
+    this prevents overlapping circles from multiplying Valhalla's ring length.
+    """
+
+    geometries: List[Any] = []
+    for hazard in hazards:
+        ring = [
+            [point["lon"], point["lat"]]
+            for point in exclusion_polygon(
+                hazard.latitude,
+                hazard.longitude,
+                max(1, hazard.radius_meters),
+            )
+        ]
+        polygon = Polygon(ring)
+        if not polygon.is_empty and polygon.is_valid:
+            geometries.append(polygon)
+
+    for value in extra_geometries:
+        geometry = _geojson_to_geometry(value)
+        if geometry is None or geometry.is_empty:
+            continue
+        if not geometry.is_valid:
+            geometry = geometry.buffer(0)
+        if not geometry.is_empty and geometry.is_valid:
+            geometries.append(geometry)
+
+    if not geometries:
+        return []
+
+    merged = unary_union(geometries)
+    simplified = merged.simplify(simplify_tolerance, preserve_topology=True)
+    polygons: List[Polygon] = []
+    for polygon in _polygon_geometries(simplified):
+        polygons.extend(_split_oversized_polygon(polygon, simplify_tolerance))
+
+    return [
+        _polygon_ring(polygon)
+        for polygon in polygons
+        if not polygon.is_empty
+        and _ring_perimeter_meters(polygon) < VALHALLA_MAX_CIRCUMFERENCE_METERS
+    ]
 
 
 def point_to_segment_meters(
@@ -223,23 +384,13 @@ async def request_valhalla_route(
 
     timeout = httpx.Timeout(10.0, connect=5.0)
     headers = {"User-Agent": "RESQ-Route/1.0 (evacuation-routing)", "Accept": "application/json"}
-    errors: List[str] = []
-
     with prefer_ipv4_dns():
         async with httpx.AsyncClient(timeout=timeout, headers=headers, follow_redirects=True) as client:
             try:
                 response = await client.post(url, json=payload)
                 return trip_from_response(response)
             except (httpx.HTTPError, ValueError, OSError) as error:
-                errors.append(f"POST {format_routing_error(error)}")
-
-            try:
-                response = await client.get(url, params={"json": json.dumps(payload, separators=(",", ":"))})
-                return trip_from_response(response)
-            except (httpx.HTTPError, ValueError, OSError) as error:
-                errors.append(f"GET {format_routing_error(error)}")
-
-    raise ValueError(f"{url} unreachable. " + " | ".join(errors))
+                raise ValueError(f"{url} unreachable. POST {format_routing_error(error)}") from error
 
 
 def straight_line_geometry(
@@ -311,10 +462,10 @@ async def route_citizen(
             "message": "Walking route calculated with Valhalla.",
         }
 
-    exclude_polygons = [
-        exclusion_polygon(hazard.latitude, hazard.longitude, hazard.radius_meters)
-        for hazard in blocking_hazards
-    ]
+    # Exclude every active shape in the reroute request. The route may pass
+    # close to a second active hazard even when only one intersected the first
+    # Valhalla result, and the union builder keeps this payload compact.
+    exclude_polygons = build_valhalla_exclusion_polygons(active_hazards)
 
     try:
         rerouted_trip = await request_valhalla_route(
