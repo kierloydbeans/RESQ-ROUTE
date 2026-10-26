@@ -217,14 +217,17 @@
 [data-theme='light'] .shelter-route-summary { color: #1d4ed8; }
 .shelter-route-options { display: grid; gap: 7px; margin: 0; }
 .shelter-route-options h3 { margin: 0; color: var(--text-color, #e7edf5); font-size: 11px; letter-spacing: .06em; text-transform: uppercase; }
-.shelter-route-option { display: flex; align-items: center; gap: 9px; width: 100%; padding: 9px 10px; border: 1px solid var(--ops-border, #334155); border-radius: 8px; background: var(--ops-surface-2, rgba(15, 23, 42, .7)); color: inherit; text-align: left; cursor: pointer; }
-.shelter-route-option:hover, .shelter-route-option.selected { border-color: #60a5fa; }
+.shelter-route-option { display: flex; align-items: center; gap: 9px; width: 100%; min-width: 0; padding: 9px 10px; border: 1px solid var(--ops-border, #334155); border-radius: 8px; background: var(--ops-surface-2, rgba(15, 23, 42, .7)); color: inherit; text-align: left; cursor: pointer; transition: border-color .16s ease, background-color .16s ease, transform .16s ease; }
+.shelter-route-option:hover { border-color: var(--route-color, #60a5fa); transform: translateY(-1px); }
+.shelter-route-option.selected { border-color: var(--route-color, #60a5fa); background: rgba(30, 41, 59, .9); box-shadow: 0 0 0 1px color-mix(in srgb, var(--route-color, #60a5fa) 30%, transparent); }
 .route-option-swatch { flex: 0 0 9px; width: 9px; height: 9px; border-radius: 50%; }
 .route-option-copy { display: grid; min-width: 0; flex: 1; gap: 2px; }
-.route-option-copy strong { font-size: 12px; }
+.route-option-copy strong { min-width: 0; overflow: hidden; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
 .route-option-copy small { color: #94a3b8; font-size: 11px; }
-.shelter-route-option em { color: #22c55e; font-size: 10px; font-style: normal; font-weight: 800; }
-.shelter-route-option em.hazardous { color: #f87171; }
+.route-option-tier { flex: 0 0 auto; padding: 3px 5px; border-radius: 999px; font-size: 9px; font-weight: 800; letter-spacing: .04em; }
+.route-option-tier.tier-1 { color: #6ee7b7; background: rgba(16, 185, 129, .16); }
+.route-option-tier.tier-2 { color: #fcd34d; background: rgba(245, 158, 11, .16); }
+.route-option-tier.tier-3 { color: #fca5a5; background: rgba(239, 68, 68, .16); }
 .shelter-emergency-warning { margin: 0; padding: 12px; border: 2px solid #fca5a5; border-radius: 8px; background: #991b1b; color: #fff; font-size: 12px; font-weight: 900; line-height: 1.45; text-align: center; letter-spacing: .02em; }
 [data-theme='light'] .shelter-route-options h3 { color: #172033; }
 [data-theme='light'] .shelter-route-option { background: #f8fafc; border-color: #cbd5e1; color: #172033; }

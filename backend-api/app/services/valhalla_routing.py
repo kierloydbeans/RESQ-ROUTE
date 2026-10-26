@@ -203,9 +203,10 @@ async def request_valhalla_route(
     destination_latitude: float,
     destination_longitude: float,
     exclude_polygons: Optional[List[List[List[float]]]] = None,
+    locations: Optional[List[Dict[str, Any]]] = None,
 ) -> Dict[str, Any]:
     payload: Dict[str, Any] = {
-        "locations": [
+        "locations": locations or [
             {"lat": origin_latitude, "lon": origin_longitude, "type": "break"},
             {"lat": destination_latitude, "lon": destination_longitude, "type": "break"},
         ],
@@ -276,26 +277,20 @@ async def route_citizen(
             destination_longitude,
         )
     except (httpx.HTTPError, ValueError, OSError) as error:
-        geometry = straight_line_geometry(
-            origin_latitude,
-            origin_longitude,
-            destination_latitude,
-            destination_longitude,
-        )
-        blocking = hazards_on_route(geometry["coordinates"], active_hazards)
+        # Do not fabricate a crow-flies line when the road graph is unavailable.
+        # An empty geometry is safer than displaying a route through buildings.
+        geometry = {"type": "LineString", "coordinates": []}
         return {
             "engine": "valhalla",
             "algorithm": "dijkstra_astar",
             "costing": "pedestrian",
             "rerouted": False,
             "fallback": True,
-            "distance_meters": haversine_meters(
-                origin_latitude, origin_longitude, destination_latitude, destination_longitude
-            ),
+            "distance_meters": None,
             "duration_seconds": None,
             "geometry": geometry,
-            "avoided_hazards": [serialize_hazard(hazard) for hazard in blocking],
-            "message": f"Valhalla was unavailable ({format_routing_error(error)}). Direct path used as fallback.",
+            "avoided_hazards": [],
+            "message": f"Valhalla was unavailable ({format_routing_error(error)}). No road geometry was returned.",
         }
 
     initial_coordinates = extract_geometry(initial_trip)

@@ -1,12 +1,15 @@
 import json
 import math
-from typing import Any, Dict, List, Optional, Sequence, Tuple
+from typing import Any, Awaitable, Callable, Dict, List, Optional, Sequence, Tuple
 
 import httpx
 
 from app.core.config import settings
 from app.models.hazard_map_layer import HazardMapLayer
 from app.models.road_hazard import RoadHazardReport
+from app.services.greedy_escape import find_escape_plan, haversine_meters
+from app.services.groq_spatial_fallback import choose_ai_escape_waypoint
+from app.services.mid_route_hazard import first_hazard_interception, resolve_cardinal_escape
 from app.services.valhalla_routing import decode_polyline6, request_valhalla_route
 
 Coordinate = Tuple[float, float]
@@ -157,9 +160,17 @@ def build_valhalla_exclusion_polygons(
 
 
 def extract_valhalla_geometry(trip: Dict[str, Any]) -> List[List[float]]:
-    legs = trip.get("legs") or []
-    shape = legs[0].get("shape") if legs else None
-    return decode_polyline6(shape) if shape else []
+    coordinates: List[List[float]] = []
+    for leg in trip.get("legs") or []:
+        shape = leg.get("shape")
+        if not shape:
+            continue
+        leg_coordinates = decode_polyline6(shape)
+        if coordinates and leg_coordinates and coordinates[-1] == leg_coordinates[0]:
+            coordinates.extend(leg_coordinates[1:])
+        else:
+            coordinates.extend(leg_coordinates)
+    return coordinates
 
 
 def point_to_segment_meters(
@@ -276,6 +287,11 @@ def format_routing_error(error: Exception) -> str:
 
 
 EMERGENCY_ROUTE_WARNING = "PLEASE TAKE CAUTION. YOU ARE GOING THROUGH A HAZARDOUS AREA."
+ROUTE_TIER_COLORS = {
+    1: "#10b981",
+    2: "#f59e0b",
+    3: "#ef4444",
+}
 
 
 def _route_variant(
@@ -316,7 +332,11 @@ def _route_response(primary: Dict[str, Any], variants: Sequence[Dict[str, Any]])
     return {
         **primary,
         "routes": list(variants),
-        "rerouted": primary["id"] == "safe-reroute",
+        "rerouted": primary["id"] in {
+            "safe-reroute",
+            "greedy-escape-reroute",
+            "mid-route-escape-reroute",
+        },
         "fallback": primary["route_status"] == "fallback",
         "message": primary.get("message") or "Walking route calculated.",
         "route_status": primary["route_status"],
@@ -324,6 +344,92 @@ def _route_response(primary: Dict[str, Any], variants: Sequence[Dict[str, Any]])
         "warning_message": primary["warning_message"],
         "selected_route_id": primary["id"],
     }
+
+
+async def _try_ai_dynamic_bypass(
+    *,
+    origin_latitude: float,
+    origin_longitude: float,
+    destination_latitude: float,
+    destination_longitude: float,
+    active_hazards: Sequence[RoadHazardReport],
+    noah_layers: Sequence[HazardMapLayer],
+    cardinal_scan: Sequence[Dict[str, Any]],
+) -> Optional[Tuple[Dict[str, Any], Dict[str, Any], List[float]]]:
+    """Return an AI route variant only when it is snapped and hazard-free."""
+
+    if not active_hazards:
+        return None
+
+    context = {
+        "start": [origin_latitude, origin_longitude],
+        "destination": [destination_latitude, destination_longitude],
+        "hazards": [
+            {
+                "id": int(hazard.id),
+                "center": [float(hazard.latitude), float(hazard.longitude)],
+                "radius_meters": float(hazard.radius_meters),
+            }
+            for hazard in active_hazards
+        ],
+        "cardinal_vectors": list(cardinal_scan),
+    }
+    try:
+        ai_waypoint = await choose_ai_escape_waypoint(context)
+        snap_path = await request_graphhopper_route(
+            ai_waypoint["waypoint_lat"],
+            ai_waypoint["waypoint_lon"],
+            destination_latitude,
+            destination_longitude,
+        )
+        snap_coordinates = extract_geometry(snap_path)
+        if len(snap_coordinates) < 2:
+            raise ValueError("AI waypoint could not be snapped to a road node")
+
+        snapped_waypoint = snap_coordinates[0]
+        ai_trip = await request_valhalla_route(
+            origin_latitude,
+            origin_longitude,
+            destination_latitude,
+            destination_longitude,
+            exclude_polygons=build_valhalla_exclusion_polygons(active_hazards, noah_layers),
+            locations=[
+                {"lat": origin_latitude, "lon": origin_longitude, "type": "break"},
+                {
+                    "lat": snapped_waypoint[1],
+                    "lon": snapped_waypoint[0],
+                    "type": "through",
+                    "radius": 100,
+                    "node_snap_tolerance": 75,
+                },
+                {"lat": destination_latitude, "lon": destination_longitude, "type": "break"},
+            ],
+        )
+        ai_coordinates = extract_valhalla_geometry(ai_trip)
+        if len(ai_coordinates) < 2 or first_hazard_interception(ai_coordinates, active_hazards):
+            raise ValueError("AI bypass remained inside an active hazard")
+
+        summary = ai_trip.get("summary") or {}
+        variant = _route_variant(
+            route_id="ai-optimized-dynamic-bypass",
+            label="AI-Optimized Dynamic Bypass",
+            tier=2,
+            route_status="safe",
+            intersects_hazard=False,
+            warning_message=None,
+            geometry={"type": "LineString", "coordinates": ai_coordinates},
+            distance_meters=float(summary.get("length") or 0) * 1000,
+            duration_seconds=float(summary.get("time") or 0),
+            engine="valhalla",
+            algorithm="groq_spatial_bypass",
+            avoided_hazards=[serialize_hazard(hazard) for hazard in active_hazards],
+            route_color=ROUTE_TIER_COLORS[2],
+        )
+        variant["ai_reasoning"] = ai_waypoint["reasoning"]
+        return variant, ai_waypoint, snapped_waypoint
+    except Exception as error:  # AI is advisory; deterministic fallback remains authoritative.
+        print(f"[groq-spatial] AI bypass failed: {type(error).__name__}: {error}")
+        return None
 
 
 async def request_graphhopper_route(
@@ -415,13 +521,187 @@ async def route_citizen(
     destination_longitude: float,
     hazards: Sequence[RoadHazardReport],
     noah_layers: Sequence[HazardMapLayer] = (),
+    status_callback: Optional[Callable[[str, Dict[str, Any]], Awaitable[None]]] = None,
 ) -> Dict[str, Any]:
     active_hazards = [
         hazard for hazard in hazards
         if hazard.is_active and not hazard.is_resolved
     ]
+    cardinal_scan: List[Dict[str, Any]] = []
 
     custom_model, excluded_zones = build_hazard_exclusion_model(active_hazards, noah_layers)
+
+    async def emit(message: str, **data: Any) -> None:
+        if status_callback:
+            await status_callback(message, data)
+
+    escape_plan = find_escape_plan(origin_latitude, origin_longitude, active_hazards)
+    if escape_plan:
+        await emit("You're within a hazard zone.", hazard_id=escape_plan.hazard_id)
+        await emit("Calculating distance to hazard boundary in all directions...")
+        await emit(
+            "N: {N}m | S: {S}m | E: {E}m | W: {W}m".format(**escape_plan.distances.as_dict()),
+            distances_meters=escape_plan.distances.as_dict(),
+        )
+        await emit(
+            f"{escape_plan.direction} has the shortest route out of the hazard ({round(escape_plan.distance_meters, 1)}m).",
+            direction=escape_plan.direction,
+            distance_meters=round(escape_plan.distance_meters, 1),
+            waypoint={"latitude": escape_plan.waypoint_latitude, "longitude": escape_plan.waypoint_longitude},
+        )
+        await emit("Checking if the escape route is safe...")
+
+        escape_hazards = [hazard for hazard in active_hazards if int(hazard.id) != escape_plan.hazard_id]
+        escape_polygons = [
+            exclusion_polygon(hazard.latitude, hazard.longitude, hazard.radius_meters)
+            for hazard in escape_hazards
+        ]
+        waypoint_locations = [
+            {"lat": origin_latitude, "lon": origin_longitude, "type": "break"},
+            {
+                "lat": escape_plan.waypoint_latitude,
+                "lon": escape_plan.waypoint_longitude,
+                "type": "through",
+                "radius": 100,
+                "node_snap_tolerance": 75,
+            },
+            {"lat": destination_latitude, "lon": destination_longitude, "type": "break"},
+        ]
+        try:
+            escape_trip = await request_valhalla_route(
+                origin_latitude,
+                origin_longitude,
+                destination_latitude,
+                destination_longitude,
+                exclude_polygons=escape_polygons,
+                locations=waypoint_locations,
+            )
+            escape_coordinates = extract_valhalla_geometry(escape_trip)
+            if len(escape_coordinates) < 2:
+                raise ValueError("Valhalla returned no escape route geometry")
+            summary = escape_trip.get("summary") or {}
+            await emit("Rerouting done. Generating final path options...")
+            escape_variant = _route_variant(
+                route_id="greedy-escape-reroute",
+                label="Greedy hazard escape route",
+                tier=1,
+                route_status="safe",
+                intersects_hazard=False,
+                warning_message=None,
+                geometry={"type": "LineString", "coordinates": escape_coordinates},
+                distance_meters=float(summary.get("length") or 0) * 1000,
+                duration_seconds=float(summary.get("time") or 0),
+                engine="valhalla",
+                algorithm="greedy_escape_waypoint",
+                avoided_hazards=[serialize_hazard(hazard) for hazard in escape_hazards],
+                route_color=ROUTE_TIER_COLORS[1],
+            )
+            response = _route_response(escape_variant, [escape_variant])
+            response.update({
+                "message": "A safe route was generated from inside the hazard zone.",
+                "escape": {
+                    "hazard_id": escape_plan.hazard_id,
+                    "direction": escape_plan.direction,
+                    "distance_meters": round(escape_plan.distance_meters, 1),
+                    "waypoint": {"latitude": escape_plan.waypoint_latitude, "longitude": escape_plan.waypoint_longitude},
+                },
+            })
+            return response
+        except (httpx.HTTPError, ValueError, OSError):
+            await emit("Rerouting done. Generating final path options...")
+            ai_result = await _try_ai_dynamic_bypass(
+                origin_latitude=origin_latitude,
+                origin_longitude=origin_longitude,
+                destination_latitude=destination_latitude,
+                destination_longitude=destination_longitude,
+                active_hazards=active_hazards,
+                noah_layers=noah_layers,
+                cardinal_scan=[
+                    {"direction": direction, "safe": False, "distance_meters": distance}
+                    for direction, distance in escape_plan.distances.as_dict().items()
+                ],
+            )
+            if ai_result:
+                ai_variant, ai_waypoint, snapped_waypoint = ai_result
+                response = _route_response(ai_variant, [ai_variant])
+                response.update({
+                    "message": "An AI-assisted bypass route was generated after deterministic routing failed.",
+                    "ai_reasoning": ai_waypoint["reasoning"],
+                    "ai_spatial_bypass": {
+                        "selected_direction": ai_waypoint["selected_direction"],
+                        "requested_waypoint": {
+                            "latitude": ai_waypoint["waypoint_lat"],
+                            "longitude": ai_waypoint["waypoint_lon"],
+                        },
+                        "snapped_waypoint": {
+                            "latitude": snapped_waypoint[1],
+                            "longitude": snapped_waypoint[0],
+                        },
+                    },
+                    "rerouted": True,
+                    "fallback": False,
+                    "original_route_hazard": True,
+                })
+                return response
+
+            fallback_coordinates: List[List[float]] = []
+            try:
+                escape_path = await request_graphhopper_route(
+                    escape_plan.waypoint_latitude,
+                    escape_plan.waypoint_longitude,
+                    destination_latitude,
+                    destination_longitude,
+                )
+                escape_geometry = extract_geometry(escape_path)
+                if len(escape_geometry) >= 2:
+                    snapped_waypoint = escape_geometry[0]
+                    origin_path = await request_graphhopper_route(
+                        origin_latitude,
+                        origin_longitude,
+                        snapped_waypoint[1],
+                        snapped_waypoint[0],
+                    )
+                    origin_geometry = extract_geometry(origin_path)
+                    if len(origin_geometry) >= 2:
+                        fallback_coordinates = origin_geometry
+                        fallback_coordinates.extend(
+                            point for point in escape_geometry
+                            if point != fallback_coordinates[-1]
+                        )
+                        await emit(
+                            "Escape waypoint snapped to the pedestrian road graph.",
+                            raw_waypoint={"latitude": escape_plan.waypoint_latitude, "longitude": escape_plan.waypoint_longitude},
+                            snapped_waypoint={"longitude": snapped_waypoint[0], "latitude": snapped_waypoint[1]},
+                        )
+            except (httpx.HTTPError, ValueError, OSError):
+                fallback_coordinates = []
+            if not fallback_coordinates:
+                await emit("No road-snapped escape geometry was available.")
+            fallback = _route_variant(
+                route_id="greedy-escape-fallback",
+                label="Emergency escape fallback",
+                tier=3,
+                route_status="fallback",
+                intersects_hazard=True,
+                warning_message=EMERGENCY_ROUTE_WARNING,
+                geometry={"type": "LineString", "coordinates": fallback_coordinates},
+                distance_meters=None,
+                duration_seconds=None,
+                engine="fallback",
+                algorithm="greedy_escape_vector",
+                route_color="#ef4444",
+            )
+            response = _route_response(fallback, [fallback])
+            response.update({
+                "message": "Routing was unavailable; a directional escape path is shown.",
+                "escape": {
+                    "hazard_id": escape_plan.hazard_id,
+                    "direction": escape_plan.direction,
+                    "distance_meters": round(escape_plan.distance_meters, 1),
+                    "waypoint": {"latitude": escape_plan.waypoint_latitude, "longitude": escape_plan.waypoint_longitude},
+                },
+            })
+            return response
 
     try:
         direct = await request_graphhopper_route(
@@ -431,26 +711,36 @@ async def route_citizen(
         if len(direct_coordinates) < 2:
             raise ValueError("GraphHopper returned no road route geometry")
     except (httpx.HTTPError, ValueError, OSError):
-        if not active_hazards and not noah_layers:
-            raise ValueError("Routing service did not return a usable route")
-        geometry = straight_line_geometry(
-            origin_latitude, origin_longitude, destination_latitude, destination_longitude
-        )
+        await emit("Routing request failed. Preparing a safe fallback path...")
+        road_geometry: List[List[float]] = []
+        try:
+            valhalla_trip = await request_valhalla_route(
+                origin_latitude,
+                origin_longitude,
+                destination_latitude,
+                destination_longitude,
+            )
+            road_geometry = extract_valhalla_geometry(valhalla_trip)
+        except (httpx.HTTPError, ValueError, OSError):
+            await emit("No road routing engine returned a valid snapped geometry.")
+        geometry = {"type": "LineString", "coordinates": road_geometry}
         fallback = _route_variant(
-            route_id="emergency-fallback",
-            label="Emergency fallback route",
+            route_id="routing-unavailable",
+            label="Road route unavailable",
             tier=3,
             route_status="fallback",
-            intersects_hazard=True,
-            warning_message=EMERGENCY_ROUTE_WARNING,
+            intersects_hazard=bool(active_hazards or noah_layers),
+            warning_message=EMERGENCY_ROUTE_WARNING if active_hazards or noah_layers else None,
             geometry=geometry,
-            distance_meters=haversine_meters(origin_latitude, origin_longitude, destination_latitude, destination_longitude),
+            distance_meters=None,
             duration_seconds=None,
             engine="fallback",
-            algorithm="straight_line",
+            algorithm="no_road_geometry",
             route_color="#ef4444",
         )
-        return _route_response(fallback, [fallback])
+        response = _route_response(fallback, [fallback])
+        response["message"] = "Routing was unavailable; a fallback path is shown."
+        return response
 
     blocking_roads = hazards_on_route(direct_coordinates, active_hazards)
     blocking_layers = [layer for layer in noah_layers if layer_near_route(direct_coordinates, layer)]
@@ -458,7 +748,7 @@ async def route_citizen(
     direct_variant = _route_variant(
         route_id="direct-hazardous" if blocking_roads or blocking_layers else "safe-direct",
         label="Direct hazardous route" if blocking_roads or blocking_layers else "Safe direct route",
-        tier=2 if blocking_roads or blocking_layers else 1,
+        tier=3 if blocking_roads or blocking_layers else 1,
         route_status="hazardous" if blocking_roads or blocking_layers else "safe",
         intersects_hazard=bool(blocking_roads or blocking_layers),
         warning_message=EMERGENCY_ROUTE_WARNING if blocking_roads or blocking_layers else None,
@@ -467,7 +757,7 @@ async def route_citizen(
         duration_seconds=direct.get("time", 0) / 1000,
         engine="graphhopper",
         algorithm="dijkstra",
-        route_color="#ef4444" if blocking_roads or blocking_layers else "#2563eb",
+        route_color=ROUTE_TIER_COLORS[3] if blocking_roads or blocking_layers else ROUTE_TIER_COLORS[1],
     )
     if not blocking_roads and not blocking_layers:
         return _route_response(direct_variant, [direct_variant])
@@ -483,12 +773,12 @@ async def route_citizen(
             layer_near_route(safe_coordinates, layer) for layer in noah_layers
         ):
             safe_variant = _route_variant(
-                route_id="safe-reroute", label="Safe rerouted route", tier=2,
+                route_id="safe-reroute", label="Safe perimeter route", tier=1,
                 route_status="safe", intersects_hazard=False, warning_message=None,
                 geometry={"type": "LineString", "coordinates": safe_coordinates},
                 distance_meters=safe_path.get("distance", 0), duration_seconds=safe_path.get("time", 0) / 1000,
                 engine="graphhopper", algorithm="dijkstra", avoided_hazards=excluded_zones,
-                route_color="#facc15",
+                route_color=ROUTE_TIER_COLORS[1],
             )
     except (httpx.HTTPError, ValueError, OSError):
         safe_variant = None
@@ -506,14 +796,235 @@ async def route_citizen(
                 _, avoided = build_hazard_exclusion_model(blocking_roads, blocking_layers)
                 summary = valhalla_trip.get("summary") or {}
                 safe_variant = _route_variant(
-                    route_id="safe-reroute", label="Safe rerouted route", tier=2,
+                    route_id="safe-reroute", label="Safe perimeter route", tier=1,
                     route_status="safe", intersects_hazard=False, warning_message=None,
                     geometry={"type": "LineString", "coordinates": coordinates},
                     distance_meters=float(summary.get("length") or 0) * 1000,
                     duration_seconds=float(summary.get("time") or 0),
                     engine="valhalla", algorithm="dijkstra_astar", avoided_hazards=avoided,
-                    route_color="#facc15",
+                    route_color=ROUTE_TIER_COLORS[1],
                 )
+            elif len(coordinates) >= 2:
+                interception = first_hazard_interception(coordinates, active_hazards)
+                if interception:
+                    await emit(
+                        "Hazard intersection detected on the calculated route.",
+                        hazard_id=interception.hazard_id,
+                        checkpoint={"latitude": interception.checkpoint[0], "longitude": interception.checkpoint[1]},
+                        route_distance_meters=round(interception.route_distance_meters, 1),
+                    )
+                    await emit("Scanning cardinal directions for a safe escape vector...")
+                    escape = resolve_cardinal_escape(
+                        interception,
+                        (destination_latitude, destination_longitude),
+                        active_hazards,
+                    )
+                    cardinal_scan = [
+                        {
+                            "direction": candidate.direction,
+                            "safe": candidate.safe,
+                            "offset_meters": candidate.offset_meters,
+                            "coordinate": {
+                                "latitude": candidate.coordinate[0],
+                                "longitude": candidate.coordinate[1],
+                            },
+                            "blocked_by": list(candidate.blocked_by),
+                        }
+                        for candidate in (escape.candidates if escape else ())
+                    ]
+                    await emit(
+                        "Cardinal safety scan complete.",
+                        directions=cardinal_scan,
+                    )
+                    if escape:
+                        await emit(
+                            f"{escape.direction} escape vector found; preparing a safe waypoint.",
+                            direction=escape.direction,
+                            waypoint={"latitude": escape.waypoint[0], "longitude": escape.waypoint[1]},
+                        )
+                        locations = [
+                            {"lat": origin_latitude, "lon": origin_longitude, "type": "break"},
+                            {
+                                "lat": interception.checkpoint[0],
+                                "lon": interception.checkpoint[1],
+                                "type": "through",
+                                "radius": 100,
+                                "node_snap_tolerance": 75,
+                            },
+                            {
+                                "lat": escape.waypoint[0],
+                                "lon": escape.waypoint[1],
+                                "type": "through",
+                                "radius": 100,
+                                "node_snap_tolerance": 75,
+                            },
+                            {"lat": destination_latitude, "lon": destination_longitude, "type": "break"},
+                        ]
+                        try:
+                            dynamic_trip = await request_valhalla_route(
+                                origin_latitude,
+                                origin_longitude,
+                                destination_latitude,
+                                destination_longitude,
+                                exclude_polygons=build_valhalla_exclusion_polygons(
+                                    [hazard for hazard in active_hazards if hazard.id != interception.hazard_id],
+                                    noah_layers,
+                                ),
+                                locations=locations,
+                            )
+                            dynamic_coordinates = extract_valhalla_geometry(dynamic_trip)
+                            if len(dynamic_coordinates) >= 2 and not first_hazard_interception(dynamic_coordinates, active_hazards):
+                                await emit("Mid-route hazard rerouting complete.")
+                                dynamic_summary = dynamic_trip.get("summary") or {}
+                                dynamic_variant = _route_variant(
+                                    route_id="mid-route-escape-reroute",
+                                    label="Mid-route hazard escape route",
+                                    tier=1,
+                                    route_status="safe",
+                                    intersects_hazard=False,
+                                    warning_message=None,
+                                    geometry={"type": "LineString", "coordinates": dynamic_coordinates},
+                                    distance_meters=float(dynamic_summary.get("length") or 0) * 1000,
+                                    duration_seconds=float(dynamic_summary.get("time") or 0),
+                                    engine="valhalla",
+                                    algorithm="cardinal_escape_waypoint",
+                                    avoided_hazards=[serialize_hazard(hazard) for hazard in active_hazards],
+                            route_color=ROUTE_TIER_COLORS[1],
+                                )
+                                response = _route_response(dynamic_variant, [dynamic_variant])
+                                response.update({
+                                    "message": "Route rerouted around a mid-route hazard.",
+                                    "interception": {
+                                        "hazard_id": interception.hazard_id,
+                                        "checkpoint": {"latitude": interception.checkpoint[0], "longitude": interception.checkpoint[1]},
+                                        "route_distance_meters": round(interception.route_distance_meters, 1),
+                                    },
+                                    "escape": {
+                                        "direction": escape.direction,
+                                        "waypoint": {"latitude": escape.waypoint[0], "longitude": escape.waypoint[1]},
+                                        "cardinal_scan": [
+                                            {"direction": candidate.direction, "safe": candidate.safe}
+                                            for candidate in escape.candidates
+                                        ],
+                                    },
+                                })
+                                return response
+                            await emit("Cardinal waypoint route still intersects a hazard; using the escape waypoint fallback.")
+                        except (httpx.HTTPError, ValueError, OSError):
+                            await emit("Cardinal escape reroute failed; using the escape waypoint fallback.")
+
+                        ai_result = await _try_ai_dynamic_bypass(
+                            origin_latitude=origin_latitude,
+                            origin_longitude=origin_longitude,
+                            destination_latitude=destination_latitude,
+                            destination_longitude=destination_longitude,
+                            active_hazards=active_hazards,
+                            noah_layers=noah_layers,
+                            cardinal_scan=cardinal_scan,
+                        )
+                        if ai_result:
+                            ai_variant, ai_waypoint, snapped_waypoint = ai_result
+                            response = _route_response(ai_variant, [ai_variant, direct_variant])
+                            response.update({
+                                "message": "An AI-assisted bypass route was generated after deterministic routing failed.",
+                                "ai_reasoning": ai_waypoint["reasoning"],
+                                "ai_spatial_bypass": {
+                                    "selected_direction": ai_waypoint["selected_direction"],
+                                    "requested_waypoint": {
+                                        "latitude": ai_waypoint["waypoint_lat"],
+                                        "longitude": ai_waypoint["waypoint_lon"],
+                                    },
+                                    "snapped_waypoint": {
+                                        "latitude": snapped_waypoint[1],
+                                        "longitude": snapped_waypoint[0],
+                                    },
+                                },
+                                "rerouted": True,
+                                "fallback": False,
+                                "original_route_hazard": True,
+                            })
+                            return response
+
+                        snapped_fallback_coordinates: List[List[float]] = []
+                        try:
+                            # GraphHopper snaps both endpoints to its pedestrian graph.
+                            # Route the checkpoint-to-waypoint connector first, use its
+                            # snapped endpoint, then route that endpoint to the destination.
+                            connector_path = await request_graphhopper_route(
+                                interception.checkpoint[0],
+                                interception.checkpoint[1],
+                                escape.waypoint[0],
+                                escape.waypoint[1],
+                            )
+                            connector_geometry = extract_geometry(connector_path)
+                            if len(connector_geometry) >= 2:
+                                snapped_waypoint = connector_geometry[-1]
+                                escape_path = await request_graphhopper_route(
+                                    snapped_waypoint[1],
+                                    snapped_waypoint[0],
+                                    destination_latitude,
+                                    destination_longitude,
+                                )
+                                escape_geometry = extract_geometry(escape_path)
+                            else:
+                                escape_geometry = []
+                            if len(connector_geometry) >= 2 and len(escape_geometry) >= 2:
+                                prefix = coordinates[: interception.segment_index + 1]
+                                prefix.append([interception.checkpoint[1], interception.checkpoint[0]])
+                                snapped_fallback_coordinates = prefix
+                                for point in connector_geometry + escape_geometry:
+                                    if point != snapped_fallback_coordinates[-1]:
+                                        snapped_fallback_coordinates.append(point)
+                                await emit(
+                                    "Escape waypoint snapped to the pedestrian road graph.",
+                                    raw_waypoint={"latitude": escape.waypoint[0], "longitude": escape.waypoint[1]},
+                                    snapped_waypoint={"longitude": snapped_waypoint[0], "latitude": snapped_waypoint[1]},
+                                )
+                        except (httpx.HTTPError, ValueError, OSError):
+                            snapped_fallback_coordinates = []
+
+                        # The Valhalla polyline is already road-snapped. It is the
+                        # last non-diagonal representation if both reroute attempts fail.
+                        fallback_coordinates = snapped_fallback_coordinates or coordinates
+                        fallback = _route_variant(
+                            route_id="mid-route-escape-fallback",
+                            label="Cardinal escape waypoint fallback",
+                            tier=3,
+                            route_status="fallback",
+                            intersects_hazard=True,
+                            warning_message=EMERGENCY_ROUTE_WARNING,
+                            geometry={"type": "LineString", "coordinates": fallback_coordinates},
+                            distance_meters=sum(
+                                haversine_meters(
+                                    fallback_coordinates[index][1], fallback_coordinates[index][0],
+                                    fallback_coordinates[index + 1][1], fallback_coordinates[index + 1][0],
+                                )
+                                for index in range(len(fallback_coordinates) - 1)
+                            ),
+                            duration_seconds=None,
+                            engine="fallback",
+                            algorithm="cardinal_escape_waypoint",
+                            avoided_hazards=[serialize_hazard(hazard) for hazard in active_hazards],
+                            route_color=ROUTE_TIER_COLORS[3],
+                        )
+                        response = _route_response(fallback, [fallback])
+                        response.update({
+                            "message": (
+                                "Valhalla could not complete the reroute; a road-snapped escape path is shown."
+                                if snapped_fallback_coordinates
+                                else "No clean road reroute was available; the last road-snapped route is shown."
+                            ),
+                            "interception": {
+                                "hazard_id": interception.hazard_id,
+                                "checkpoint": {"latitude": interception.checkpoint[0], "longitude": interception.checkpoint[1]},
+                                "route_distance_meters": round(interception.route_distance_meters, 1),
+                            },
+                            "escape": {
+                                "direction": escape.direction,
+                                "waypoint": {"latitude": escape.waypoint[0], "longitude": escape.waypoint[1]},
+                            },
+                        })
+                        return response
         except (httpx.HTTPError, ValueError, OSError):
             safe_variant = None
 
@@ -524,6 +1035,98 @@ async def route_citizen(
         response["fallback"] = False
         response["original_route_hazard"] = True
         return response
+
+    # Deterministic graph routing and cardinal escape have both failed. Give the
+    # AI provider one bounded opportunity to suggest a different bypass, then
+    # snap that suggestion back onto the pedestrian graph before routing it.
+    if active_hazards:
+        ai_context = {
+            "start": [origin_latitude, origin_longitude],
+            "destination": [destination_latitude, destination_longitude],
+            "hazards": [
+                {
+                    "id": int(hazard.id),
+                    "center": [float(hazard.latitude), float(hazard.longitude)],
+                    "radius_meters": float(hazard.radius_meters),
+                }
+                for hazard in active_hazards
+            ],
+            "cardinal_vectors": cardinal_scan,
+        }
+        try:
+            ai_waypoint = await choose_ai_escape_waypoint(ai_context)
+            snap_path = await request_graphhopper_route(
+                ai_waypoint["waypoint_lat"],
+                ai_waypoint["waypoint_lon"],
+                destination_latitude,
+                destination_longitude,
+            )
+            snap_coordinates = extract_geometry(snap_path)
+            if len(snap_coordinates) < 2:
+                raise ValueError("AI waypoint could not be snapped to a road node")
+
+            snapped_waypoint = snap_coordinates[0]
+            ai_trip = await request_valhalla_route(
+                origin_latitude,
+                origin_longitude,
+                destination_latitude,
+                destination_longitude,
+                exclude_polygons=build_valhalla_exclusion_polygons(active_hazards, noah_layers),
+                locations=[
+                    {"lat": origin_latitude, "lon": origin_longitude, "type": "break"},
+                    {
+                        "lat": snapped_waypoint[1],
+                        "lon": snapped_waypoint[0],
+                        "type": "through",
+                        "radius": 100,
+                        "node_snap_tolerance": 75,
+                    },
+                    {"lat": destination_latitude, "lon": destination_longitude, "type": "break"},
+                ],
+            )
+            ai_coordinates = extract_valhalla_geometry(ai_trip)
+            if len(ai_coordinates) < 2 or first_hazard_interception(ai_coordinates, active_hazards):
+                raise ValueError("AI bypass remained inside an active hazard")
+
+            ai_summary = ai_trip.get("summary") or {}
+            ai_variant = _route_variant(
+                route_id="ai-optimized-dynamic-bypass",
+                label="AI-Optimized Dynamic Bypass",
+                tier=2,
+                route_status="safe",
+                intersects_hazard=False,
+                warning_message=None,
+                geometry={"type": "LineString", "coordinates": ai_coordinates},
+                distance_meters=float(ai_summary.get("length") or 0) * 1000,
+                duration_seconds=float(ai_summary.get("time") or 0),
+                engine="valhalla",
+                algorithm="groq_spatial_bypass",
+                avoided_hazards=[serialize_hazard(hazard) for hazard in active_hazards],
+                route_color=ROUTE_TIER_COLORS[2],
+            )
+            ai_variant["ai_reasoning"] = ai_waypoint["reasoning"]
+            response = _route_response(ai_variant, [ai_variant, direct_variant])
+            response.update({
+                "message": "An AI-assisted bypass route was generated after deterministic routing failed.",
+                "ai_reasoning": ai_waypoint["reasoning"],
+                "ai_spatial_bypass": {
+                    "selected_direction": ai_waypoint["selected_direction"],
+                    "requested_waypoint": {
+                        "latitude": ai_waypoint["waypoint_lat"],
+                        "longitude": ai_waypoint["waypoint_lon"],
+                    },
+                    "snapped_waypoint": {
+                        "latitude": snapped_waypoint[1],
+                        "longitude": snapped_waypoint[0],
+                    },
+                },
+                "rerouted": True,
+                "fallback": False,
+                "original_route_hazard": True,
+            })
+            return response
+        except Exception as error:  # AI is advisory; deterministic fallback remains authoritative.
+            print(f"[groq-spatial] AI bypass failed: {type(error).__name__}: {error}")
 
     fallback = _route_variant(
         route_id="emergency-fallback", label="Emergency fallback route", tier=3,

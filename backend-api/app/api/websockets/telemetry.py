@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, Request, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, Set
 import json
 import time
 from fastapi import HTTPException
@@ -32,6 +32,7 @@ class ConnectionManager:
         self.latest_gps_by_user: Dict[str, Dict] = {}
         self.user_connections: Dict[int, List[WebSocket]] = {}
         self.calls: Dict[str, Dict] = {}
+        self.routing_subscribers: Dict[str, Set[WebSocket]] = {}
 
     async def connect(self, websocket: WebSocket):
         await websocket.accept()
@@ -59,6 +60,39 @@ class ConnectionManager:
                 user_connections.remove(websocket)
             if not user_connections:
                 self.user_connections.pop(user_id, None)
+        for request_id, subscribers in list(self.routing_subscribers.items()):
+            subscribers.discard(websocket)
+            if not subscribers:
+                self.routing_subscribers.pop(request_id, None)
+
+    def subscribe_routing_status(self, request_id: str, websocket: WebSocket) -> None:
+        self.routing_subscribers.setdefault(request_id, set()).add(websocket)
+
+    def unsubscribe_routing_status(self, request_id: str, websocket: WebSocket) -> None:
+        subscribers = self.routing_subscribers.get(request_id)
+        if not subscribers:
+            return
+        subscribers.discard(websocket)
+        if not subscribers:
+            self.routing_subscribers.pop(request_id, None)
+
+    async def publish_routing_status(self, request_id: str, message: str, data: Optional[Dict] = None) -> None:
+        event = {
+            "type": "routing_status",
+            "request_id": request_id,
+            "message": message,
+            "data": data or {},
+            "timestamp": time.time(),
+        }
+        subscribers = list(self.routing_subscribers.get(request_id, set()))
+        if subscribers:
+            for connection in subscribers:
+                try:
+                    await connection.send_json(event)
+                except Exception:
+                    self.disconnect(connection)
+            return
+        await self.broadcast(event)
 
     async def send_to_user(self, user_id: int, message: dict) -> int:
         delivered = 0
@@ -266,6 +300,19 @@ async def websocket_endpoint(websocket: WebSocket):
                 continue
 
             if isinstance(message, dict) and message.get("type") == "heartbeat":
+                continue
+
+            if isinstance(message, dict) and message.get("type") == "route_status_subscribe":
+                request_id = str(message.get("request_id") or "").strip()
+                if request_id:
+                    manager.subscribe_routing_status(request_id, websocket)
+                    await websocket.send_json({"type": "route_status_subscribed", "request_id": request_id})
+                continue
+
+            if isinstance(message, dict) and message.get("type") == "route_status_unsubscribe":
+                request_id = str(message.get("request_id") or "").strip()
+                if request_id:
+                    manager.unsubscribe_routing_status(request_id, websocket)
                 continue
 
             if isinstance(message, dict) and await manager.handle_voice_message(websocket, message):

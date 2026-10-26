@@ -184,17 +184,33 @@ const getApiErrorMessage = (detail, fallback) => {
 }
 
 const ROUTE_WARNING = 'PLEASE TAKE CAUTION. YOU ARE GOING THROUGH A HAZARDOUS AREA.'
+const ROUTE_TIER_COLORS = {
+  1: '#10b981',
+  2: '#f59e0b',
+  3: '#ef4444',
+}
+
+const routeColor = (route) => route?.route_color || ROUTE_TIER_COLORS[Number(route?.tier)] || '#64748b'
+
+const routeTierLabel = (route) => {
+  const tier = Number(route?.tier)
+  if (tier === 1) return 'TIER 1 · CLEAN'
+  if (tier === 2) return 'TIER 2 · DETOUR'
+  if (tier === 3) return 'TIER 3 · EMERGENCY'
+  return 'ROUTE OPTION'
+}
 
 const toRouteFeatureCollection = (routes, selectedRouteId) => ({
   type: 'FeatureCollection',
   features: routes
     .filter((route) => Array.isArray(route?.geometry?.coordinates) && route.geometry.coordinates.length >= 2)
+    .sort((first, second) => Number(first.id === selectedRouteId) - Number(second.id === selectedRouteId))
     .map((route) => ({
       type: 'Feature',
       properties: {
         route_id: route.id,
         route_status: route.route_status,
-        route_color: route.route_color,
+        route_color: routeColor(route),
         selected: route.id === selectedRouteId,
       },
       geometry: route.geometry,
@@ -694,9 +710,16 @@ export const CitizenDashboard = ({ auth, onLogout }) => {
             : `Directions are temporarily unavailable (${res.status}).`
         ))
       }
-      const options = Array.isArray(data.routes) && data.routes.length > 0
+      const options = (Array.isArray(data.routes) && data.routes.length > 0
         ? data.routes
-        : [{ ...data, id: 'primary-route', label: 'Walking route', route_status: data.route_status || 'safe' }]
+        : [{ ...data, id: 'primary-route', label: 'Walking route', route_status: data.route_status || 'safe' }])
+        .map((route, index) => ({
+          ...route,
+          id: route.id || `route-${index + 1}`,
+          tier: Number(route.tier) || (route.intersects_hazard ? 3 : 1),
+          route_color: routeColor(route),
+        }))
+        .sort((first, second) => first.tier - second.tier)
       const initialRoute = options.find((route) => route.id === data.selected_route_id)
         || options.find((route) => route.route_status === 'safe')
         || options[0]
@@ -1865,14 +1888,17 @@ export const CitizenDashboard = ({ auth, onLogout }) => {
                         key={route.id}
                         type="button"
                         className={`shelter-route-option${route.id === selectedRouteId ? ' selected' : ''}`}
+                        style={{ '--route-color': routeColor(route) }}
                         onClick={() => selectRouteOption(route)}
                       >
-                        <span className="route-option-swatch" style={{ backgroundColor: route.route_color || '#2563eb' }} aria-hidden="true" />
+                        <span className="route-option-swatch" style={{ backgroundColor: routeColor(route) }} aria-hidden="true" />
                         <span className="route-option-copy">
                           <strong>{route.label || 'Walking route'}</strong>
-                          <small>{formatRouteMetric(route) || 'Route details unavailable'}</small>
+                          <small>{routeTierLabel(route)} · {formatRouteMetric(route) || 'Route details unavailable'}</small>
                         </span>
-                        <em className={route.intersects_hazard ? 'hazardous' : 'safe'}>{route.intersects_hazard ? 'HAZARDOUS' : 'SAFE'}</em>
+                        <span className={`route-option-tier tier-${Number(route.tier) || 3}`}>
+                          {route.intersects_hazard ? 'HAZARDOUS' : 'SAFE'}
+                        </span>
                       </button>
                     ))}
                   </section>
