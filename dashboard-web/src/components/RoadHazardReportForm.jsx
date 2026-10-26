@@ -259,7 +259,7 @@ export default function RoadHazardReportForm({ initialLocation, reporterName = '
           </select>
         </label>
       </div>
-      <label>Road name<input name="road_name" value={form.road_name} onChange={update} placeholder={roadLookupLoading ? 'Looking up road name…' : 'Filled from location'} aria-busy={roadLookupLoading} /></label>
+      <label>Road name<input className={roadLookupLoading ? 'is-loading' : ''} name="road_name" value={form.road_name} onChange={update} placeholder={roadLookupLoading ? 'Looking up road name…' : 'Filled from location'} aria-busy={roadLookupLoading} /></label>
       <label>Reporter name<input name="reporter_name" value={form.reporter_name} readOnly aria-readonly="true" placeholder="Optional" /></label>
       <input ref={mediaInputRef} className="report-media-input" type="file" accept="image/*" multiple onChange={handleMediaSelection} aria-label="Upload road hazard photos" />
       <div className="report-attachment-actions">

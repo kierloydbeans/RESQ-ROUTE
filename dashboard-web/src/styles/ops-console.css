@@ -613,11 +613,102 @@
 .center-column .map-panel {
   display: flex;
   flex-direction: column;
-  flex: 1;
+  flex: 1 1 auto;
   height: 100%;
   min-height: 0;
   overflow: hidden;
 }
+
+.center-column .road-hazard-review-panel {
+  flex: 0 0 138px;
+  height: 138px;
+  max-height: 138px;
+  min-height: 0;
+  overflow: hidden;
+  padding: 6px;
+}
+
+.center-column .road-hazard-review-panel .road-hazard-review-queue {
+  max-height: none;
+  overflow: visible;
+}
+
+.center-column .road-hazard-review-panel > .panel-title {
+  min-height: 25px;
+  margin: -6px -6px 4px;
+  padding: 0 7px;
+}
+.center-column .road-hazard-review-pagination {
+  margin-bottom: 4px;
+  line-height: 1;
+}
+.center-column .road-hazard-review-pagination button {
+  padding: 2px 5px;
+  font-size: 9px;
+}
+.center-column .road-hazard-review-item {
+  gap: 3px;
+  padding: 5px 7px;
+  font-size: 10px;
+  line-height: 1.2;
+}
+.center-column .road-hazard-review-item strong { line-height: 1.1; }
+.center-column .road-hazard-review-item p,
+.center-column .road-hazard-review-item small { margin: 0; line-height: 1.1; }
+.center-column .road-hazard-review-item span,
+.center-column .road-hazard-review-item p,
+.center-column .road-hazard-review-item small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.center-column .road-hazard-review-item > div {
+  gap: 5px;
+  margin-top: 1px;
+}
+.center-column .road-hazard-review-item > div button {
+  padding: 3px 5px;
+  font-size: 9px;
+  line-height: 1;
+}
+.center-column .road-hazard-review-card-grid {
+  display: grid !important;
+  grid-template-columns: 76px minmax(0, 1fr) 128px;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  margin: 0;
+}
+.road-hazard-review-thumbnail,
+.road-hazard-review-thumbnail > button,
+.road-hazard-review-thumbnail-placeholder {
+  width: 76px;
+  height: 64px;
+}
+.road-hazard-review-thumbnail > button {
+  display: block;
+  padding: 0;
+  border: 1px solid var(--ops-border);
+  background: var(--ops-surface-2);
+  cursor: zoom-in;
+}
+.road-hazard-review-thumbnail img { display: block; width: 100%; height: 100%; object-fit: cover; }
+.road-hazard-review-thumbnail-placeholder { display: grid; place-items: center; border: 1px dashed var(--ops-border); color: var(--ops-muted); font: 8px var(--ops-mono); }
+.road-hazard-review-details { display: grid !important; min-width: 0; gap: 3px !important; }
+.road-hazard-review-badges { display: flex !important; align-items: center; gap: 5px !important; margin: 0 !important; }
+.road-hazard-type-badge, .road-hazard-severity-badge { display: inline-flex; align-items: center; width: fit-content; padding: 3px 6px; border-radius: 5px; font: 700 9px var(--ops-mono); text-transform: uppercase; white-space: nowrap; }
+.road-hazard-type-badge { background: #b91c1c; color: #fff; }
+.road-hazard-severity-badge { background: #f59e0b; color: #1f2937; }
+.road-hazard-review-location { display: block; overflow: hidden; color: var(--ops-text); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+.road-hazard-review-coordinates { display: block; overflow: hidden; color: var(--ops-muted); font: 9px var(--ops-mono); text-overflow: ellipsis; white-space: nowrap; }
+.road-hazard-review-description { margin: 0 !important; padding: 4px 6px; overflow: hidden; border-left: 2px solid var(--ops-red); background: color-mix(in srgb, var(--ops-surface-2) 75%, transparent); color: var(--ops-muted); font-size: 10px; font-style: italic; text-overflow: ellipsis; white-space: nowrap; }
+.center-column .road-hazard-review-actions { display: grid !important; gap: 5px !important; margin: 0 !important; }
+.road-hazard-review-actions button { display: inline-flex; align-items: center; justify-content: center; gap: 5px; width: 100%; min-height: 25px; padding: 5px 6px !important; border: 0; border-radius: 5px; color: #fff; font: 700 9px var(--ops-font); cursor: pointer; }
+.road-hazard-review-actions button:disabled { cursor: wait; opacity: .55; }
+.road-hazard-approve-button { background: #15803d; }
+.road-hazard-approve-button:hover, .road-hazard-approve-button:focus-visible { background: #16a34a; }
+.road-hazard-reject-button { background: #b91c1c; }
+.road-hazard-reject-button:hover, .road-hazard-reject-button:focus-visible { background: #dc2626; }
 
 .center-column .map-stage {
   flex: 1;
@@ -1017,6 +1108,14 @@
 .road-hazard-detail-content dd { margin-top: 4px; color: var(--ops-text); font-size: 12px; overflow-wrap: anywhere; }
 .road-hazard-detail-description { grid-column: 1 / -1; }
 .road-hazard-detail-content .road-hazard-review-images { grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); }
+.modal-skeleton-list { display: grid; gap: 12px; padding: 18px; }
+.skeleton-line, .field-skeleton { display: block; height: 12px; border-radius: 3px; background: linear-gradient(90deg, var(--ops-surface-2) 25%, color-mix(in srgb, var(--ops-border) 70%, #fff) 50%, var(--ops-surface-2) 75%); background-size: 220% 100%; animation: skeleton-shimmer 1.15s ease-in-out infinite; }
+.skeleton-line { width: 82%; }
+.skeleton-line-wide { width: 100%; height: 16px; }
+.skeleton-line-short { width: 58%; }
+.field-skeleton { width: min(240px, 90%); height: 14px; }
+@keyframes skeleton-shimmer { from { background-position: 100% 0; } to { background-position: -100% 0; } }
+@media (prefers-reduced-motion: reduce) { .skeleton-line, .field-skeleton { animation: none; } }
 
 @media (max-width: 560px) {
   .alert-detail-backdrop { padding: 0; align-items: stretch; }
@@ -1167,6 +1266,13 @@
     flex: none;
     height: auto;
     min-height: 0;
+  }
+
+  .center-column .road-hazard-review-panel {
+    flex: none;
+    height: auto;
+    max-height: none;
+    overflow: visible;
   }
 
   .center-column .map-stage {

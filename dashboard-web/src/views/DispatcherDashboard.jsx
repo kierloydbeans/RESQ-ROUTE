@@ -11,7 +11,7 @@ import AssignmentModal from '../components/AssignmentModal'
 import DeployedVehicles from '../components/DeployedVehicles'
 import { BASE_URL, WS_URL } from '../dataProvider'
 import '../styles/ops-console.css'
-import { ChevronLeft, ChevronRight, SlidersHorizontal, X } from 'lucide-react'
+import { Check, ChevronLeft, ChevronRight, SlidersHorizontal, X } from 'lucide-react'
 
 const getStoredAuth = () => {
   try {
@@ -2287,15 +2287,33 @@ export const Dashboard = ({ onLogout }) => {
                   <div className="road-hazard-review-queue">
                   {(() => {
                     const { id, properties } = pendingRoadHazards.features[roadHazardPage]
+                    const imageUrls = getAlertImageUrls(properties.image_url)
+                    const previewImage = imageUrls[0]
                     return (
                     <article key={id} className="road-hazard-review-item" role="button" tabIndex={0} onClick={() => setSelectedRoadHazard({ id, ...properties })}>
-                      <strong>{String(properties.hazard_type).replace(/_/g, ' ')} · {properties.severity}</strong>
-                      <span>{properties.road_name || 'Unnamed road'} · {properties.radius_meters} m radius</span>
-                      <p>{properties.description}</p>
-                      <small>{Number(properties.latitude).toFixed(5)}, {Number(properties.longitude).toFixed(5)} · Reported by {properties.reporter_name || 'Anonymous'}</small>
-                      <div>
-                        <button type="button" disabled={roadHazardReviewing !== null} onClick={(event) => { event.stopPropagation(); reviewRoadHazard(id, true) }}>Approve &amp; publish</button>
-                        <button type="button" disabled={roadHazardReviewing !== null} onClick={(event) => openRoadHazardRejection(id, event)}>Reject</button>
+                      <div className="road-hazard-review-card-grid">
+                        <div className="road-hazard-review-thumbnail">
+                          {previewImage ? (
+                            <button type="button" onClick={(event) => { event.stopPropagation(); setSelectedImagePreview({ url: previewImage, index: 0 }) }} aria-label="Open road hazard image preview">
+                              <img src={previewImage} alt="Road hazard evidence preview" />
+                            </button>
+                          ) : (
+                            <div className="road-hazard-review-thumbnail-placeholder" aria-label="No image attached">NO IMAGE</div>
+                          )}
+                        </div>
+                        <div className="road-hazard-review-details">
+                          <div className="road-hazard-review-badges">
+                            <strong><span className="road-hazard-type-badge">{String(properties.hazard_type).replace(/_/g, ' ')}</span></strong>
+                            <span className={`road-hazard-severity-badge ${properties.severity || 'high'}`}>{properties.severity || 'high'} severity</span>
+                          </div>
+                          <strong className="road-hazard-review-location">{properties.road_name || 'Unnamed road'}</strong>
+                          <small className="road-hazard-review-coordinates">{Number(properties.latitude).toFixed(5)}, {Number(properties.longitude).toFixed(5)} · Reported by {properties.reporter_name || 'Anonymous'}</small>
+                          <p className="road-hazard-review-description">“{properties.description || 'No description provided.'}”</p>
+                        </div>
+                        <div className="road-hazard-review-actions">
+                          <button className="road-hazard-approve-button" type="button" disabled={roadHazardReviewing !== null} onClick={(event) => { event.stopPropagation(); reviewRoadHazard(id, true) }}><Check size={13} aria-hidden="true" />Approve &amp; Publish</button>
+                          <button className="road-hazard-reject-button" type="button" disabled={roadHazardReviewing !== null} onClick={(event) => openRoadHazardRejection(id, event)}><X size={13} aria-hidden="true" />Reject Report</button>
+                        </div>
                       </div>
                     </article>
                     )
