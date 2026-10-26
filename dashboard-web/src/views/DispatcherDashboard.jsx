@@ -140,6 +140,74 @@ const normalizeDisasterType = (value) => {
   return Object.prototype.hasOwnProperty.call(disasterLabels, category) ? category : 'other'
 }
 
+const getAlertImageUrls = (value) => {
+  if (!value) return []
+  try {
+    const decoded = JSON.parse(value)
+    if (Array.isArray(decoded)) return decoded.filter((url) => typeof url === 'string' && url.trim())
+    if (typeof decoded === 'string' && decoded.trim()) return [decoded]
+  } catch {}
+  return typeof value === 'string' ? [value] : []
+}
+
+const ALERT_LOCATION_CACHE_KEY = 'resq-nominatim-reverse-geocode-v1'
+const alertLocationCache = new Map()
+
+const formatAlertLocation = (address) => {
+  if (!address) return null
+  const road = address.road || address.pedestrian || address.footway
+  const barangay = address.neighbourhood || address.suburb || address.quarter || address.village
+  const city = address.city || address.town || address.municipality || address.county
+  return [road, barangay, city]
+    .filter(Boolean)
+    .filter((value, index, values) => values.indexOf(value) === index)
+    .join(', ') || address.display_name?.split(',').slice(0, 3).join(', ') || null
+}
+
+const getAlertCoordinateFallback = (latitude, longitude) => {
+  const latitudeDirection = latitude >= 0 ? 'N' : 'S'
+  const longitudeDirection = longitude >= 0 ? 'E' : 'W'
+  return `${Math.abs(latitude).toFixed(4)}° ${latitudeDirection}, ${Math.abs(longitude).toFixed(4)}° ${longitudeDirection}`
+}
+
+const lookupAlertLocation = async (latitude, longitude) => {
+  const lat = Number(latitude)
+  const lon = Number(longitude)
+  if (!Number.isFinite(lat) || !Number.isFinite(lon)) return ''
+  const key = `${lat.toFixed(6)},${lon.toFixed(6)}`
+  if (!alertLocationCache.size) {
+    try {
+      const stored = JSON.parse(window.localStorage.getItem(ALERT_LOCATION_CACHE_KEY) || '{}')
+      Object.entries(stored).forEach(([cachedKey, value]) => alertLocationCache.set(cachedKey, value))
+    } catch {}
+  }
+  if (alertLocationCache.has(key)) return alertLocationCache.get(key) || getAlertCoordinateFallback(lat, lon)
+
+  const controller = new AbortController()
+  const timeout = window.setTimeout(() => controller.abort(), 5000)
+  try {
+    const params = new URLSearchParams({ format: 'json', lat: String(lat), lon: String(lon), zoom: '18', addressdetails: '1' })
+    const response = await fetch(`https://nominatim.openstreetmap.org/reverse?${params}`, {
+      signal: controller.signal,
+      headers: { Accept: 'application/json', 'Accept-Language': 'en' },
+    })
+    if (!response.ok) throw new Error(`Nominatim returned ${response.status}`)
+    const data = await response.json()
+    const location = formatAlertLocation(data.address)
+    alertLocationCache.set(key, location)
+    try {
+      const stored = Object.fromEntries([...alertLocationCache.entries()].filter(([, value]) => value))
+      window.localStorage.setItem(ALERT_LOCATION_CACHE_KEY, JSON.stringify(stored))
+    } catch {}
+    return location || getAlertCoordinateFallback(lat, lon)
+  } catch {
+    alertLocationCache.set(key, null)
+    return getAlertCoordinateFallback(lat, lon)
+  } finally {
+    window.clearTimeout(timeout)
+  }
+}
+
 const distanceBetween = (firstLatitude, firstLongitude, secondLatitude, secondLongitude) => {
   const [normalizedFirstLatitude, normalizedFirstLongitude, normalizedSecondLatitude, normalizedSecondLongitude] = [firstLatitude, firstLongitude, secondLatitude, secondLongitude].map(Number)
   if ([normalizedFirstLatitude, normalizedFirstLongitude, normalizedSecondLatitude, normalizedSecondLongitude].some((value) => !Number.isFinite(value))) return null
@@ -162,7 +230,18 @@ const SosFeedItem = ({ alert, now, onAssign, onView, isClosed = false }) => {
   const sentAt = parseAlertDate(alert.created_at)
 
   return (
-    <article className={unattended ? 'sos-item unattended-alert' : 'sos-item'}>
+    <article
+      className={unattended ? 'sos-item unattended-alert' : 'sos-item'}
+      onClick={() => onView?.(alert)}
+      onKeyDown={(event) => {
+        if ((event.key === 'Enter' || event.key === ' ') && event.target === event.currentTarget) {
+          event.preventDefault()
+          onView?.(alert)
+        }
+      }}
+      role={onView ? 'button' : undefined}
+      tabIndex={onView ? 0 : undefined}
+    >
       <div className="sos-meta">
         <span className={`severity ${severity}`}>{severity.toUpperCase()}</span>
         {unattended && <span className="unattended-badge">UNATTENDED 2H+</span>}
@@ -178,9 +257,9 @@ const SosFeedItem = ({ alert, now, onAssign, onView, isClosed = false }) => {
       <div className="coordinates">{alert.latitude?.toFixed?.(5) || 'Unknown'}° N, {alert.longitude?.toFixed?.(5) || 'Unknown'}° E</div>
       {!isClosed && (
         <div className="sos-actions">
-          <button onClick={() => onAssign(alert.id)}>ASSIGN</button>
+          <button onClick={(event) => { event.stopPropagation(); onAssign(alert.id) }}>ASSIGN</button>
           <button type="button" onClick={() => onView(alert)}>VIEW</button>
-          <button>MERGE</button>
+          <button onClick={(event) => event.stopPropagation()}>MERGE</button>
         </div>
       )}
     </article>
@@ -220,6 +299,11 @@ export const Dashboard = ({ onLogout }) => {
   const [selectedRescuerId, setSelectedRescuerId] = useState('')
   const [selectedIncident, setSelectedIncident] = useState('')
   const [selectedSeverity, setSelectedSeverity] = useState('high')
+  const [selectedAlert, setSelectedAlert] = useState(null)
+  const [selectedImagePreview, setSelectedImagePreview] = useState(null)
+  const [alertImageSize, setAlertImageSize] = useState('medium')
+  const [alertLocation, setAlertLocation] = useState('')
+  const [alertLocationLoading, setAlertLocationLoading] = useState(false)
   const [activeModal, setActiveModal] = useState(null)
   // ── Voice call state ──────────────────────────────────────────────────
   const { callId, callError, isSocketReady: isVoiceReady, participants: callParticipants, remoteStreams, startCall, endCall } =
@@ -786,6 +870,9 @@ export const Dashboard = ({ onLogout }) => {
   ))
 
   const handleViewAlert = (alert) => {
+    setSelectedAlert(alert)
+    setSelectedImagePreview(null)
+    setAlertImageSize('medium')
     const longitude = Number(alert.longitude)
     const latitude = Number(alert.latitude)
     if (!Number.isFinite(longitude) || !Number.isFinite(latitude)) {
@@ -796,6 +883,23 @@ export const Dashboard = ({ onLogout }) => {
     setFocusedAlertId(alert.id)
     setFocusRequestKey((current) => current + 1)
   }
+
+  useEffect(() => {
+    if (!selectedAlert) {
+      setAlertLocation('')
+      return undefined
+    }
+    let cancelled = false
+    setAlertLocationLoading(true)
+    lookupAlertLocation(selectedAlert.latitude, selectedAlert.longitude)
+      .then((location) => {
+        if (!cancelled) setAlertLocation(location)
+      })
+      .finally(() => {
+        if (!cancelled) setAlertLocationLoading(false)
+      })
+    return () => { cancelled = true }
+  }, [selectedAlert?.id, selectedAlert?.latitude, selectedAlert?.longitude])
 
   const verifiedAlert = verifiedAlertState
   const setVerifiedAlert = (alert) => setVerifiedAlertState((current) => current?.id === alert?.id ? null : alert)
@@ -941,6 +1045,11 @@ export const Dashboard = ({ onLogout }) => {
 
     if (lastMessage?.type === 'alert_updated' && lastMessage.data) {
       setAlerts((currentAlerts) => currentAlerts.map((alert) => alert.id === lastMessage.data.id ? lastMessage.data : alert))
+      setSelectedAlert((currentAlert) => (
+        currentAlert?.id === lastMessage.data.id
+          ? { ...currentAlert, ...lastMessage.data }
+          : currentAlert
+      ))
     }
 
     if (lastMessage?.type === 'rescuer_status_updated' && lastMessage.data) {
@@ -1867,6 +1976,7 @@ export const Dashboard = ({ onLogout }) => {
                           alert={alert}
                           now={currentTime}
                           onAssign={handleAssignAlert}
+                          onView={handleViewAlert}
                           isClosed
                         />
                       ))
@@ -2379,6 +2489,126 @@ export const Dashboard = ({ onLogout }) => {
                 </div>
               </div>
             )}
+          </section>
+        </div>
+      )}
+
+      {selectedAlert && (
+        <div className="modal-backdrop alert-detail-backdrop" onClick={() => setSelectedAlert(null)}>
+          <section
+            className="ops-modal alert-detail-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="alert-detail-title"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="modal-header">
+              <PanelTitle title="EMERGENCY ALERT DETAILS" badge={`ALERT #${selectedAlert.id}`} />
+              <button className="modal-close" onClick={() => setSelectedAlert(null)} aria-label="Close alert details">Ã—</button>
+            </div>
+            <div className="alert-detail-content">
+              <div className="alert-detail-heading">
+                <span className={`severity ${selectedAlert.severity || 'high'}`}>
+                  {(selectedAlert.severity || 'high').toUpperCase()}
+                </span>
+                <h2 id="alert-detail-title">{disasterLabels[normalizeDisasterType(selectedAlert.disaster_type)] || 'Other'} incident</h2>
+                <span className="alert-detail-status">{statusLabel(selectedAlert.status)}</span>
+              </div>
+
+              <div className="alert-detail-preview-toolbar">
+                <span>IMAGE PREVIEW</span>
+                <div className="alert-image-size-controls" role="group" aria-label="Adjust image preview size">
+                  {[
+                    ['small', 'SMALL'],
+                    ['medium', 'MEDIUM'],
+                    ['large', 'LARGE'],
+                  ].map(([size, label]) => (
+                    <button
+                      key={size}
+                      type="button"
+                      className={alertImageSize === size ? 'active' : ''}
+                      aria-pressed={alertImageSize === size}
+                      onClick={() => setAlertImageSize(size)}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {getAlertImageUrls(selectedAlert.image_url).length > 0 ? (
+                <div className={`alert-detail-image-frame ${alertImageSize}`}>
+                  <div className="alert-detail-image-gallery">
+                    {getAlertImageUrls(selectedAlert.image_url).map((imageUrl, index) => (
+                      <button
+                        className="alert-detail-image-button"
+                        key={`${imageUrl}-${index}`}
+                        type="button"
+                        onClick={() => setSelectedImagePreview({ url: imageUrl, index })}
+                        aria-label={`Open uploaded evidence ${index + 1} for alert ${selectedAlert.id}`}
+                      >
+                        <img
+                          className="alert-detail-image"
+                          src={imageUrl}
+                          alt={`Uploaded evidence ${index + 1} for alert ${selectedAlert.id}`}
+                        />
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              ) : (
+                <div className="alert-detail-image-empty">NO IMAGE ATTACHED</div>
+              )}
+
+              <dl className="alert-detail-fields">
+                <div><dt>Reported by</dt><dd>{selectedAlert.sender_name || 'Unknown reporter'}</dd></div>
+                <div><dt>Reported</dt><dd>{formatTime(selectedAlert.created_at)}</dd></div>
+                <div><dt>General location</dt><dd>{alertLocationLoading ? 'Looking up location...' : alertLocation || 'Location unavailable'}</dd></div>
+                <div><dt>Coordinates</dt><dd>{selectedAlert.latitude}, {selectedAlert.longitude}</dd></div>
+                <div className="alert-detail-message"><dt>Description</dt><dd>{selectedAlert.message || 'No additional description provided.'}</dd></div>
+              </dl>
+              {!isClosedAlert(selectedAlert) && (
+                <button
+                  type="button"
+                  className="alert-detail-assign-button"
+                  onClick={() => {
+                    openAssignmentModal(selectedAlert.id)
+                    setSelectedAlert(null)
+                  }}
+                >
+                  ASSIGN RESCUER
+                </button>
+              )}
+            </div>
+          </section>
+        </div>
+      )}
+
+      {selectedImagePreview && (
+        <div className="image-preview-backdrop" onClick={() => setSelectedImagePreview(null)}>
+          <section
+            className="image-preview-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-label={`Uploaded evidence ${selectedImagePreview.index + 1}`}
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="image-preview-header">
+              <span>IMAGE {selectedImagePreview.index + 1}</span>
+              <button
+                className="modal-close"
+                type="button"
+                onClick={() => setSelectedImagePreview(null)}
+                aria-label="Close image preview"
+              >
+                Ã—
+              </button>
+            </div>
+            <img
+              className="image-preview-full"
+              src={selectedImagePreview.url}
+              alt={`Expanded uploaded evidence ${selectedImagePreview.index + 1}`}
+            />
           </section>
         </div>
       )}

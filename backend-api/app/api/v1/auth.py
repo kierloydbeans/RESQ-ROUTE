@@ -63,6 +63,50 @@ SOS_VIDEO_EXTENSIONS = frozenset(
 )
 
 
+def _extract_public_storage_url(response: object) -> str | None:
+    """Normalize the public URL returned by different supabase-py versions."""
+    if isinstance(response, str):
+        return response.strip() or None
+
+    if isinstance(response, dict):
+        data = response.get("data")
+        candidates = [
+            response.get("publicUrl"),
+            response.get("public_url"),
+            data.get("publicUrl") if isinstance(data, dict) else None,
+            data.get("public_url") if isinstance(data, dict) else None,
+        ]
+    else:
+        candidates = [
+            getattr(response, "public_url", None),
+            getattr(response, "publicUrl", None),
+        ]
+
+    return next((url.strip() for url in candidates if isinstance(url, str) and url.strip()), None)
+
+
+def _image_urls_from_column(value: str | None) -> list[str]:
+    """Read both legacy single URLs and the current JSON-array representation."""
+    if not value:
+        return []
+    try:
+        decoded = json.loads(value)
+    except (TypeError, json.JSONDecodeError):
+        decoded = value
+    if isinstance(decoded, str):
+        return [decoded] if decoded.strip() else []
+    if isinstance(decoded, list):
+        return [url.strip() for url in decoded if isinstance(url, str) and url.strip()]
+    return []
+
+
+def _serialize_image_urls(urls: list[str]) -> str:
+    serialized = json.dumps(urls, separators=(",", ":"))
+    if len(serialized) > 2048:
+        raise ValueError("The emergency alert image URL list exceeds the database column limit")
+    return serialized
+
+
 def _utc_isoformat(value: datetime | None) -> str | None:
     if value is None:
         return None
@@ -983,7 +1027,11 @@ async def create_alert(
         "status": payload.get("status", AlertStatus.PENDING),
         "assigned_rescuer_id": payload.get("assigned_rescuer_id"),
         "assigned_rescuer_name": payload.get("assigned_rescuer_name"),
-        "assigned_vehicle_ids": payload.get("assigned_vehicle_ids")
+        "assigned_vehicle_ids": payload.get("assigned_vehicle_ids"),
+        # Allows trusted callers that already have a public media URL to persist
+        # it as part of the insert. Normal citizen uploads use the media endpoint
+        # below, which obtains and persists the URL after Storage upload.
+        "image_url": payload.get("image_url"),
     }
     alert = EmergencyAlert.model_validate(alert_data)
 
@@ -1044,7 +1092,7 @@ async def upload_alert_media(
             raise HTTPException(status_code=403, detail="You can only upload media to your own SOS alert")
 
     storage_path = f"{alert_id}/{uuid4().hex}{extension}"
-    public_url = None
+    public_url: str | None = None
     supabase_url_parts = urlsplit(settings.SUPABASE_URL)
     supabase_url_path = supabase_url_parts.path.rstrip("/")
     if supabase_url_path == "/rest/v1":
@@ -1065,26 +1113,18 @@ async def upload_alert_media(
         if content_type.startswith("video/") and stored_video_count >= 1:
             raise HTTPException(status_code=409, detail="An SOS alert can have at most 1 video")
         storage_stage = "uploading media"
-        await run_in_threadpool(
+        upload_response = await run_in_threadpool(
             lambda: storage.upload(
                 storage_path,
                 contents,
                 file_options={"content-type": content_type, "upsert": "false"},
             )
         )
+        if upload_response is None:
+            raise RuntimeError("Supabase Storage returned no upload response")
         if content_type.startswith("image/"):
             public_url_response = await run_in_threadpool(lambda: storage.get_public_url(storage_path))
-            if isinstance(public_url_response, str):
-                public_url = public_url_response
-            elif isinstance(public_url_response, dict):
-                public_url = (
-                    public_url_response.get("publicUrl")
-                    or public_url_response.get("public_url")
-                    or public_url_response.get("data", {}).get("publicUrl")
-                    or public_url_response.get("data", {}).get("public_url")
-                )
-            else:
-                public_url = getattr(public_url_response, "public_url", None) or getattr(public_url_response, "publicUrl", None)
+            public_url = _extract_public_storage_url(public_url_response)
             if not public_url:
                 raise RuntimeError("Supabase Storage did not return a public URL")
     except HTTPException:
@@ -1095,10 +1135,31 @@ async def upload_alert_media(
     finally:
         await file.close()
 
-    if public_url:
-        alert.image_url = public_url
-        await session.commit()
-        await session.refresh(alert)
+    if content_type.startswith("image/"):
+        # An image upload must never be reported as successful while the
+        # emergency_alert row still contains NULL image_url.
+        if not public_url:
+            raise HTTPException(status_code=502, detail="Supabase Storage returned no public image URL")
+        existing_image_urls = _image_urls_from_column(alert.image_url)
+        try:
+            image_urls = existing_image_urls
+            if public_url not in image_urls:
+                image_urls.append(public_url)
+            alert.image_url = _serialize_image_urls(image_urls)
+            await session.commit()
+            await session.refresh(alert)
+        except Exception as error:
+            await session.rollback()
+            logger.exception("Unable to persist image URL for SOS alert %s", alert_id)
+            raise HTTPException(status_code=502, detail="Media uploaded but its URL could not be saved") from error
+        try:
+            await telemetry_manager.broadcast({
+                "type": "alert_updated",
+                "data": EmergencyAlertRead.model_validate(alert).model_dump(mode="json"),
+                "timestamp": datetime.utcnow().timestamp(),
+            })
+        except Exception:
+            logger.exception("Unable to broadcast image URL update for SOS alert %s", alert_id)
 
     return {
         "bucket": SOS_ALERT_MEDIA_BUCKET,
