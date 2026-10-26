@@ -287,9 +287,13 @@ export const Dashboard = ({ onLogout }) => {
   const [activeEvacuationRoute, setActiveEvacuationRoute] = useState(null)
   const [isRoadHazardFormOpen, setIsRoadHazardFormOpen] = useState(false)
   const [pendingRoadHazards, setPendingRoadHazards] = useState({ type: 'FeatureCollection', features: [] })
+  const [roadHazardPage, setRoadHazardPage] = useState(0)
   const [roadHazardReviewing, setRoadHazardReviewing] = useState(null)
   const [roadHazardReviewError, setRoadHazardReviewError] = useState('')
+  const [roadHazardRejectionTarget, setRoadHazardRejectionTarget] = useState(null)
+  const [roadHazardRejectionRemarks, setRoadHazardRejectionRemarks] = useState('')
   const [selectedRoadHazard, setSelectedRoadHazard] = useState(null)
+  const [closingModal, setClosingModal] = useState(null)
   const [hazardLayers, setHazardLayers] = useState([])
   const [hazardLayerPublishing, setHazardLayerPublishing] = useState(null)
   const [showNoahHazards, setShowNoahHazards] = useState(true)
@@ -304,6 +308,14 @@ export const Dashboard = ({ onLogout }) => {
   const [alertImageSize, setAlertImageSize] = useState('medium')
   const [alertLocation, setAlertLocation] = useState('')
   const [alertLocationLoading, setAlertLocationLoading] = useState(false)
+
+  const closeModalWithAnimation = (modalKey, close) => {
+    setClosingModal(modalKey)
+    window.setTimeout(() => {
+      close()
+      setClosingModal(null)
+    }, 180)
+  }
   const [activeModal, setActiveModal] = useState(null)
   // ── Voice call state ──────────────────────────────────────────────────
   const { callId, callError, isSocketReady: isVoiceReady, participants: callParticipants, remoteStreams, startCall, endCall } =
@@ -337,6 +349,7 @@ export const Dashboard = ({ onLogout }) => {
     operationalMetrics: true,
     sosFeed: true,
     tacticalMap: true,
+    roadHazardReview: true,
     averageResponse: true,
     vehicles: true,
     rescuers: true,
@@ -396,12 +409,13 @@ export const Dashboard = ({ onLogout }) => {
   }
   const hasLeftRail = renderedPanels.operationalMetrics || renderedPanels.sosFeed
   const hasRightRail = renderedPanels.averageResponse || renderedPanels.vehicles || renderedPanels.rescuers
+  const hasCenterPanel = renderedPanels.tacticalMap || renderedPanels.roadHazardReview
   const gridColumns = [
     ...(hasLeftRail ? ['200px'] : []),
-    ...(renderedPanels.tacticalMap ? ['minmax(0, 1fr)'] : []),
+    ...(hasCenterPanel ? ['minmax(0, 1fr)'] : []),
     ...(hasRightRail ? ['213px'] : []),
   ]
-  if (!renderedPanels.tacticalMap && gridColumns.length > 0) gridColumns.fill('minmax(0, 1fr)')
+  if (!hasCenterPanel && gridColumns.length > 0) gridColumns.fill('minmax(0, 1fr)')
 
   useEffect(() => () => {
     Object.values(panelAnimationTimers.current).forEach(window.clearTimeout)
@@ -925,14 +939,19 @@ export const Dashboard = ({ onLogout }) => {
     }
   }, [lastMessage, refreshPendingRoadHazards])
 
-  const reviewRoadHazard = async (id, approved) => {
+  useEffect(() => {
+    const pageCount = pendingRoadHazards.features.length
+    setRoadHazardPage((current) => pageCount === 0 ? 0 : Math.min(current, pageCount - 1))
+  }, [pendingRoadHazards.features.length])
+
+  const reviewRoadHazard = async (id, approved, remarks = '') => {
     setRoadHazardReviewing(id)
     setRoadHazardReviewError('')
     try {
       const response = await fetch(`${API_BASE_URL}/api/v1/hazards/road-reports/${id}/review`, {
         method: 'PATCH',
         headers: { ...getAuthHeaders(), 'Content-Type': 'application/json' },
-        body: JSON.stringify({ approved }),
+        body: JSON.stringify({ approved, remarks: remarks.trim() || null }),
       })
       if (!response.ok) {
         const responseData = await response.json().catch(() => null)
@@ -949,6 +968,22 @@ export const Dashboard = ({ onLogout }) => {
     } finally {
       setRoadHazardReviewing(null)
     }
+  }
+
+  const openRoadHazardRejection = (id, event) => {
+    event.stopPropagation()
+    setRoadHazardReviewError('')
+    setRoadHazardRejectionRemarks('')
+    setRoadHazardRejectionTarget(id)
+  }
+
+  const submitRoadHazardRejection = async (event) => {
+    event.preventDefault()
+    const remarks = roadHazardRejectionRemarks.trim()
+    if (!remarks || roadHazardRejectionTarget === null) return
+    const id = roadHazardRejectionTarget
+    setRoadHazardRejectionTarget(null)
+    await reviewRoadHazard(id, false, remarks)
   }
 
   const handleMapMarkerClick = (marker) => {
@@ -1823,6 +1858,7 @@ export const Dashboard = ({ onLogout }) => {
                 ['operationalMetrics', 'Operational metrics'],
                 ['sosFeed', 'Live SOS feed'],
                 ['tacticalMap', 'Tactical map'],
+                ['roadHazardReview', 'Road hazard review'],
                 ['averageResponse', 'Average response'],
                 ['vehicles', 'Vehicles'],
                 ['rescuers', 'Rescuer profiles'],
@@ -2092,8 +2128,8 @@ export const Dashboard = ({ onLogout }) => {
         </aside>}
 
         {/* CENTER COLUMN: MAP ONLY */}
-        {renderedPanels.tacticalMap && <main className={`center-column map-only-column ${getPanelAnimationClass('tacticalMap')}`}>
-          <section className="map-panel">
+        {hasCenterPanel && <main className={`center-column map-only-column ${getPanelAnimationClass('tacticalMap')}`}>
+          {renderedPanels.tacticalMap && <section className="map-panel">
             <PanelTitle title="CDRRMO TACTICAL MAP AREA" badge="TRACKING MAP" />
             <button className="map-hazard-publish-button" type="button" onClick={() => setIsRoadHazardFormOpen((open) => !open)}>
               Report Road Hazard
@@ -2112,20 +2148,47 @@ export const Dashboard = ({ onLogout }) => {
                   <div><dt>Location</dt><dd>{selectedRoadHazard.latitude ?? '—'}, {selectedRoadHazard.longitude ?? '—'}</dd></div>
                   <div><dt>Description</dt><dd>{selectedRoadHazard.description || 'No description provided.'}</dd></div>
                 </dl>
+                {getAlertImageUrls(selectedRoadHazard.image_url).length > 0 && (
+                  <div className="road-hazard-review-images" aria-label="Uploaded road hazard images">
+                    {getAlertImageUrls(selectedRoadHazard.image_url).map((imageUrl, index) => (
+                      <button
+                        type="button"
+                        className="road-hazard-review-image-button"
+                        key={`${imageUrl}-${index}`}
+                        onClick={() => setSelectedImagePreview({ url: imageUrl, index })}
+                        aria-label={`Open road hazard image ${index + 1}`}
+                      >
+                        <img src={imageUrl} alt={`Road hazard evidence ${index + 1}`} />
+                      </button>
+                    ))}
+                  </div>
+                )}
               </article>
             )}
-            {pendingRoadHazards.features.length > 0 && (
+            {false && pendingRoadHazards.features.length > 0 && (
               <section className="road-hazard-review-queue" aria-label="Pending road hazard reports">
                 <h3>Road hazards awaiting review ({pendingRoadHazards.features.length})</h3>
                 {pendingRoadHazards.features.map(({ id, properties }) => (
-                  <article key={id} className="road-hazard-review-item">
+                  <article
+                    key={id}
+                    className="road-hazard-review-item"
+                    role="button"
+                    tabIndex={0}
+                    onClick={() => setSelectedRoadHazard({ id, ...properties })}
+                    onKeyDown={(event) => {
+                      if (event.key === 'Enter' || event.key === ' ') {
+                        event.preventDefault()
+                        setSelectedRoadHazard({ id, ...properties })
+                      }
+                    }}
+                  >
                     <strong>{String(properties.hazard_type).replace(/_/g, ' ')} · {properties.severity}</strong>
                     <span>{properties.road_name || 'Unnamed road'} · {properties.radius_meters} m radius</span>
                     <p>{properties.description}</p>
                     <small>{Number(properties.latitude).toFixed(5)}, {Number(properties.longitude).toFixed(5)} · Reported by {properties.reporter_name || 'Anonymous'}</small>
                     <div>
-                      <button type="button" disabled={roadHazardReviewing !== null} onClick={() => reviewRoadHazard(id, true)}>Approve & publish</button>
-                      <button type="button" disabled={roadHazardReviewing !== null} onClick={() => reviewRoadHazard(id, false)}>Reject</button>
+                      <button type="button" disabled={roadHazardReviewing !== null} onClick={(event) => { event.stopPropagation(); reviewRoadHazard(id, true) }}>Approve & publish</button>
+                      <button type="button" disabled={roadHazardReviewing !== null} onClick={(event) => openRoadHazardRejection(id, event)}>Reject</button>
                     </div>
                   </article>
                 ))}
@@ -2208,7 +2271,40 @@ export const Dashboard = ({ onLogout }) => {
               </div>
               <button className="map-resize-handle" onPointerDown={startMapResize} aria-label="Drag to resize map" title="Drag to resize map">↕</button>
             </div>
-          </section>
+          </section>}
+          {renderedPanels.roadHazardReview && (
+            <section className={`road-hazard-review-panel ${getPanelAnimationClass('roadHazardReview')}`} aria-label="Road hazard review panel">
+              <PanelTitle title="ROAD HAZARD REVIEW" badge={`${pendingRoadHazards.features.length} PENDING`} />
+              {pendingRoadHazards.features.length === 0 ? (
+                <p className="road-hazard-review-empty">No road hazards awaiting review.</p>
+              ) : (
+                <>
+                  <div className="road-hazard-review-pagination" aria-label="Road hazard review pagination">
+                    <button type="button" onClick={() => setRoadHazardPage((page) => Math.max(0, page - 1))} disabled={roadHazardPage === 0} aria-label="Previous road hazard">Previous</button>
+                    <span>REPORT {roadHazardPage + 1} / {pendingRoadHazards.features.length}</span>
+                    <button type="button" onClick={() => setRoadHazardPage((page) => Math.min(pendingRoadHazards.features.length - 1, page + 1))} disabled={roadHazardPage >= pendingRoadHazards.features.length - 1} aria-label="Next road hazard">Next</button>
+                  </div>
+                  <div className="road-hazard-review-queue">
+                  {(() => {
+                    const { id, properties } = pendingRoadHazards.features[roadHazardPage]
+                    return (
+                    <article key={id} className="road-hazard-review-item" role="button" tabIndex={0} onClick={() => setSelectedRoadHazard({ id, ...properties })}>
+                      <strong>{String(properties.hazard_type).replace(/_/g, ' ')} · {properties.severity}</strong>
+                      <span>{properties.road_name || 'Unnamed road'} · {properties.radius_meters} m radius</span>
+                      <p>{properties.description}</p>
+                      <small>{Number(properties.latitude).toFixed(5)}, {Number(properties.longitude).toFixed(5)} · Reported by {properties.reporter_name || 'Anonymous'}</small>
+                      <div>
+                        <button type="button" disabled={roadHazardReviewing !== null} onClick={(event) => { event.stopPropagation(); reviewRoadHazard(id, true) }}>Approve &amp; publish</button>
+                        <button type="button" disabled={roadHazardReviewing !== null} onClick={(event) => openRoadHazardRejection(id, event)}>Reject</button>
+                      </div>
+                    </article>
+                    )
+                  })()}
+                  </div>
+                </>
+              )}
+            </section>
+          )}
         </main>}
 
         {/* RIGHT RAIL: Average Response -> Vehicles -> Rescuer Profiles */}
@@ -2390,16 +2486,51 @@ export const Dashboard = ({ onLogout }) => {
         </div>
       )}
 
+      {roadHazardRejectionTarget !== null && (
+        <div className={`modal-backdrop road-hazard-rejection-backdrop${closingModal === 'rejection' ? ' is-closing' : ''}`} onClick={() => closeModalWithAnimation('rejection', () => setRoadHazardRejectionTarget(null))}>
+          <section className="ops-modal road-hazard-rejection-modal" role="dialog" aria-modal="true" aria-labelledby="road-hazard-rejection-title" onClick={(event) => event.stopPropagation()}>
+            <div className="modal-header">
+              <PanelTitle title="REJECT ROAD HAZARD" badge={`REPORT #${roadHazardRejectionTarget}`} />
+              <button className="modal-close" type="button" onClick={() => setRoadHazardRejectionTarget(null)} aria-label="Close rejection remarks">×</button>
+            </div>
+            <form className="road-hazard-rejection-form" onSubmit={submitRoadHazardRejection}>
+              <h2 id="road-hazard-rejection-title">Why is this report being rejected?</h2>
+              <p>The remarks will be saved with the review record.</p>
+              <label htmlFor="road-hazard-rejection-remarks">Remarks</label>
+              <textarea
+                id="road-hazard-rejection-remarks"
+                value={roadHazardRejectionRemarks}
+                onChange={(event) => setRoadHazardRejectionRemarks(event.target.value)}
+                placeholder="State the reason for rejecting this road hazard..."
+                maxLength={1000}
+                rows={5}
+                required
+                autoFocus
+              />
+              <div className="road-hazard-rejection-actions">
+                <button type="button" onClick={() => closeModalWithAnimation('rejection', () => setRoadHazardRejectionTarget(null))}>Cancel</button>
+                <button type="submit" disabled={!roadHazardRejectionRemarks.trim() || roadHazardReviewing !== null}>Reject report</button>
+              </div>
+            </form>
+          </section>
+        </div>
+      )}
+
       {/* MODAL */}
       {activeModal && (
-        <div className="modal-backdrop" onClick={() => setActiveModal(null)}>
+        <div className={`modal-backdrop${closingModal === 'active' ? ' is-closing' : ''}`} onClick={() => closeModalWithAnimation('active', () => setActiveModal(null))}>
           <section className="ops-modal" role="dialog" aria-modal="true" onClick={(event) => event.stopPropagation()}>
             <div className="modal-header">
               <PanelTitle title={activeModal === 'alerts' ? 'ALL EMERGENCY ALERTS' : 'ACTIVE RESCUE UNITS'} badge="LIVE DATA" />
-              <button className="modal-close" onClick={() => setActiveModal(null)} aria-label="Close modal">×</button>
+              <button className="modal-close" onClick={() => closeModalWithAnimation('active', () => setActiveModal(null))} aria-label="Close modal">×</button>
             </div>
             {modalLoading ? (
-              <p className="modal-empty">Loading live data...</p>
+              <div className="modal-skeleton-list" aria-busy="true" aria-label="Loading live data">
+                <span className="skeleton-line skeleton-line-wide" />
+                <span className="skeleton-line" />
+                <span className="skeleton-line skeleton-line-short" />
+                <span className="skeleton-line skeleton-line-wide" />
+              </div>
             ) : activeModal === 'alerts' ? (
               <div className="modal-alert-list">
                 {alerts.length === 0 ? (
@@ -2494,7 +2625,7 @@ export const Dashboard = ({ onLogout }) => {
       )}
 
       {selectedAlert && (
-        <div className="modal-backdrop alert-detail-backdrop" onClick={() => setSelectedAlert(null)}>
+        <div className={`modal-backdrop alert-detail-backdrop${closingModal === 'alert' ? ' is-closing' : ''}`} onClick={() => closeModalWithAnimation('alert', () => setSelectedAlert(null))}>
           <section
             className="ops-modal alert-detail-modal"
             role="dialog"
@@ -2504,7 +2635,7 @@ export const Dashboard = ({ onLogout }) => {
           >
             <div className="modal-header">
               <PanelTitle title="EMERGENCY ALERT DETAILS" badge={`ALERT #${selectedAlert.id}`} />
-              <button className="modal-close" onClick={() => setSelectedAlert(null)} aria-label="Close alert details">Ã—</button>
+              <button className="modal-close" onClick={() => closeModalWithAnimation('alert', () => setSelectedAlert(null))} aria-label="Close alert details">Ã—</button>
             </div>
             <div className="alert-detail-content">
               <div className="alert-detail-heading">
@@ -2563,7 +2694,7 @@ export const Dashboard = ({ onLogout }) => {
               <dl className="alert-detail-fields">
                 <div><dt>Reported by</dt><dd>{selectedAlert.sender_name || 'Unknown reporter'}</dd></div>
                 <div><dt>Reported</dt><dd>{formatTime(selectedAlert.created_at)}</dd></div>
-                <div><dt>General location</dt><dd>{alertLocationLoading ? 'Looking up location...' : alertLocation || 'Location unavailable'}</dd></div>
+                <div><dt>General location</dt><dd>{alertLocationLoading ? <span className="field-skeleton" aria-label="Loading general location" /> : alertLocation || 'Location unavailable'}</dd></div>
                 <div><dt>Coordinates</dt><dd>{selectedAlert.latitude}, {selectedAlert.longitude}</dd></div>
                 <div className="alert-detail-message"><dt>Description</dt><dd>{selectedAlert.message || 'No additional description provided.'}</dd></div>
               </dl>
@@ -2584,8 +2715,38 @@ export const Dashboard = ({ onLogout }) => {
         </div>
       )}
 
+      {selectedRoadHazard && (
+        <div className={`modal-backdrop road-hazard-detail-backdrop${closingModal === 'road-hazard' ? ' is-closing' : ''}`} onClick={() => closeModalWithAnimation('road-hazard', () => setSelectedRoadHazard(null))}>
+          <section className="ops-modal road-hazard-detail-modal" role="dialog" aria-modal="true" aria-labelledby="road-hazard-detail-title" onClick={(event) => event.stopPropagation()}>
+            <div className="modal-header">
+              <PanelTitle title="ROAD HAZARD DETAILS" badge={`REPORT #${selectedRoadHazard.id}`} />
+              <button className="modal-close" type="button" onClick={() => closeModalWithAnimation('road-hazard', () => setSelectedRoadHazard(null))} aria-label="Close hazard report details">×</button>
+            </div>
+            <div className="road-hazard-detail-content">
+              <h2 id="road-hazard-detail-title">{String(selectedRoadHazard.hazard_type || 'Unknown hazard').replace(/_/g, ' ')} report</h2>
+              <dl>
+                <div><dt>Severity</dt><dd>{selectedRoadHazard.severity || '—'}</dd></div>
+                <div><dt>Status</dt><dd>{selectedRoadHazard.review_status || (selectedRoadHazard.is_resolved ? 'Resolved' : 'Active')}</dd></div>
+                <div><dt>Road</dt><dd>{selectedRoadHazard.road_name || 'Unspecified road'}</dd></div>
+                <div><dt>Location</dt><dd>{selectedRoadHazard.latitude ?? '—'}, {selectedRoadHazard.longitude ?? '—'}</dd></div>
+                <div className="road-hazard-detail-description"><dt>Description</dt><dd>{selectedRoadHazard.description || 'No description provided.'}</dd></div>
+              </dl>
+              {getAlertImageUrls(selectedRoadHazard.image_url).length > 0 && (
+                <div className="road-hazard-review-images" aria-label="Uploaded road hazard images">
+                  {getAlertImageUrls(selectedRoadHazard.image_url).map((imageUrl, index) => (
+                    <button type="button" className="road-hazard-review-image-button" key={`${imageUrl}-${index}`} onClick={() => setSelectedImagePreview({ url: imageUrl, index })} aria-label={`Open road hazard image ${index + 1}`}>
+                      <img src={imageUrl} alt={`Road hazard evidence ${index + 1}`} />
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          </section>
+        </div>
+      )}
+
       {selectedImagePreview && (
-        <div className="image-preview-backdrop" onClick={() => setSelectedImagePreview(null)}>
+        <div className={`modal-backdrop image-preview-backdrop${closingModal === 'image-preview' ? ' is-closing' : ''}`} onClick={() => closeModalWithAnimation('image-preview', () => setSelectedImagePreview(null))}>
           <section
             className="image-preview-modal"
             role="dialog"
@@ -2598,7 +2759,7 @@ export const Dashboard = ({ onLogout }) => {
               <button
                 className="modal-close"
                 type="button"
-                onClick={() => setSelectedImagePreview(null)}
+                onClick={() => closeModalWithAnimation('image-preview', () => setSelectedImagePreview(null))}
                 aria-label="Close image preview"
               >
                 Ã—

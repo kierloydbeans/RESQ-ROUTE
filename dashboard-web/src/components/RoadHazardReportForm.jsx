@@ -1,5 +1,6 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { BASE_URL } from '../dataProvider'
+import { Camera, UploadCloud } from 'lucide-react'
 import '../styles/road-hazard-report.css'
 
 const HAZARD_TYPES = [
@@ -78,6 +79,13 @@ export default function RoadHazardReportForm({ initialLocation, reporterName = '
   const [submitting, setSubmitting] = useState(false)
   const [status, setStatus] = useState('')
   const [roadLookupLoading, setRoadLookupLoading] = useState(false)
+  const [attachmentFiles, setAttachmentFiles] = useState([])
+  const [mediaUploading, setMediaUploading] = useState(false)
+  const [cameraOpen, setCameraOpen] = useState(false)
+  const [cameraError, setCameraError] = useState('')
+  const mediaInputRef = useRef(null)
+  const cameraVideoRef = useRef(null)
+  const cameraStreamRef = useRef(null)
 
   useEffect(() => {
     if (!initialLocation) return
@@ -106,7 +114,77 @@ export default function RoadHazardReportForm({ initialLocation, reporterName = '
     }
   }, [form.latitude, form.longitude, form.road_name])
 
+  useEffect(() => {
+    if (!cameraOpen) return undefined
+    let active = true
+    const startCamera = async () => {
+      try {
+        if (!navigator.mediaDevices?.getUserMedia) throw new Error('Camera access is not supported by this browser.')
+        const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' } }, audio: false })
+        if (!active) {
+          stream.getTracks().forEach((track) => track.stop())
+          return
+        }
+        cameraStreamRef.current = stream
+        if (cameraVideoRef.current) {
+          cameraVideoRef.current.srcObject = stream
+          await cameraVideoRef.current.play()
+        }
+      } catch (error) {
+        if (active) {
+          setCameraError(error.message || 'Unable to open the camera.')
+          setCameraOpen(false)
+        }
+      }
+    }
+    startCamera()
+    return () => {
+      active = false
+      cameraStreamRef.current?.getTracks().forEach((track) => track.stop())
+      cameraStreamRef.current = null
+    }
+  }, [cameraOpen])
+
   const update = (event) => setForm((current) => ({ ...current, [event.target.name]: event.target.value }))
+
+  const handleMediaSelection = (event) => {
+    const selectedFiles = Array.from(event.target.files || [])
+    event.target.value = ''
+    const acceptedFiles = []
+    const rejectedFiles = []
+    let imageCount = attachmentFiles.length
+    for (const file of selectedFiles) {
+      if (!file.type.startsWith('image/')) rejectedFiles.push(`${file.name}: images only`)
+      else if (file.size > 25 * 1024 * 1024) rejectedFiles.push(`${file.name}: maximum size is 25 MB`)
+      else if (imageCount >= 5) rejectedFiles.push(`${file.name}: up to 5 photos are allowed`)
+      else {
+        acceptedFiles.push(file)
+        imageCount += 1
+      }
+    }
+    if (acceptedFiles.length) setAttachmentFiles((current) => [...current, ...acceptedFiles])
+    setStatus(rejectedFiles[0] || `${imageCount} photo${imageCount === 1 ? '' : 's'} selected.`)
+  }
+
+  const openCamera = () => {
+    setCameraError('')
+    setCameraOpen(true)
+  }
+
+  const captureCameraImage = () => {
+    const video = cameraVideoRef.current
+    if (!video?.videoWidth || !video.videoHeight) return
+    const canvas = document.createElement('canvas')
+    canvas.width = video.videoWidth
+    canvas.height = video.videoHeight
+    canvas.getContext('2d').drawImage(video, 0, 0, canvas.width, canvas.height)
+    canvas.toBlob((blob) => {
+      if (!blob) return
+      const file = new File([blob], `road-hazard-${Date.now()}.jpg`, { type: 'image/jpeg' })
+      setAttachmentFiles((current) => current.length >= 5 ? current : [...current, file])
+      setCameraOpen(false)
+    }, 'image/jpeg', 0.9)
+  }
 
   const submit = async (event) => {
     event.preventDefault()
@@ -127,13 +205,33 @@ export default function RoadHazardReportForm({ initialLocation, reporterName = '
       })
       if (!response.ok) throw new Error(`Unable to submit road hazard (${response.status}).`)
       const feature = await response.json()
+      if (attachmentFiles.length > 0) {
+        setMediaUploading(true)
+        setStatus('Preparing photos...')
+        const auth = JSON.parse(window.localStorage.getItem('auth') || 'null')
+        const token = auth?.token || auth?.access_token
+        for (const file of attachmentFiles) {
+          setStatus(`Uploading ${file.name}`)
+          const media = new FormData()
+          media.append('file', file)
+          const mediaResponse = await fetch(`${BASE_URL}/api/v1/hazards/${feature.id}/media`, {
+            method: 'POST',
+            headers: token ? { Authorization: `Bearer ${token}` } : {},
+            body: media,
+          })
+          const mediaData = await mediaResponse.json().catch(() => ({}))
+          if (!mediaResponse.ok) throw new Error(`${file.name}: ${mediaData.detail || 'Image upload failed'}`)
+        }
+      }
       onReported?.(feature)
       setForm((current) => ({ ...current, description: '', road_name: '' }))
-      setStatus('Report sent to dispatchers for review. It will appear on public maps only if approved.')
+      setAttachmentFiles([])
+      setStatus('Report and attached photos sent to dispatchers for review. It will appear on public maps only if approved.')
     } catch (error) {
       setStatus(error.message || 'Unable to submit road hazard.')
     } finally {
       setSubmitting(false)
+      setMediaUploading(false)
     }
   }
 
@@ -163,8 +261,40 @@ export default function RoadHazardReportForm({ initialLocation, reporterName = '
       </div>
       <label>Road name<input name="road_name" value={form.road_name} onChange={update} placeholder={roadLookupLoading ? 'Looking up road name…' : 'Filled from location'} aria-busy={roadLookupLoading} /></label>
       <label>Reporter name<input name="reporter_name" value={form.reporter_name} readOnly aria-readonly="true" placeholder="Optional" /></label>
+      <input ref={mediaInputRef} className="report-media-input" type="file" accept="image/*" multiple onChange={handleMediaSelection} aria-label="Upload road hazard photos" />
+      <div className="report-attachment-actions">
+        <button type="button" className="report-attach-btn" onClick={() => mediaInputRef.current?.click()} disabled={submitting || mediaUploading}>
+          <UploadCloud size={18} />
+          <span>Upload files</span>
+        </button>
+        <button type="button" className="report-attach-btn" onClick={openCamera} disabled={submitting || mediaUploading || attachmentFiles.length >= 5}>
+          <Camera size={18} />
+          <span>Open camera</span>
+        </button>
+      </div>
+      {attachmentFiles.length > 0 && (
+        <div className="road-hazard-media-selection" aria-live="polite">
+          <p>{attachmentFiles.length} / 5 photos selected</p>
+          {attachmentFiles.map((file, index) => (
+            <div key={`${file.name}-${file.lastModified}-${index}`}>
+              <span>{file.name}</span>
+              <button type="button" onClick={() => setAttachmentFiles((current) => current.filter((_, fileIndex) => fileIndex !== index))}>Remove</button>
+            </div>
+          ))}
+        </div>
+      )}
+      {cameraOpen && (
+        <div className="road-hazard-camera-panel">
+          <video ref={cameraVideoRef} className="road-hazard-camera-preview" autoPlay muted playsInline />
+          <div className="road-hazard-camera-actions">
+            <button type="button" onClick={() => setCameraOpen(false)}>Cancel</button>
+            <button type="button" onClick={captureCameraImage}>Capture photo</button>
+          </div>
+        </div>
+      )}
+      {cameraError && <p className="road-hazard-report-status" role="alert">{cameraError}</p>}
       <button className="road-hazard-submit" type="submit" disabled={submitting}>{submitting ? 'Publishing…' : 'Publish Road Hazard'}</button>
-      {status && <p className="road-hazard-report-status" role="status">{status}</p>}
+      {status && <p className={`road-hazard-report-status${mediaUploading ? ' is-busy' : ''}`} role="status">{status}</p>}
     </form>
   )
 }

@@ -1756,7 +1756,7 @@ export const CitizenDashboard = ({ auth, onLogout }) => {
 
               <div className="report-status-section">
                 <span className="report-status-heading">Status & activity</span>
-                <div className="report-status-feed">
+                <div className={`report-status-feed${isUploadingMedia ? ' is-busy' : ''}`}>
                   <span className="report-status-dot" />
                   <span>{alertStatus || 'Ready · Tap map to drop location pin'}</span>
                 </div>

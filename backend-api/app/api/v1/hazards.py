@@ -1,8 +1,11 @@
 import csv
+import json
+from urllib.parse import urlsplit, urlunsplit
 from datetime import datetime, timezone
 from pathlib import Path
+from uuid import uuid4
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, UploadFile
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.dialects.postgresql import insert as pg_insert
@@ -18,9 +21,21 @@ from app.models.road_hazard import RoadHazardReport, RoadHazardType
 from app.services.graphhopper_routing import exclusion_polygon
 from app.services.road_hazard_expiration import calculate_road_hazard_expiration, expire_stale_road_hazards
 from app.services.audit_logging import record_audit_log
+from app.core.config import settings
+from starlette.concurrency import run_in_threadpool
+from supabase import create_client
 
 router = APIRouter()
 FEATURES_PATH = Path(__file__).resolve().parents[4] / "data-science" / "data" / "derived" / "south_caloocan_real_hazard_features.csv"
+# Reuse the existing public SOS media bucket so road-hazard uploads use the
+# same Supabase Storage configuration and policies.
+ROAD_HAZARD_MEDIA_BUCKET = "sos_alert_media"
+MAX_ROAD_HAZARD_IMAGES = 5
+MAX_ROAD_HAZARD_IMAGE_BYTES = 25 * 1024 * 1024
+ROAD_HAZARD_IMAGE_EXTENSIONS = {
+    "image/jpeg": ".jpg", "image/png": ".png", "image/webp": ".webp",
+    "image/gif": ".gif", "image/heic": ".heic", "image/heif": ".heif",
+}
 
 
 class RoadHazardSubmission(BaseModel):
@@ -55,6 +70,7 @@ def road_hazard_feature(hazard: RoadHazardReport) -> dict:
             "is_active": hazard.is_active,
             "is_resolved": hazard.is_resolved,
             "review_status": hazard.review_status,
+            "image_url": hazard.image_url,
         },
     }
 
@@ -90,6 +106,78 @@ async def report_road_hazard(
     return feature
 
 
+@router.post("/{hazard_id}/media", status_code=201)
+async def upload_road_hazard_media(
+    hazard_id: int,
+    file: UploadFile = File(...),
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    content_type = (file.content_type or "").lower()
+    extension = ROAD_HAZARD_IMAGE_EXTENSIONS.get(content_type)
+    if not extension:
+        raise HTTPException(status_code=415, detail="Upload a supported image file")
+
+    contents = await file.read(MAX_ROAD_HAZARD_IMAGE_BYTES + 1)
+    if len(contents) > MAX_ROAD_HAZARD_IMAGE_BYTES:
+        raise HTTPException(status_code=413, detail="Images must be 25 MB or smaller")
+    if not contents:
+        raise HTTPException(status_code=400, detail="The selected image is empty")
+
+    result = await session.execute(select(RoadHazardReport).where(RoadHazardReport.id == hazard_id))
+    hazard = result.scalar_one_or_none()
+    if not hazard:
+        raise HTTPException(status_code=404, detail="Road hazard report not found")
+
+    existing_urls = []
+    if hazard.image_url:
+        try:
+            decoded = json.loads(hazard.image_url)
+        except (TypeError, json.JSONDecodeError):
+            decoded = hazard.image_url
+        existing_urls = decoded if isinstance(decoded, list) else [decoded]
+        existing_urls = [url for url in existing_urls if isinstance(url, str) and url.strip()]
+    if len(existing_urls) >= MAX_ROAD_HAZARD_IMAGES:
+        raise HTTPException(status_code=409, detail="A road hazard can have at most 5 photos")
+
+    storage_path = f"road_hazards/{hazard_id}/{uuid4().hex}{extension}"
+    supabase_url_parts = urlsplit(settings.SUPABASE_URL)
+    if supabase_url_parts.path.rstrip("/") == "/rest/v1":
+        supabase_url_parts = supabase_url_parts._replace(path="")
+    client = create_client(urlunsplit(supabase_url_parts), settings.SUPABASE_KEY)
+    try:
+        storage = client.storage.from_(ROAD_HAZARD_MEDIA_BUCKET)
+        await run_in_threadpool(lambda: storage.upload(
+            storage_path,
+            contents,
+            file_options={"content-type": content_type, "upsert": "false"},
+        ))
+        public_url_response = await run_in_threadpool(lambda: storage.get_public_url(storage_path))
+        public_url = public_url_response if isinstance(public_url_response, str) else (
+            public_url_response.get("publicUrl") or public_url_response.get("public_url")
+            if isinstance(public_url_response, dict) else None
+        )
+        if not public_url:
+            raise RuntimeError("Supabase Storage did not return a public URL")
+        urls = [*existing_urls, public_url]
+        serialized_urls = json.dumps(urls, separators=(",", ":"))
+        if len(serialized_urls) > 2048:
+            raise RuntimeError("Image URL list exceeds the database column limit")
+        hazard.image_url = serialized_urls
+        await session.commit()
+        await session.refresh(hazard)
+    except HTTPException:
+        raise
+    except Exception as error:
+        await session.rollback()
+        raise HTTPException(status_code=502, detail="Unable to upload road hazard image") from error
+    finally:
+        await file.close()
+
+    feature = road_hazard_feature(hazard)
+    await telemetry_manager.broadcast({"type": "road_hazard_updated", "data": feature})
+    return {"bucket": ROAD_HAZARD_MEDIA_BUCKET, "path": storage_path, "public_url": public_url, "image_url": hazard.image_url}
+
+
 def _require_dispatcher(credentials: dict) -> None:
     role = str(credentials.get("role", "")).lower().split(".")[-1]
     if role not in {"dispatcher", "admin"}:
@@ -111,6 +199,7 @@ async def pending_road_hazards(
 
 class RoadHazardReview(BaseModel):
     approved: bool
+    remarks: Optional[str] = Field(default=None, max_length=1000)
 
 
 @router.patch("/road-reports/{hazard_id}/review")
@@ -133,13 +222,17 @@ async def review_road_hazard(
     hazard.is_active = payload.approved
     hazard.reviewed_by = str(credentials.get("sub") or "dispatcher")
     hazard.reviewed_at = now
+    remarks = (payload.remarks or "").strip()
+    if not payload.approved and not remarks:
+        raise HTTPException(status_code=422, detail="Rejection remarks are required")
     if payload.approved:
         hazard.expires_at = calculate_road_hazard_expiration(hazard.hazard_type, now)
     record_audit_log(
         session,
         credentials,
         request,
-        f"Road hazard {hazard_id} {'approved' if payload.approved else 'rejected'}",
+        f"Road hazard {hazard_id} {'approved' if payload.approved else 'rejected'}"
+        + (f": {remarks}" if remarks else ""),
     )
     try:
         await session.commit()

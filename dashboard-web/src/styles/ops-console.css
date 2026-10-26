@@ -160,6 +160,39 @@
 .unit-panel-heading { position: relative; }.unit-panel-heading > .panel-title { padding-right: 88px; }.unit-panel-heading > select { position: absolute; top: 7px; right: 7px; max-width: 78px; border: 1px solid var(--ops-border); background: var(--ops-surface-2); color: var(--ops-muted); font: 7px var(--ops-mono); }.unit-list-label { padding: 7px 9px 3px; color: var(--ops-red); font: 7px var(--ops-mono); letter-spacing: .08em; }.unit-empty { margin: 8px 9px; color: var(--ops-muted); font: 8px var(--ops-mono); }.unit-status.in_transit { color: var(--ops-amber); }
 .alert-console { display: none !important; }.citizen-alert { margin-top: 10px; padding-top: 10px; padding-bottom: 10px; }.alert-console > p, .citizen-alert > * { margin-left: 10px; margin-right: 10px; }.alert-row { display: flex; align-items: center; gap: 12px; padding: 8px 10px; border-bottom: 1px solid var(--ops-border); font-size: 11px; }.alert-row span { flex: 1; color: var(--ops-muted); }.alert-row em { color: var(--ops-amber); font: 9px var(--ops-mono); }.alert-row select { background: var(--ops-surface-2); color: var(--ops-text); border: 1px solid var(--ops-border); padding: 4px; }.alert-row button { flex: 0 0 auto; }.citizen-alert h3 { margin: 0 10px 8px; font-size: 13px; }.citizen-alert textarea { display: block; width: min(100%, 500px); min-height: 60px; margin-bottom: 8px; padding: 8px; background: var(--ops-surface-2); color: var(--ops-text); border: 1px solid var(--ops-border); }.citizen-alert button { display: block; flex: none; width: 110px; }.citizen-alert small { display: block; margin-top: 7px; color: var(--ops-muted); }
 .modal-backdrop { position: fixed; inset: 0; z-index: 2000; display: grid; place-items: center; padding: 24px; background: rgba(3, 6, 12, .78); }.ops-modal { width: min(760px, 100%); max-height: min(720px, 90vh); overflow: auto; background: var(--ops-surface); border: 1px solid var(--ops-border); box-shadow: 0 24px 80px rgba(0, 0, 0, .45); }.modal-header { position: sticky; top: 0; display: flex; background: var(--ops-surface); border-bottom: 1px solid var(--ops-border); }.modal-header .panel-title { flex: 1; border-bottom: 0; }.modal-close { width: 42px; border: 0; border-left: 1px solid var(--ops-border); background: transparent; color: var(--ops-muted); font-size: 24px; cursor: pointer; }.modal-close:hover { color: var(--ops-red); }.modal-alert-list, .modal-unit-grid { padding: 12px; }.modal-alert { display: flex; align-items: center; gap: 12px; padding: 12px 8px; border-bottom: 1px solid var(--ops-border); }.modal-alert > div { flex: 1; }.modal-alert b, .modal-alert small { display: block; }.modal-alert small, .modal-unit small { margin-top: 4px; color: var(--ops-muted); font: 10px var(--ops-mono); }.modal-alert em, .modal-unit span { color: var(--ops-amber); font: 9px var(--ops-mono); }.modal-empty { padding: 24px; color: var(--ops-muted); font: 11px var(--ops-mono); }.modal-unit-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 22px; }.modal-unit-grid h3 { margin: 4px 0 8px; color: var(--ops-red); font: 10px var(--ops-mono); }.modal-unit { display: grid; grid-template-columns: 1fr auto; gap: 4px 10px; padding: 11px 8px; border-bottom: 1px solid var(--ops-border); font-size: 11px; }.modal-unit span { text-transform: uppercase; }.modal-unit small { grid-column: 1 / -1; }
+
+/* Shared modal motion: fade the scrim and lift the dialog into place. */
+@keyframes modal-backdrop-open {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@keyframes modal-panel-open {
+  from { opacity: 0; transform: translateY(12px) scale(.97); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+@keyframes modal-panel-close {
+  from { opacity: 1; transform: translateY(0) scale(1); }
+  to { opacity: 0; transform: translateY(8px) scale(.98); }
+}
+.modal-backdrop {
+  animation: modal-backdrop-open .2s ease-out both;
+}
+.modal-backdrop > .ops-modal {
+  transform-origin: center;
+  animation: modal-panel-open .22s cubic-bezier(.2, .8, .25, 1) both;
+  will-change: opacity, transform;
+}
+.modal-backdrop.is-closing {
+  animation: modal-backdrop-close .16s ease-in both;
+  pointer-events: none;
+}
+.modal-backdrop.is-closing > .ops-modal {
+  animation: modal-panel-close .16s ease-in both;
+}
+@keyframes modal-backdrop-close {
+  from { opacity: 1; }
+  to { opacity: 0; }
+}
 @media (max-width: 950px) { .ops-grid { grid-template-columns: 180px minmax(0, 1fr); }.right-rail { grid-column: 1 / -1; grid-template-columns: repeat(3, 1fr); }.operational { grid-column: 1 / -1; display: grid; grid-template-columns: repeat(3, 1fr); }.operational .panel-title { grid-column: 1 / -1; } }
 @media (max-width: 680px) {
   #root,
@@ -883,13 +916,43 @@
 }
 
 .alert-detail-backdrop { z-index: 2100; padding: 12px; }
-.modal-close { display: grid; min-height: 52px; place-items: center; font-size: 0; line-height: 1; }
+.modal-close {
+  position: relative;
+  display: grid;
+  flex: 0 0 52px;
+  width: 52px;
+  min-height: 52px;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  border-left: 1px solid var(--ops-border);
+  background: var(--ops-surface-2);
+  color: var(--ops-text);
+  font-size: 0;
+  line-height: 1;
+  cursor: pointer;
+  appearance: none;
+  transition: background-color .15s ease, color .15s ease;
+}
 .alert-detail-modal { display: flex; flex-direction: column; width: min(700px, 100%); max-height: min(820px, calc(100vh - 24px)); overflow: hidden; }
 .alert-detail-modal .modal-header { z-index: 1; flex: 0 0 auto; min-height: 52px; }
-.alert-detail-modal .modal-close { display: grid; flex: 0 0 52px; min-height: 52px; place-items: center; color: var(--ops-text); background: var(--ops-surface-2); font-size: 0; line-height: 1; }
-.modal-close::after { content: 'X'; display: block; font-size: 22px; font-weight: 600; line-height: 1; }
+.alert-detail-modal .modal-close { flex: 0 0 52px; }
+.modal-close::before,
+.modal-close::after {
+  position: absolute;
+  width: 22px;
+  height: 2px;
+  border-radius: 2px;
+  background: currentColor;
+  content: '';
+  pointer-events: none;
+  transition: transform .15s ease;
+}
+.modal-close::before { transform: rotate(45deg); }
+.modal-close::after { transform: rotate(-45deg); }
 .modal-close svg { display: block; pointer-events: none; }
-.alert-detail-modal .modal-close:hover, .alert-detail-modal .modal-close:focus-visible { background: var(--ops-red); color: #fff; }
+.modal-close:hover, .modal-close:focus-visible { background: var(--ops-red); color: #fff; }
+.modal-close:focus-visible { outline: 2px solid var(--ops-red); outline-offset: 2px; }
 .alert-detail-content { display: grid; gap: 16px; min-height: 0; overflow-y: auto; padding: 18px; }
 .alert-detail-heading { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .alert-detail-heading h2 { flex: 1; min-width: 180px; color: var(--ops-text); font-size: 18px; font-weight: 700; text-transform: uppercase; }
@@ -921,6 +984,39 @@
 .alert-detail-assign-button:hover, .alert-detail-assign-button:focus-visible { background: color-mix(in srgb, var(--ops-red) 82%, #000); outline: 2px solid var(--ops-red); outline-offset: 2px; }
 .sos-item[role='button'] { cursor: pointer; }
 .sos-item[role='button']:focus-visible { outline: 2px solid var(--ops-red); outline-offset: -2px; }
+.road-hazard-review-panel { min-width: 0; padding: 10px; border: 1px solid var(--ops-border); background: var(--ops-surface); }
+.map-panel > .road-hazard-selected-report { display: none; }
+.road-hazard-review-panel > .panel-title { margin: -10px -10px 10px; }
+.road-hazard-review-empty { margin: 10px 0 0; color: var(--ops-muted); font: 11px var(--ops-mono); }
+.road-hazard-review-pagination { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 8px; color: var(--ops-muted); font: 10px var(--ops-mono); }
+.road-hazard-review-pagination button { padding: 5px 8px; border: 1px solid var(--ops-border); background: var(--ops-surface-2); color: var(--ops-text); font: inherit; cursor: pointer; }
+.road-hazard-review-pagination button:hover:not(:disabled), .road-hazard-review-pagination button:focus-visible { border-color: var(--ops-red); color: var(--ops-red); }
+.road-hazard-review-pagination button:disabled { cursor: not-allowed; opacity: .45; }
+.road-hazard-review-panel .road-hazard-review-queue { max-height: 260px; }
+.road-hazard-review-item > div { display: flex; gap: 8px; width: 100%; }
+.road-hazard-review-item > div button { flex: 1 1 0; min-width: 0; }
+.road-hazard-rejection-backdrop { z-index: 2300; }
+.road-hazard-rejection-modal { width: min(520px, 100%); }
+.road-hazard-rejection-form { display: grid; gap: 10px; padding: 16px; }
+.road-hazard-rejection-form h2 { color: var(--ops-text); font-size: 16px; }
+.road-hazard-rejection-form p { margin: 0; color: var(--ops-muted); font-size: 12px; }
+.road-hazard-rejection-form label { color: var(--ops-muted); font: 10px var(--ops-mono); text-transform: uppercase; }
+.road-hazard-rejection-form textarea { width: 100%; min-height: 120px; resize: vertical; padding: 10px; border: 1px solid var(--ops-border); background: var(--ops-surface-2); color: var(--ops-text); font: 12px var(--ops-font); }
+.road-hazard-rejection-form textarea:focus { border-color: var(--ops-red); outline: 2px solid color-mix(in srgb, var(--ops-red) 35%, transparent); }
+.road-hazard-rejection-actions { display: flex; gap: 8px; justify-content: flex-end; }
+.road-hazard-rejection-actions button { min-width: 120px; padding: 10px 14px; border: 1px solid var(--ops-border); background: var(--ops-surface-2); color: var(--ops-text); cursor: pointer; }
+.road-hazard-rejection-actions button[type='submit'] { border-color: var(--ops-red); background: var(--ops-red); color: #fff; font-weight: 700; }
+.road-hazard-rejection-actions button:disabled { cursor: not-allowed; opacity: .55; }
+.road-hazard-detail-backdrop { z-index: 2150; }
+.road-hazard-detail-modal { width: min(700px, 100%); max-height: min(760px, calc(100vh - 24px)); overflow: hidden; }
+.road-hazard-detail-content { display: grid; gap: 16px; overflow-y: auto; padding: 18px; }
+.road-hazard-detail-content h2 { color: var(--ops-text); font-size: 18px; text-transform: uppercase; }
+.road-hazard-detail-content dl { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin: 0; }
+.road-hazard-detail-content dl > div { min-width: 0; padding-top: 8px; border-top: 1px solid var(--ops-border); }
+.road-hazard-detail-content dt { color: var(--ops-muted); font: 9px var(--ops-mono); text-transform: uppercase; }
+.road-hazard-detail-content dd { margin-top: 4px; color: var(--ops-text); font-size: 12px; overflow-wrap: anywhere; }
+.road-hazard-detail-description { grid-column: 1 / -1; }
+.road-hazard-detail-content .road-hazard-review-images { grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); }
 
 @media (max-width: 560px) {
   .alert-detail-backdrop { padding: 0; align-items: stretch; }
