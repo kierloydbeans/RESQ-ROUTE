@@ -7,7 +7,7 @@ import MapContainer from '../components/MapContainer'
 import RoadHazardReportForm from '../components/RoadHazardReportForm'
 import { parseImageUrls } from '../components/CenterImageManager'
 import Logo from '../components/Logo'
-import { Accessibility, CheckCircle2, ChevronDown, CircleHelp, Clock3, Construction, LockKeyhole, Menu, QrCode, UploadCloud } from 'lucide-react'
+import { Accessibility, CheckCircle2, ChevronDown, CircleHelp, Clock3, Construction, LockKeyhole, MapPin, Menu, QrCode, UploadCloud } from 'lucide-react'
 import QRCode from 'qrcode'
 import 'maplibre-gl/dist/maplibre-gl.css'
 import "../styles/citizen-console.css";
@@ -867,6 +867,40 @@ export const CitizenDashboard = ({ auth, onLogout }) => {
     setActiveTab('road-hazard')
   }
 
+  const handleVoiceCommandAction = (action, context = {}) => {
+    const location = context.currentLocation || pinnedLocation || latestGps
+    if (action === 'FETCH_NEAREST_ROUTE') {
+      const hasLocation = Number.isFinite(Number(location?.latitude))
+        && Number.isFinite(Number(location?.longitude))
+      if (!hasLocation) {
+        setRouteError('Location is unavailable. Allow location access or tap the map to set a starting point.')
+        return
+      }
+      const nearestCenter = centers
+        .filter((center) => isCenterAvailable(center))
+        .sort((first, second) => getDistanceKm(location?.latitude, location?.longitude, first)
+          - getDistanceKm(location?.latitude, location?.longitude, second))[0]
+      if (!nearestCenter) {
+        setRouteError('No verified evacuation center is currently available for voice routing.')
+        return
+      }
+      handleSelectCenter(nearestCenter)
+      void handleRouteToCenter(nearestCenter)
+      return
+    }
+
+    if (action === 'OPEN_EMERGENCY_CAMERA') {
+      handleOpenEmergencyReport()
+      window.setTimeout(() => cameraInputRef.current?.click(), 0)
+      return
+    }
+
+    if (action === 'OPEN_ROAD_HAZARD_REPORT') {
+      if (location) setPinnedLocation(location)
+      handleOpenRoadHazardReport()
+    }
+  }
+
   const handleShare = async (center) => {
     const capacity = getVerifiedCapacity(center)
     const status = center.is_active === false
@@ -1202,6 +1236,8 @@ export const CitizenDashboard = ({ auth, onLogout }) => {
           highlightMarkerId={selectedCenter?.id ?? null}
           pinnedLocation={pinnedLocation}
           onMapClick={handleMapClick}
+          voiceLocation={pinnedLocation || latestGps}
+          onVoiceCommandAction={handleVoiceCommandAction}
         />
         <div className="citizen-map-legend" aria-label="Map marker legend">
           <span className="citizen-map-legend-title">Map key</span>
@@ -1684,7 +1720,10 @@ export const CitizenDashboard = ({ auth, onLogout }) => {
 
               {pinnedLocation && (
                 <div className="pinned-location-banner">
-                  <span>📍 Pin set: {getReadablePinnedLocation(pinnedLocation, centers)}</span>
+                  <span className="pinned-location-label">
+                    <MapPin size={16} strokeWidth={2.2} aria-hidden="true" />
+                    <span>Pin set: {getReadablePinnedLocation(pinnedLocation, centers)}</span>
+                  </span>
                   <button
                     type="button"
                     className="pinned-location-clear-btn"

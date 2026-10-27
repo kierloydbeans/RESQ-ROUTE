@@ -87,3 +87,24 @@
 [data-theme='light'] .road-hazard-review-item button { color: #152033; background: #fff; }
 .road-hazard-report-form input.is-loading { background-image: linear-gradient(90deg, transparent 20%, rgba(255,255,255,.12) 50%, transparent 80%); background-size: 220% 100%; animation: road-hazard-field-shimmer 1.15s ease-in-out infinite; }
 @keyframes road-hazard-field-shimmer { from { background-position: 100% 0; } to { background-position: -100% 0; } }
+
+[data-theme='dark'] .road-hazard-report-form { color: #e2e8f0; background: #111827; border-color: #334155; }
+[data-theme='dark'] .road-hazard-report-form input,
+[data-theme='dark'] .road-hazard-report-form textarea { color: #e2e8f0; background: #1e293b; border-color: #475569; }
+[data-theme='dark'] .road-hazard-report-form input::placeholder,
+[data-theme='dark'] .road-hazard-report-form textarea::placeholder { color: #94a3b8; }
+[data-theme='dark'] .road-hazard-report-form input:focus,
+[data-theme='dark'] .road-hazard-report-form textarea:focus { border-color: #60a5fa; outline-color: rgba(96, 165, 250, .25); }
+[data-theme='dark'] .road-hazard-type-grid .road-hazard-expiry { color: #94a3b8 !important; }
+[data-theme='dark'] .road-hazard-type-pill.flood.active { background: #082f49; border-color: #38bdf8; }
+[data-theme='dark'] .road-hazard-type-pill.debris.active { background: #451a03; border-color: #f59e0b; }
+[data-theme='dark'] .road-hazard-type-pill.fire.active { background: #450a0a; border-color: #ef4444; }
+[data-theme='dark'] .road-hazard-type-pill.landslide.active,
+[data-theme='dark'] .road-hazard-type-pill.collapsed_road.active { background: #431407; border-color: #f97316; }
+[data-theme='dark'] .road-hazard-type-pill.downed_power_line.active { background: #2e1065; border-color: #8b5cf6; }
+[data-theme='dark'] .road-hazard-type-pill.other.active { background: #1e293b; border-color: #64748b; }
+[data-theme='dark'] .road-hazard-attachment-actions button,
+[data-theme='dark'] .road-hazard-media-selection button,
+[data-theme='dark'] .road-hazard-camera-actions button { color: #e2e8f0; background: #1e293b; border-color: #475569; }
+[data-theme='dark'] .road-hazard-media-selection,
+[data-theme='dark'] .road-hazard-camera-panel { border-color: #334155; background: #0f172a; }

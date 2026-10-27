@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from 'react'
 import * as maplibregl from 'maplibre-gl'
 import maplibreWorkerUrl from 'maplibre-gl/dist/maplibre-gl-worker.mjs?url'
 import { LocateFixed } from 'lucide-react'
+import VoiceCommandButton from './VoiceCommandButton'
 import 'maplibre-gl/dist/maplibre-gl.css'
 
 const DEFAULT_LOCATION = [120.98, 14.65]
@@ -261,6 +262,8 @@ const MapContainer = ({
   pinnedLocation = null, 
   onMapClick,
   onMarkerClick,
+  onVoiceCommandAction,
+  voiceLocation = null,
   trackDeviceLocation = true 
 }) => {
   const mapContainerRef = useRef(null)
@@ -929,6 +932,7 @@ const MapContainer = ({
           <LocateFixed size={19} aria-hidden="true" />
           <span>{isLocating ? 'Locating…' : 'My location'}</span>
         </button>
+        <VoiceCommandButton currentLocation={voiceLocation} onAction={onVoiceCommandAction} />
       </div>
       <div className="map-source-credit" aria-label="Hazard data attribution">
         Hazard data: <a href={NOAH_DATASET_URL} target="_blank" rel="noreferrer" title="University of the Philippines Nationwide Operational Assessment of Hazards">UP NOAH</a>
