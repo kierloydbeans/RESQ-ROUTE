@@ -2,8 +2,24 @@
 .road-hazard-report-form label:not(.report-section-label) { display: grid; gap: 4px; font-size: 12px; font-weight: 600; }
 .road-hazard-report-form input, .road-hazard-report-form textarea { width: 100%; min-width: 0; padding: 9px; color: #202124; background: #f8fafc; border: 1px solid #cbd5e1; border-radius: 7px; font: inherit; }
 .road-hazard-report-form input:focus, .road-hazard-report-form textarea:focus { border-color: #1a73e8; outline: 2px solid rgba(26, 115, 232, .14); }
-.road-hazard-type-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
-.road-hazard-type-grid .report-type-pill { min-height: 68px; }
+.report-type-grid.road-hazard-type-grid { display: flex; flex-wrap: wrap; gap: 8px; }
+.road-hazard-type-grid .road-hazard-type-pill {
+  flex: 1 1 calc(25% - 6px);
+  min-width: calc(25% - 6px);
+  min-height: 82px;
+  gap: 4px;
+  padding: 8px 5px;
+}
+.road-hazard-type-grid .road-hazard-type-label { font-size: 12px; font-weight: 650; line-height: 1.15; text-align: center; }
+.road-hazard-type-grid .road-hazard-expiry {
+  max-width: 100%;
+  color: #64748b !important;
+  font-size: 9px;
+  font-weight: 550;
+  line-height: 1.15;
+  text-align: center;
+  overflow-wrap: anywhere;
+}
 .road-hazard-type-pill.flood { color: #1683b8; }
 .road-hazard-type-pill.debris { color: #a16207; }
 .road-hazard-type-pill.fire { color: #dc2626; }

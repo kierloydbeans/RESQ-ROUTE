@@ -7,7 +7,7 @@ import MapContainer from '../components/MapContainer'
 import RoadHazardReportForm from '../components/RoadHazardReportForm'
 import { parseImageUrls } from '../components/CenterImageManager'
 import Logo from '../components/Logo'
-import { Accessibility, CheckCircle2, CircleHelp, Clock3, Construction, LockKeyhole, Menu, QrCode, UploadCloud } from 'lucide-react'
+import { Accessibility, CheckCircle2, ChevronDown, CircleHelp, Clock3, Construction, LockKeyhole, Menu, QrCode, UploadCloud } from 'lucide-react'
 import QRCode from 'qrcode'
 import 'maplibre-gl/dist/maplibre-gl.css'
 import "../styles/citizen-console.css";
@@ -306,6 +306,8 @@ export const CitizenDashboard = ({ auth, onLogout }) => {
   const [centersLastFetchedAt, setCentersLastFetchedAt] = useState(null)
   const [centerLoadError, setCenterLoadError] = useState('')
   const [publishedHazardLayers, setPublishedHazardLayers] = useState([])
+  const [noahHazardFilter, setNoahHazardFilter] = useState('hide')
+  const [isNoahFilterOpen, setIsNoahFilterOpen] = useState(false)
   const [selectedCenter, setSelectedCenter] = useState(null)
   const [detailSheetState, setDetailSheetState] = useState('partial')
   const sheetDragStartYRef = useRef(null)
@@ -323,6 +325,10 @@ export const CitizenDashboard = ({ auth, onLogout }) => {
   const [routeError, setRouteError] = useState('')
 
   const selectedRoute = routeOptions.find((route) => route.id === selectedRouteId) || null
+  const visiblePublishedHazardLayers = noahHazardFilter === 'hide'
+    ? []
+    : publishedHazardLayers.filter((layer) => noahHazardFilter === 'all'
+      || String(layer.hazard_level || '').toLowerCase() === noahHazardFilter)
 
   const clearRouteState = () => {
     setEvacuationRoute(null)
@@ -372,7 +378,6 @@ export const CitizenDashboard = ({ auth, onLogout }) => {
   const sharedCenterHandledRef = useRef(null)
 
   const [pinnedLocation, setPinnedLocation] = useState(null)
-  const [showNoahHazards, setShowNoahHazards] = useState(true)
   const [showRoadHazards, setShowRoadHazards] = useState(true)
 
   const [selectedIncident, setSelectedIncident] = useState('flood')
@@ -1182,7 +1187,7 @@ export const CitizenDashboard = ({ auth, onLogout }) => {
       {/* 1. Background Map */}
       <div className={`citizen-map-canvas ${activeTab === 'shelters' && isShelterPanelCollapsed ? 'panel-collapsed' : ''}`}>
         <MapContainer
-          hazardLayers={showNoahHazards ? publishedHazardLayers : []}
+          hazardLayers={visiblePublishedHazardLayers}
           roadHazardZones={showRoadHazards ? roadHazardZones : { type: 'FeatureCollection', features: [] }}
           markers={[...centerMarkers, ...(showRoadHazards ? hazardMarkers : [])]}
           onMarkerClick={(marker) => {
@@ -1207,16 +1212,40 @@ export const CitizenDashboard = ({ auth, onLogout }) => {
           <span><i className="legend-selected" aria-hidden="true" /> Selected</span>
         </div>
         <div className="citizen-map-layer-controls" role="group" aria-label="Map layers">
-          <button
-            type="button"
-            className={`citizen-map-layer-button${showNoahHazards ? ' active' : ''}`}
-            aria-pressed={showNoahHazards}
-            onClick={() => setShowNoahHazards((visible) => !visible)}
-            title={`${showNoahHazards ? 'Hide' : 'Show'} UP NOAH disaster hazards`}
-          >
-            <span className="layer-swatch noah" aria-hidden="true" />
-            {showNoahHazards ? 'Hide' : 'Show'} UP NOAH Disaster Hazards
-          </button>
+          <div className={`citizen-noah-filter${isNoahFilterOpen ? ' is-open' : ''}`} role="group" aria-label="Filter UP NOAH disaster hazards">
+            <button
+              type="button"
+              className="citizen-noah-filter-toggle"
+              aria-expanded={isNoahFilterOpen}
+              onClick={() => setIsNoahFilterOpen((open) => !open)}
+              title={`${isNoahFilterOpen ? 'Collapse' : 'Expand'} UP NOAH hazard filters`}
+            >
+              <span className="citizen-noah-filter-label"><span className="layer-swatch noah" aria-hidden="true" />UP NOAH</span>
+              <span className="citizen-noah-filter-current">{noahHazardFilter === 'hide' ? 'Hidden' : noahHazardFilter === 'all' ? 'All' : noahHazardFilter}</span>
+              <span className="citizen-noah-filter-chevron" aria-hidden="true"><ChevronDown size={13} strokeWidth={2.5} /></span>
+            </button>
+            {isNoahFilterOpen && (
+              <div className="citizen-noah-filter-options">
+                {[
+                  ['all', 'All'],
+                  ['high', 'High'],
+                  ['medium', 'Medium'],
+                  ['hide', 'Hide all'],
+                ].map(([value, label]) => (
+                  <button
+                    key={value}
+                    type="button"
+                    className={`citizen-map-layer-button citizen-noah-filter-button${noahHazardFilter === value ? ' active' : ''}`}
+                    aria-pressed={noahHazardFilter === value}
+                    onClick={() => setNoahHazardFilter(value)}
+                    title={`${label} UP NOAH disaster hazards`}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
           <button
             type="button"
             className={`citizen-map-layer-button${showRoadHazards ? ' active' : ''}`}
@@ -1241,6 +1270,10 @@ export const CitizenDashboard = ({ auth, onLogout }) => {
       >
         <a className="citizen-map-brand" href="/" aria-label="RESQ-ROUTE home">
           <img src="/resq_logo.png" alt="RESQ-ROUTE" />
+          <span className="citizen-map-brand-copy">
+            <strong>RESQ-ROUTE</strong>
+            <span>Citizen Module</span>
+          </span>
         </a>
         <div className="citizen-top-bar">
           <div className="citizen-chip-row">

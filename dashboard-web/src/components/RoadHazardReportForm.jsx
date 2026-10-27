@@ -4,13 +4,13 @@ import { AlertTriangle, Camera, CircleHelp, Construction, Flame, Mountain, Uploa
 import '../styles/road-hazard-report.css'
 
 const HAZARD_TYPES = [
-  { value: 'flood', label: 'Flood', Icon: Waves },
-  { value: 'debris', label: 'Debris', Icon: Construction },
-  { value: 'fire', label: 'Fire', Icon: Flame },
-  { value: 'landslide', label: 'Landslide', Icon: Mountain },
-  { value: 'collapsed_road', label: 'Collapsed road', Icon: Construction },
-  { value: 'downed_power_line', label: 'Downed power line', Icon: Zap },
-  { value: 'other', label: 'Other', Icon: CircleHelp },
+  { value: 'flood', label: 'Flood', expiresHours: 6, Icon: Waves },
+  { value: 'debris', label: 'Debris', expiresHours: 24, Icon: Construction },
+  { value: 'fire', label: 'Fire', expiresHours: 6, Icon: Flame },
+  { value: 'landslide', label: 'Landslide', expiresHours: 72, Icon: Mountain },
+  { value: 'collapsed_road', label: 'Collapsed road', expiresHours: 168, Icon: Construction },
+  { value: 'downed_power_line', label: 'Downed power line', expiresHours: 168, Icon: Zap },
+  { value: 'other', label: 'Other', expiresHours: 24, Icon: CircleHelp },
 ]
 
 const ROAD_LOOKUP_CACHE_KEY = 'resq-nominatim-reverse-geocode-v1'
@@ -251,7 +251,7 @@ export default function RoadHazardReportForm({ initialLocation, reporterName = '
 
       <label className="report-section-label">Hazard type</label>
       <div className="report-type-grid road-hazard-type-grid" role="group" aria-label="Choose hazard type">
-        {HAZARD_TYPES.map(({ value, label, Icon }) => (
+        {HAZARD_TYPES.map(({ value, label, expiresHours, Icon }) => (
           <button
             key={value}
             type="button"
@@ -260,7 +260,8 @@ export default function RoadHazardReportForm({ initialLocation, reporterName = '
             aria-pressed={form.hazard_type === value}
           >
             <Icon size={18} aria-hidden="true" />
-            <span>{label}</span>
+            <span className="road-hazard-type-label">{label}</span>
+            <span className="road-hazard-expiry">Expires in {expiresHours} hours upon approval</span>
           </button>
         ))}
       </div>
