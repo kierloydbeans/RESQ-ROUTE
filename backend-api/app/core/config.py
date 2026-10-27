@@ -34,6 +34,7 @@ class Settings(BaseSettings):
     GRAPHHOPPER_URL: str = "https://graphhopper.com/api/1"
     GRAPHHOPPER_API_KEY: str = ""
     GROQ_API_KEY: Optional[str] = None
+    GROQ_VISION_MODEL: Optional[str] = None
     # Override when Groq retires or replaces a model. The fallback service
     # supplies the current production default when this is unset.
     GROQ_MODEL: Optional[str] = None

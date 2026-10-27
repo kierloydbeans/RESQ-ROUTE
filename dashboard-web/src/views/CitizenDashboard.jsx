@@ -7,7 +7,7 @@ import MapContainer from '../components/MapContainer'
 import RoadHazardReportForm from '../components/RoadHazardReportForm'
 import { parseImageUrls } from '../components/CenterImageManager'
 import Logo from '../components/Logo'
-import { Accessibility, CheckCircle2, ChevronDown, CircleHelp, Clock3, Construction, LockKeyhole, MapPin, Menu, QrCode, UploadCloud } from 'lucide-react'
+import { Accessibility, CheckCircle2, ChevronDown, CircleHelp, Clock3, Construction, LockKeyhole, MapPin, Menu, QrCode, ScanSearch, UploadCloud } from 'lucide-react'
 import QRCode from 'qrcode'
 import 'maplibre-gl/dist/maplibre-gl.css'
 import "../styles/citizen-console.css";
@@ -389,6 +389,8 @@ export const CitizenDashboard = ({ auth, onLogout }) => {
   const [pendingMediaUploadToken, setPendingMediaUploadToken] = useState(null)
   const [isSubmittingAlert, setIsSubmittingAlert] = useState(false)
   const [isUploadingMedia, setIsUploadingMedia] = useState(false)
+  const [isAnalyzingAlertImage, setIsAnalyzingAlertImage] = useState(false)
+  const [alertAnalysisResult, setAlertAnalysisResult] = useState(null)
   const mediaInputRef = useRef(null)
   const cameraInputRef = useRef(null)
   const selectedPhotoCount = attachmentFiles.filter((file) => file.type.startsWith('image/')).length
@@ -1030,6 +1032,38 @@ export const CitizenDashboard = ({ auth, onLogout }) => {
     }
   }
 
+  const analyzeAlertImage = async (file) => {
+    setIsAnalyzingAlertImage(true)
+    setAlertAnalysisResult(null)
+    setAlertStatus(`Analyzing ${file.name}...`)
+    try {
+      const formData = new FormData()
+      formData.append('file', file)
+      const response = await fetch(`${API_BASE_URL}/api/v1/auth/alerts/analyze-image`, {
+        method: 'POST',
+        body: formData,
+      })
+      const analysis = await response.json().catch(() => ({}))
+      if (!response.ok) throw new Error(analysis.detail || 'Image analysis failed.')
+
+      setAlertAnalysisResult(analysis)
+      if (analysis.analyzed) {
+        setSelectedIncident(analysis.incident_type || 'trapped')
+        setSelectedSeverity(String(analysis.severity || 'high').toLowerCase())
+        setPeopleAffected(Number.isFinite(Number(analysis.people_affected)) ? Number(analysis.people_affected) : 0)
+        setAlertMessage(analysis.details || '')
+        setAlertStatus('Image analyzed: incident fields updated.')
+      } else {
+        setAlertStatus('Image selected. Please review and complete the incident details manually.')
+      }
+    } catch {
+      setAlertAnalysisResult({ analyzed: false })
+      setAlertStatus(`${file.name} selected. Manual incident details are still available.`)
+    } finally {
+      setIsAnalyzingAlertImage(false)
+    }
+  }
+
   const handleMediaSelection = (event) => {
     const selectedFiles = Array.from(event.target.files || [])
     event.target.value = ''
@@ -1054,8 +1088,17 @@ export const CitizenDashboard = ({ auth, onLogout }) => {
         if (file.type.startsWith('video/')) videoCount += 1
       }
     }
-    if (acceptedFiles.length > 0) setAttachmentFiles((currentFiles) => [...currentFiles, ...acceptedFiles])
-    setAlertStatus(rejectedFiles[0] || `${imageCount} photo${imageCount === 1 ? '' : 's'} and ${videoCount} video${videoCount === 1 ? '' : 's'} selected.`)
+    if (acceptedFiles.length > 0) {
+      setAttachmentFiles((currentFiles) => [...currentFiles, ...acceptedFiles])
+      const firstImage = acceptedFiles.find((file) => file.type.startsWith('image/'))
+      if (firstImage) {
+        void analyzeAlertImage(firstImage)
+      } else {
+        setAlertStatus(`${imageCount} photo${imageCount === 1 ? '' : 's'} and ${videoCount} video${videoCount === 1 ? '' : 's'} selected.`)
+      }
+    } else {
+      setAlertStatus(rejectedFiles[0] || `${imageCount} photo${imageCount === 1 ? '' : 's'} and ${videoCount} video${videoCount === 1 ? '' : 's'} selected.`)
+    }
   }
 
   const handleSendEmergencyAlert = async () => {
@@ -1820,7 +1863,7 @@ export const CitizenDashboard = ({ auth, onLogout }) => {
                   type="button"
                   className="report-attach-btn"
                   onClick={() => mediaInputRef.current?.click()}
-                  disabled={isSubmittingAlert || isUploadingMedia || Boolean(pendingMediaAlertId)}
+                  disabled={isSubmittingAlert || isUploadingMedia || isAnalyzingAlertImage || Boolean(pendingMediaAlertId)}
                 >
                   <UploadCloud size={18} />
                   <span>Upload files</span>
@@ -1829,7 +1872,7 @@ export const CitizenDashboard = ({ auth, onLogout }) => {
                   type="button"
                   className="report-attach-btn"
                   onClick={() => cameraInputRef.current?.click()}
-                  disabled={isSubmittingAlert || isUploadingMedia || Boolean(pendingMediaAlertId) || selectedPhotoCount >= 5}
+                  disabled={isSubmittingAlert || isUploadingMedia || isAnalyzingAlertImage || Boolean(pendingMediaAlertId) || selectedPhotoCount >= 5}
                 >
                   <Icons.Camera />
                   <span>Open camera</span>
@@ -1848,12 +1891,33 @@ export const CitizenDashboard = ({ auth, onLogout }) => {
                   ))}
                 </div>
               )}
+              {alertAnalysisResult && (
+                <section className={`report-analysis-result${alertAnalysisResult.analyzed ? '' : ' is-fallback'}`} aria-live="polite">
+                  <div className="report-analysis-heading">
+                    <ScanSearch size={17} aria-hidden="true" />
+                    <strong>{alertAnalysisResult.analyzed ? 'Image analysis result' : 'Manual review needed'}</strong>
+                  </div>
+                  {alertAnalysisResult.analyzed ? (
+                    <>
+                      <h3>{alertAnalysisResult.suggested_title}</h3>
+                      <dl>
+                        <div><dt>Incident</dt><dd>{alertAnalysisResult.incident_type}</dd></div>
+                        <div><dt>Severity</dt><dd>{alertAnalysisResult.severity}</dd></div>
+                        <div><dt>People affected</dt><dd>{alertAnalysisResult.people_affected}</dd></div>
+                      </dl>
+                      <p>{alertAnalysisResult.suggested_description}</p>
+                    </>
+                  ) : (
+                    <p>The image is attached, but automatic analysis was unavailable. Review the incident details manually before sending.</p>
+                  )}
+                </section>
+              )}
 
               <button
                 type="button"
                 className="report-sos-submit"
                 onClick={handleSendEmergencyAlert}
-                disabled={isSubmittingAlert || isUploadingMedia}
+                disabled={isSubmittingAlert || isUploadingMedia || isAnalyzingAlertImage}
               >
                 <Icons.Alert />
                 <span>{isSubmittingAlert ? 'Sending SOS...' : isUploadingMedia ? 'Uploading media...' : pendingMediaAlertId ? 'Retry media upload' : 'Send emergency SOS'}</span>
@@ -1868,7 +1932,7 @@ export const CitizenDashboard = ({ auth, onLogout }) => {
 
               <div className="report-status-section">
                 <span className="report-status-heading">Status & activity</span>
-                <div className={`report-status-feed${isUploadingMedia ? ' is-busy' : ''}`}>
+                <div className={`report-status-feed${isUploadingMedia || isAnalyzingAlertImage ? ' is-busy' : ''}`}>
                   <span className="report-status-dot" />
                   <span>{alertStatus || 'Ready · Tap map to drop location pin'}</span>
                 </div>

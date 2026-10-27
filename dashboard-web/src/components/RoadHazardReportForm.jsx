@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { BASE_URL } from '../dataProvider'
-import { AlertTriangle, Camera, CircleHelp, Construction, Flame, Mountain, UploadCloud, Waves, Zap } from 'lucide-react'
+import { AlertTriangle, Camera, CircleHelp, Construction, Flame, Mountain, ScanSearch, UploadCloud, Waves, Zap } from 'lucide-react'
 import '../styles/road-hazard-report.css'
 
 const HAZARD_TYPES = [
@@ -81,6 +81,8 @@ export default function RoadHazardReportForm({ initialLocation, reporterName = '
   const [roadLookupLoading, setRoadLookupLoading] = useState(false)
   const [attachmentFiles, setAttachmentFiles] = useState([])
   const [mediaUploading, setMediaUploading] = useState(false)
+  const [imageAnalyzing, setImageAnalyzing] = useState(false)
+  const [analysisResult, setAnalysisResult] = useState(null)
   const [cameraOpen, setCameraOpen] = useState(false)
   const [cameraError, setCameraError] = useState('')
   const mediaInputRef = useRef(null)
@@ -147,6 +149,50 @@ export default function RoadHazardReportForm({ initialLocation, reporterName = '
 
   const update = (event) => setForm((current) => ({ ...current, [event.target.name]: event.target.value }))
 
+  const analyzeImage = async (file) => {
+    setImageAnalyzing(true)
+    setAnalysisResult(null)
+    setStatus(`Analyzing ${file.name}...`)
+    try {
+      const payload = new FormData()
+      payload.append('file', file)
+      const response = await fetch(`${BASE_URL}/api/v1/hazards/analyze-image`, {
+        method: 'POST',
+        body: payload,
+      })
+      const analysis = await response.json().catch(() => ({}))
+      if (!response.ok) throw new Error(analysis.detail || 'Image analysis failed.')
+      setAnalysisResult(analysis)
+
+      const hazardTypeMap = {
+        Flood: 'flood',
+        'Downed Power Line': 'downed_power_line',
+        Fire: 'fire',
+        Landslide: 'landslide',
+        'Road Obstruction': 'collapsed_road',
+        'Structural Collapse': 'collapsed_road',
+        'Fallen Tree': 'other',
+        'General Emergency': 'other',
+      }
+      if (analysis.analyzed) {
+        setForm((current) => ({
+          ...current,
+          hazard_type: hazardTypeMap[analysis.hazard_type] || current.hazard_type,
+          severity: String(analysis.severity || current.severity).toLowerCase(),
+          description: analysis.suggested_description || current.description,
+        }))
+        setStatus(`Image analyzed: ${analysis.suggested_title}`)
+      } else {
+        setStatus('Image selected. Please review and complete the hazard details manually.')
+      }
+    } catch {
+      setAnalysisResult({ analyzed: false })
+      setStatus(`${file.name} selected. Manual hazard details are still available.`)
+    } finally {
+      setImageAnalyzing(false)
+    }
+  }
+
   const handleMediaSelection = (event) => {
     const selectedFiles = Array.from(event.target.files || [])
     event.target.value = ''
@@ -162,8 +208,12 @@ export default function RoadHazardReportForm({ initialLocation, reporterName = '
         imageCount += 1
       }
     }
-    if (acceptedFiles.length) setAttachmentFiles((current) => [...current, ...acceptedFiles])
-    setStatus(rejectedFiles[0] || `${imageCount} photo${imageCount === 1 ? '' : 's'} selected.`)
+    if (acceptedFiles.length) {
+      setAttachmentFiles((current) => [...current, ...acceptedFiles])
+      void analyzeImage(acceptedFiles[0])
+    } else {
+      setStatus(rejectedFiles[0] || `${imageCount} photo${imageCount === 1 ? '' : 's'} selected.`)
+    }
   }
 
   const openCamera = () => {
@@ -182,6 +232,7 @@ export default function RoadHazardReportForm({ initialLocation, reporterName = '
       if (!blob) return
       const file = new File([blob], `road-hazard-${Date.now()}.jpg`, { type: 'image/jpeg' })
       setAttachmentFiles((current) => current.length >= 5 ? current : [...current, file])
+      void analyzeImage(file)
       setCameraOpen(false)
     }, 'image/jpeg', 0.9)
   }
@@ -303,11 +354,11 @@ export default function RoadHazardReportForm({ initialLocation, reporterName = '
       <label>Reporter name<input name="reporter_name" value={form.reporter_name} readOnly aria-readonly="true" placeholder="Optional" /></label>
       <input ref={mediaInputRef} className="report-media-input" type="file" accept="image/*" multiple onChange={handleMediaSelection} aria-label="Upload road hazard photos" />
       <div className="report-attachment-actions">
-        <button type="button" className="report-attach-btn" onClick={() => mediaInputRef.current?.click()} disabled={submitting || mediaUploading}>
+        <button type="button" className="report-attach-btn" onClick={() => mediaInputRef.current?.click()} disabled={submitting || mediaUploading || imageAnalyzing}>
           <UploadCloud size={18} />
           <span>Upload files</span>
         </button>
-        <button type="button" className="report-attach-btn" onClick={openCamera} disabled={submitting || mediaUploading || attachmentFiles.length >= 5}>
+        <button type="button" className="report-attach-btn" onClick={openCamera} disabled={submitting || mediaUploading || imageAnalyzing || attachmentFiles.length >= 5}>
           <Camera size={18} />
           <span>Open camera</span>
         </button>
@@ -323,6 +374,28 @@ export default function RoadHazardReportForm({ initialLocation, reporterName = '
           ))}
         </div>
       )}
+      {analysisResult && (
+        <section className={`road-hazard-analysis-result${analysisResult.analyzed ? '' : ' is-fallback'}`} aria-live="polite">
+          <div className="road-hazard-analysis-heading">
+            <ScanSearch size={17} aria-hidden="true" />
+            <strong>{analysisResult.analyzed ? 'Image analysis result' : 'Manual review needed'}</strong>
+          </div>
+          {analysisResult.analyzed ? (
+            <>
+              <h3>{analysisResult.suggested_title}</h3>
+              <dl>
+                <div><dt>Hazard</dt><dd>{analysisResult.hazard_type}</dd></div>
+                <div><dt>Severity</dt><dd>{analysisResult.severity}</dd></div>
+                <div><dt>Passability</dt><dd>{analysisResult.passability_impact}</dd></div>
+                <div><dt>Re-inspect</dt><dd>{analysisResult.estimated_expiration_hours} hours</dd></div>
+              </dl>
+              <p>{analysisResult.suggested_description}</p>
+            </>
+          ) : (
+            <p>The image is attached, but automatic analysis was unavailable. Review the details manually before publishing.</p>
+          )}
+        </section>
+      )}
       {cameraOpen && (
         <div className="road-hazard-camera-panel">
           <video ref={cameraVideoRef} className="road-hazard-camera-preview" autoPlay muted playsInline />
@@ -337,7 +410,7 @@ export default function RoadHazardReportForm({ initialLocation, reporterName = '
         <AlertTriangle size={18} aria-hidden="true" />
         <span>{submitting ? 'Publishing…' : 'Publish road hazard'}</span>
       </button>
-      {status && <p className={`road-hazard-report-status${mediaUploading ? ' is-busy' : ''}`} role="status">{status}</p>}
+      {status && <p className={`road-hazard-report-status${mediaUploading || imageAnalyzing ? ' is-busy' : ''}`} role="status">{status}</p>}
     </form>
   )
 }

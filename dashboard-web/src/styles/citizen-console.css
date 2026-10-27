@@ -799,6 +799,16 @@
 .report-sidebar .report-attachment-actions .report-attach-btn:disabled { cursor: not-allowed; opacity: .55; }
 .report-sidebar .report-offline-banner { background: var(--citizen-accent-soft); color: var(--citizen-accent); }
 .report-sidebar .report-status-section { border-color: var(--ops-border); }
+.report-analysis-result { display: grid; gap: 8px; padding: 11px 12px; border: 1px solid #93c5fd; border-radius: 9px; background: #eff6ff; color: #172554; }
+.report-analysis-result.is-fallback { border-color: #fbbf24; background: #fffbeb; color: #78350f; }
+.report-analysis-heading { display: flex; align-items: center; gap: 7px; color: #1d4ed8; font-size: 12px; }
+.report-analysis-result.is-fallback .report-analysis-heading { color: #b45309; }
+.report-analysis-result h3 { margin: 0; font-size: 14px; line-height: 1.25; }
+.report-analysis-result dl { display: grid; gap: 4px; margin: 0; font-size: 11px; }
+.report-analysis-result dl > div { display: grid; grid-template-columns: 82px 1fr; gap: 8px; }
+.report-analysis-result dt { color: #1e40af; font-weight: 700; }
+.report-analysis-result dd { margin: 0; }
+.report-analysis-result p { margin: 0; font-size: 12px; line-height: 1.4; }
 
 [data-theme='dark'] .report-sidebar,
 [data-theme='dark'] .report-sidebar .report-panel-padding { background: #0f172a; color: #e2e8f0; }
@@ -814,6 +824,11 @@
 [data-theme='dark'] .report-sidebar .stepper-btn,
 [data-theme='dark'] .report-sidebar .report-textarea { background: #1e293b; border-color: #475569; color: #e2e8f0; }
 [data-theme='dark'] .report-sidebar .report-textarea::placeholder { color: #94a3b8; }
+[data-theme='dark'] .report-analysis-result { border-color: #1d4ed8; background: #172554; color: #dbeafe; }
+[data-theme='dark'] .report-analysis-result.is-fallback { border-color: #a16207; background: #451a03; color: #fef3c7; }
+[data-theme='dark'] .report-analysis-heading,
+[data-theme='dark'] .report-analysis-result dt { color: #93c5fd; }
+[data-theme='dark'] .report-analysis-result.is-fallback .report-analysis-heading { color: #fbbf24; }
 [data-theme='dark'] .report-sidebar .report-attachment-actions .report-attach-btn { border-color: #475569; background: #1e293b; color: #e2e8f0; }
 [data-theme='dark'] .pinned-location-banner { border-color: #1d4ed8; background: linear-gradient(135deg, #172554, #1e293b); color: #bfdbfe; }
 [data-theme='dark'] .pinned-location-label > svg { color: #60a5fa; }

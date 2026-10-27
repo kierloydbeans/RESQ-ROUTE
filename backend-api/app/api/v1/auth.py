@@ -1,4 +1,5 @@
 from datetime import datetime, timedelta, timezone
+import base64
 import json
 import logging
 from typing import Literal
@@ -12,7 +13,7 @@ from pydantic import BaseModel, EmailStr, Field as PydanticField, field_validato
 from sqlalchemy import func, cast, String
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
-from supabase import create_client
+from storage3 import create_client as create_storage_client
 
 from app.core.security import (
     create_access_token, 
@@ -39,6 +40,7 @@ from app.core.config import settings
 from app.core.mail import send_reset_password_email, send_otp_email
 from app.api.websockets.telemetry import manager as telemetry_manager
 from app.services.audit_logging import record_audit_log
+from app.services.groq_hazard_vision import analyze_emergency_image
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -197,6 +199,14 @@ class ReauthRequest(BaseModel):
 
 class EmergencyAlertCreated(EmergencyAlertRead):
     media_upload_token: str
+
+
+class EmergencyImageAnalysisResponse(BaseModel):
+    analyzed: bool
+    incident_type: str
+    severity: str
+    people_affected: int
+    details: str
 
 
 class EmergencyAlertStatusReportCreate(BaseModel):
@@ -1004,6 +1014,39 @@ async def list_rescue_units(session: AsyncSession = Depends(get_session)):
         ],
     }
 
+@router.post("/alerts/analyze-image", response_model=EmergencyImageAnalysisResponse)
+async def analyze_emergency_image_upload(file: UploadFile = File(...)) -> EmergencyImageAnalysisResponse:
+    """Analyze an emergency-report image using the incident-form schema."""
+
+    content_type = (file.content_type or "").lower()
+    if not content_type.startswith("image/"):
+        raise HTTPException(status_code=415, detail="Upload an image file")
+
+    try:
+        image_bytes = await file.read(20 * 1024 * 1024 + 1)
+        if len(image_bytes) > 20 * 1024 * 1024:
+            raise HTTPException(status_code=413, detail="Images must be 20 MB or smaller for vision analysis")
+        if not image_bytes:
+            raise HTTPException(status_code=400, detail="The selected image is empty")
+
+        image_data_url = f"data:{content_type};base64,{base64.b64encode(image_bytes).decode('ascii')}"
+        result = await analyze_emergency_image(image_data_url)
+        return EmergencyImageAnalysisResponse(analyzed=True, **result)
+    except HTTPException:
+        raise
+    except Exception as error:
+        logger.exception("Groq emergency image analysis failed: %s", error)
+        return EmergencyImageAnalysisResponse(
+            analyzed=False,
+            incident_type="trapped",
+            severity="high",
+            people_affected=0,
+            details="The image could not be analyzed automatically. Please review the incident details and enter visible injuries, danger, damage, or people needing help manually.",
+        )
+    finally:
+        await file.close()
+
+
 @router.post("/alerts", response_model=EmergencyAlertCreated, status_code=status.HTTP_201_CREATED)
 async def create_alert(
     payload: dict,
@@ -1097,10 +1140,17 @@ async def upload_alert_media(
     supabase_url_path = supabase_url_parts.path.rstrip("/")
     if supabase_url_path == "/rest/v1":
         supabase_url_parts = supabase_url_parts._replace(path="")
-    client = create_client(urlunsplit(supabase_url_parts), settings.SUPABASE_KEY)
+    storage_client = create_storage_client(
+        f"{urlunsplit(supabase_url_parts).rstrip('/')}/storage/v1",
+        {
+            "apikey": settings.SUPABASE_KEY,
+            "Authorization": f"Bearer {settings.SUPABASE_KEY}",
+        },
+        is_async=False,
+    )
     storage_stage = "listing existing media"
     try:
-        storage = client.storage.from_(SOS_ALERT_MEDIA_BUCKET)
+        storage = storage_client.from_(SOS_ALERT_MEDIA_BUCKET)
         stored_objects = await run_in_threadpool(lambda: storage.list(str(alert_id)))
         stored_names = [
             str(item.get("name", "")) if isinstance(item, dict) else str(getattr(item, "name", ""))
@@ -1133,6 +1183,7 @@ async def upload_alert_media(
         logger.exception("Supabase Storage %s failed for SOS alert %s", storage_stage, alert_id)
         raise HTTPException(status_code=502, detail="Unable to upload media to Supabase Storage") from error
     finally:
+        await run_in_threadpool(storage_client.aclose)
         await file.close()
 
     if content_type.startswith("image/"):
