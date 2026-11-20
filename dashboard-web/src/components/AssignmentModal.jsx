@@ -25,6 +25,7 @@ const getRecommendedVehicleId = (alert, vehicles) => {
 const AssignmentModal = ({ alert, rescuers, hasAvailableRescuer, vehicles, getRescuerDistance, onConfirm, onClose }) => {
   const [selectedRescuer, setSelectedRescuer] = useState(() => rescuers[0] || null)
   const [isSubmitting, setIsSubmitting] = useState(false)
+  const [isClosing, setIsClosing] = useState(false)
   const [showUnselectedVehicles, setShowUnselectedVehicles] = useState(
     () => getRecommendedVehicleId(alert, vehicles) == null
   )
@@ -52,15 +53,21 @@ const AssignmentModal = ({ alert, rescuers, hasAvailableRescuer, vehicles, getRe
     }
   }
 
+  const closeWithAnimation = () => {
+    if (isSubmitting || isClosing) return
+    setIsClosing(true)
+    window.setTimeout(onClose, 180)
+  }
+
   return (
-    <div className="modal-backdrop" onClick={() => !isSubmitting && onClose()}>
+    <div className={`modal-backdrop${isClosing ? ' is-closing' : ''}`} onClick={closeWithAnimation}>
       <section className="ops-modal assignment-modal" role="dialog" aria-modal="true" onClick={(event) => event.stopPropagation()}>
         <div className="modal-header">
           <div className="panel-title">
             <h2>ASSIGN RESPONSE TEAM</h2>
             <span>ALERT #{alert.id}</span>
           </div>
-          <button className="modal-close" onClick={onClose} disabled={isSubmitting} aria-label="Close assignment modal">×</button>
+          <button className="modal-close" onClick={closeWithAnimation} disabled={isSubmitting || isClosing} aria-label="Close assignment modal">×</button>
         </div>
         <div className="assignment-body">
           {!hasAvailableRescuer && (

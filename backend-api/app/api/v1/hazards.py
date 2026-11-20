@@ -1,8 +1,12 @@
 import csv
+import base64
+import json
+from urllib.parse import urlsplit, urlunsplit
 from datetime import datetime, timezone
 from pathlib import Path
+from uuid import uuid4
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, UploadFile
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.dialects.postgresql import insert as pg_insert
@@ -18,9 +22,22 @@ from app.models.road_hazard import RoadHazardReport, RoadHazardType
 from app.services.graphhopper_routing import exclusion_polygon
 from app.services.road_hazard_expiration import calculate_road_hazard_expiration, expire_stale_road_hazards
 from app.services.audit_logging import record_audit_log
+from app.core.config import settings
+from app.services.groq_hazard_vision import analyze_hazard_image
+from starlette.concurrency import run_in_threadpool
+from storage3 import create_client as create_storage_client
 
 router = APIRouter()
 FEATURES_PATH = Path(__file__).resolve().parents[4] / "data-science" / "data" / "derived" / "south_caloocan_real_hazard_features.csv"
+# Reuse the existing public SOS media bucket so road-hazard uploads use the
+# same Supabase Storage configuration and policies.
+ROAD_HAZARD_MEDIA_BUCKET = "sos_alert_media"
+MAX_ROAD_HAZARD_IMAGES = 5
+MAX_ROAD_HAZARD_IMAGE_BYTES = 25 * 1024 * 1024
+ROAD_HAZARD_IMAGE_EXTENSIONS = {
+    "image/jpeg": ".jpg", "image/png": ".png", "image/webp": ".webp",
+    "image/gif": ".gif", "image/heic": ".heic", "image/heif": ".heif",
+}
 
 
 class RoadHazardSubmission(BaseModel):
@@ -32,6 +49,51 @@ class RoadHazardSubmission(BaseModel):
     severity: SeverityLevel = SeverityLevel.HIGH
     road_name: Optional[str] = None
     reporter_name: Optional[str] = None
+
+
+class HazardImageAnalysisResponse(BaseModel):
+    analyzed: bool
+    hazard_type: str
+    severity: str
+    suggested_title: str
+    suggested_description: str
+    passability_impact: str
+    estimated_expiration_hours: int
+
+
+@router.post("/analyze-image", response_model=HazardImageAnalysisResponse)
+async def analyze_hazard_image_upload(file: UploadFile = File(...)) -> HazardImageAnalysisResponse:
+    """Analyze one hazard image and return safe manual-entry fallbacks on failure."""
+
+    content_type = (file.content_type or "").lower()
+    if not content_type.startswith("image/"):
+        raise HTTPException(status_code=415, detail="Upload an image file")
+
+    try:
+        image_bytes = await file.read(20 * 1024 * 1024 + 1)
+        if len(image_bytes) > 20 * 1024 * 1024:
+            raise HTTPException(status_code=413, detail="Images must be 20 MB or smaller for vision analysis")
+        if not image_bytes:
+            raise HTTPException(status_code=400, detail="The selected image is empty")
+
+        image_data_url = f"data:{content_type};base64,{base64.b64encode(image_bytes).decode('ascii')}"
+        result = await analyze_hazard_image(image_data_url)
+        return HazardImageAnalysisResponse(analyzed=True, **result)
+    except HTTPException:
+        raise
+    except Exception as error:
+        print(f"[groq-vision] hazard image analysis failed: {type(error).__name__}: {error}")
+        return HazardImageAnalysisResponse(
+            analyzed=False,
+            hazard_type="General Emergency",
+            severity="Medium",
+            suggested_title="Manual hazard review required",
+            suggested_description="The image could not be analyzed automatically. Please review the visible hazard and enter the affected location, damage, and blockage details manually.",
+            passability_impact="Passable",
+            estimated_expiration_hours=6,
+        )
+    finally:
+        await file.close()
 
 
 def road_hazard_feature(hazard: RoadHazardReport) -> dict:
@@ -55,6 +117,7 @@ def road_hazard_feature(hazard: RoadHazardReport) -> dict:
             "is_active": hazard.is_active,
             "is_resolved": hazard.is_resolved,
             "review_status": hazard.review_status,
+            "image_url": hazard.image_url,
         },
     }
 
@@ -75,19 +138,106 @@ async def report_road_hazard(
     payload: RoadHazardSubmission,
     session: AsyncSession = Depends(get_session),
 ) -> dict:
+    # Supply timestamp fields explicitly.  This avoids SQLModel/Pydantic
+    # attempting to invoke datetime default factories without validated data
+    # when constructing a table model under the installed dependency versions.
+    reported_at = datetime.utcnow()
     hazard = RoadHazardReport(
         **payload.model_dump(),
         is_active=False,
         is_resolved=False,
         review_status="pending",
+        reported_at=reported_at,
+        expires_at=calculate_road_hazard_expiration(payload.hazard_type, reported_at),
+        created_at=reported_at,
+        updated_at=reported_at,
     )
-    hazard.expires_at = calculate_road_hazard_expiration(hazard.hazard_type, hazard.reported_at)
     session.add(hazard)
     await session.commit()
     await session.refresh(hazard)
     feature = road_hazard_feature(hazard)
     await telemetry_manager.broadcast({"type": "road_hazard_submitted", "id": hazard.id})
     return feature
+
+
+@router.post("/{hazard_id}/media", status_code=201)
+async def upload_road_hazard_media(
+    hazard_id: int,
+    file: UploadFile = File(...),
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    content_type = (file.content_type or "").lower()
+    extension = ROAD_HAZARD_IMAGE_EXTENSIONS.get(content_type)
+    if not extension:
+        raise HTTPException(status_code=415, detail="Upload a supported image file")
+
+    contents = await file.read(MAX_ROAD_HAZARD_IMAGE_BYTES + 1)
+    if len(contents) > MAX_ROAD_HAZARD_IMAGE_BYTES:
+        raise HTTPException(status_code=413, detail="Images must be 25 MB or smaller")
+    if not contents:
+        raise HTTPException(status_code=400, detail="The selected image is empty")
+
+    result = await session.execute(select(RoadHazardReport).where(RoadHazardReport.id == hazard_id))
+    hazard = result.scalar_one_or_none()
+    if not hazard:
+        raise HTTPException(status_code=404, detail="Road hazard report not found")
+
+    existing_urls = []
+    if hazard.image_url:
+        try:
+            decoded = json.loads(hazard.image_url)
+        except (TypeError, json.JSONDecodeError):
+            decoded = hazard.image_url
+        existing_urls = decoded if isinstance(decoded, list) else [decoded]
+        existing_urls = [url for url in existing_urls if isinstance(url, str) and url.strip()]
+    if len(existing_urls) >= MAX_ROAD_HAZARD_IMAGES:
+        raise HTTPException(status_code=409, detail="A road hazard can have at most 5 photos")
+
+    storage_path = f"road_hazards/{hazard_id}/{uuid4().hex}{extension}"
+    supabase_url_parts = urlsplit(settings.SUPABASE_URL)
+    if supabase_url_parts.path.rstrip("/") == "/rest/v1":
+        supabase_url_parts = supabase_url_parts._replace(path="")
+    storage_client = create_storage_client(
+        f"{urlunsplit(supabase_url_parts).rstrip('/')}/storage/v1",
+        {
+            "apikey": settings.SUPABASE_KEY,
+            "Authorization": f"Bearer {settings.SUPABASE_KEY}",
+        },
+        is_async=False,
+    )
+    try:
+        storage = storage_client.from_(ROAD_HAZARD_MEDIA_BUCKET)
+        await run_in_threadpool(lambda: storage.upload(
+            storage_path,
+            contents,
+            file_options={"content-type": content_type, "upsert": "false"},
+        ))
+        public_url_response = await run_in_threadpool(lambda: storage.get_public_url(storage_path))
+        public_url = public_url_response if isinstance(public_url_response, str) else (
+            public_url_response.get("publicUrl") or public_url_response.get("public_url")
+            if isinstance(public_url_response, dict) else None
+        )
+        if not public_url:
+            raise RuntimeError("Supabase Storage did not return a public URL")
+        urls = [*existing_urls, public_url]
+        serialized_urls = json.dumps(urls, separators=(",", ":"))
+        if len(serialized_urls) > 2048:
+            raise RuntimeError("Image URL list exceeds the database column limit")
+        hazard.image_url = serialized_urls
+        await session.commit()
+        await session.refresh(hazard)
+    except HTTPException:
+        raise
+    except Exception as error:
+        await session.rollback()
+        raise HTTPException(status_code=502, detail="Unable to upload road hazard image") from error
+    finally:
+        await run_in_threadpool(storage_client.aclose)
+        await file.close()
+
+    feature = road_hazard_feature(hazard)
+    await telemetry_manager.broadcast({"type": "road_hazard_updated", "data": feature})
+    return {"bucket": ROAD_HAZARD_MEDIA_BUCKET, "path": storage_path, "public_url": public_url, "image_url": hazard.image_url}
 
 
 def _require_dispatcher(credentials: dict) -> None:
@@ -111,6 +261,7 @@ async def pending_road_hazards(
 
 class RoadHazardReview(BaseModel):
     approved: bool
+    remarks: Optional[str] = Field(default=None, max_length=1000)
 
 
 @router.patch("/road-reports/{hazard_id}/review")
@@ -133,13 +284,17 @@ async def review_road_hazard(
     hazard.is_active = payload.approved
     hazard.reviewed_by = str(credentials.get("sub") or "dispatcher")
     hazard.reviewed_at = now
+    remarks = (payload.remarks or "").strip()
+    if not payload.approved and not remarks:
+        raise HTTPException(status_code=422, detail="Rejection remarks are required")
     if payload.approved:
         hazard.expires_at = calculate_road_hazard_expiration(hazard.hazard_type, now)
     record_audit_log(
         session,
         credentials,
         request,
-        f"Road hazard {hazard_id} {'approved' if payload.approved else 'rejected'}",
+        f"Road hazard {hazard_id} {'approved' if payload.approved else 'rejected'}"
+        + (f": {remarks}" if remarks else ""),
     )
     try:
         await session.commit()

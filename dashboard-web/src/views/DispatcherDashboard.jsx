@@ -11,7 +11,7 @@ import AssignmentModal from '../components/AssignmentModal'
 import DeployedVehicles from '../components/DeployedVehicles'
 import { BASE_URL, WS_URL } from '../dataProvider'
 import '../styles/ops-console.css'
-import { ChevronLeft, ChevronRight, SlidersHorizontal, X } from 'lucide-react'
+import { Check, ChevronLeft, ChevronRight, SlidersHorizontal, X } from 'lucide-react'
 
 const getStoredAuth = () => {
   try {
@@ -140,6 +140,74 @@ const normalizeDisasterType = (value) => {
   return Object.prototype.hasOwnProperty.call(disasterLabels, category) ? category : 'other'
 }
 
+const getAlertImageUrls = (value) => {
+  if (!value) return []
+  try {
+    const decoded = JSON.parse(value)
+    if (Array.isArray(decoded)) return decoded.filter((url) => typeof url === 'string' && url.trim())
+    if (typeof decoded === 'string' && decoded.trim()) return [decoded]
+  } catch {}
+  return typeof value === 'string' ? [value] : []
+}
+
+const ALERT_LOCATION_CACHE_KEY = 'resq-nominatim-reverse-geocode-v1'
+const alertLocationCache = new Map()
+
+const formatAlertLocation = (address) => {
+  if (!address) return null
+  const road = address.road || address.pedestrian || address.footway
+  const barangay = address.neighbourhood || address.suburb || address.quarter || address.village
+  const city = address.city || address.town || address.municipality || address.county
+  return [road, barangay, city]
+    .filter(Boolean)
+    .filter((value, index, values) => values.indexOf(value) === index)
+    .join(', ') || address.display_name?.split(',').slice(0, 3).join(', ') || null
+}
+
+const getAlertCoordinateFallback = (latitude, longitude) => {
+  const latitudeDirection = latitude >= 0 ? 'N' : 'S'
+  const longitudeDirection = longitude >= 0 ? 'E' : 'W'
+  return `${Math.abs(latitude).toFixed(4)}° ${latitudeDirection}, ${Math.abs(longitude).toFixed(4)}° ${longitudeDirection}`
+}
+
+const lookupAlertLocation = async (latitude, longitude) => {
+  const lat = Number(latitude)
+  const lon = Number(longitude)
+  if (!Number.isFinite(lat) || !Number.isFinite(lon)) return ''
+  const key = `${lat.toFixed(6)},${lon.toFixed(6)}`
+  if (!alertLocationCache.size) {
+    try {
+      const stored = JSON.parse(window.localStorage.getItem(ALERT_LOCATION_CACHE_KEY) || '{}')
+      Object.entries(stored).forEach(([cachedKey, value]) => alertLocationCache.set(cachedKey, value))
+    } catch {}
+  }
+  if (alertLocationCache.has(key)) return alertLocationCache.get(key) || getAlertCoordinateFallback(lat, lon)
+
+  const controller = new AbortController()
+  const timeout = window.setTimeout(() => controller.abort(), 5000)
+  try {
+    const params = new URLSearchParams({ format: 'json', lat: String(lat), lon: String(lon), zoom: '18', addressdetails: '1' })
+    const response = await fetch(`https://nominatim.openstreetmap.org/reverse?${params}`, {
+      signal: controller.signal,
+      headers: { Accept: 'application/json', 'Accept-Language': 'en' },
+    })
+    if (!response.ok) throw new Error(`Nominatim returned ${response.status}`)
+    const data = await response.json()
+    const location = formatAlertLocation(data.address)
+    alertLocationCache.set(key, location)
+    try {
+      const stored = Object.fromEntries([...alertLocationCache.entries()].filter(([, value]) => value))
+      window.localStorage.setItem(ALERT_LOCATION_CACHE_KEY, JSON.stringify(stored))
+    } catch {}
+    return location || getAlertCoordinateFallback(lat, lon)
+  } catch {
+    alertLocationCache.set(key, null)
+    return getAlertCoordinateFallback(lat, lon)
+  } finally {
+    window.clearTimeout(timeout)
+  }
+}
+
 const distanceBetween = (firstLatitude, firstLongitude, secondLatitude, secondLongitude) => {
   const [normalizedFirstLatitude, normalizedFirstLongitude, normalizedSecondLatitude, normalizedSecondLongitude] = [firstLatitude, firstLongitude, secondLatitude, secondLongitude].map(Number)
   if ([normalizedFirstLatitude, normalizedFirstLongitude, normalizedSecondLatitude, normalizedSecondLongitude].some((value) => !Number.isFinite(value))) return null
@@ -162,7 +230,18 @@ const SosFeedItem = ({ alert, now, onAssign, onView, isClosed = false }) => {
   const sentAt = parseAlertDate(alert.created_at)
 
   return (
-    <article className={unattended ? 'sos-item unattended-alert' : 'sos-item'}>
+    <article
+      className={unattended ? 'sos-item unattended-alert' : 'sos-item'}
+      onClick={() => onView?.(alert)}
+      onKeyDown={(event) => {
+        if ((event.key === 'Enter' || event.key === ' ') && event.target === event.currentTarget) {
+          event.preventDefault()
+          onView?.(alert)
+        }
+      }}
+      role={onView ? 'button' : undefined}
+      tabIndex={onView ? 0 : undefined}
+    >
       <div className="sos-meta">
         <span className={`severity ${severity}`}>{severity.toUpperCase()}</span>
         {unattended && <span className="unattended-badge">UNATTENDED 2H+</span>}
@@ -178,9 +257,9 @@ const SosFeedItem = ({ alert, now, onAssign, onView, isClosed = false }) => {
       <div className="coordinates">{alert.latitude?.toFixed?.(5) || 'Unknown'}° N, {alert.longitude?.toFixed?.(5) || 'Unknown'}° E</div>
       {!isClosed && (
         <div className="sos-actions">
-          <button onClick={() => onAssign(alert.id)}>ASSIGN</button>
+          <button onClick={(event) => { event.stopPropagation(); onAssign(alert.id) }}>ASSIGN</button>
           <button type="button" onClick={() => onView(alert)}>VIEW</button>
-          <button>MERGE</button>
+          <button onClick={(event) => event.stopPropagation()}>MERGE</button>
         </div>
       )}
     </article>
@@ -208,11 +287,16 @@ export const Dashboard = ({ onLogout }) => {
   const [activeEvacuationRoute, setActiveEvacuationRoute] = useState(null)
   const [isRoadHazardFormOpen, setIsRoadHazardFormOpen] = useState(false)
   const [pendingRoadHazards, setPendingRoadHazards] = useState({ type: 'FeatureCollection', features: [] })
+  const [roadHazardPage, setRoadHazardPage] = useState(0)
   const [roadHazardReviewing, setRoadHazardReviewing] = useState(null)
   const [roadHazardReviewError, setRoadHazardReviewError] = useState('')
+  const [roadHazardRejectionTarget, setRoadHazardRejectionTarget] = useState(null)
+  const [roadHazardRejectionRemarks, setRoadHazardRejectionRemarks] = useState('')
   const [selectedRoadHazard, setSelectedRoadHazard] = useState(null)
+  const [closingModal, setClosingModal] = useState(null)
   const [hazardLayers, setHazardLayers] = useState([])
   const [hazardLayerPublishing, setHazardLayerPublishing] = useState(null)
+  const [hazardPublicationMessage, setHazardPublicationMessage] = useState('')
   const [showNoahHazards, setShowNoahHazards] = useState(true)
   const [showRoadHazards, setShowRoadHazards] = useState(true)
   const [routeRerouted, setRouteRerouted] = useState(false)
@@ -220,6 +304,19 @@ export const Dashboard = ({ onLogout }) => {
   const [selectedRescuerId, setSelectedRescuerId] = useState('')
   const [selectedIncident, setSelectedIncident] = useState('')
   const [selectedSeverity, setSelectedSeverity] = useState('high')
+  const [selectedAlert, setSelectedAlert] = useState(null)
+  const [selectedImagePreview, setSelectedImagePreview] = useState(null)
+  const [alertImageSize, setAlertImageSize] = useState('medium')
+  const [alertLocation, setAlertLocation] = useState('')
+  const [alertLocationLoading, setAlertLocationLoading] = useState(false)
+
+  const closeModalWithAnimation = (modalKey, close) => {
+    setClosingModal(modalKey)
+    window.setTimeout(() => {
+      close()
+      setClosingModal(null)
+    }, 180)
+  }
   const [activeModal, setActiveModal] = useState(null)
   // ── Voice call state ──────────────────────────────────────────────────
   const { callId, callError, isSocketReady: isVoiceReady, participants: callParticipants, remoteStreams, startCall, endCall } =
@@ -253,6 +350,7 @@ export const Dashboard = ({ onLogout }) => {
     operationalMetrics: true,
     sosFeed: true,
     tacticalMap: true,
+    roadHazardReview: true,
     averageResponse: true,
     vehicles: true,
     rescuers: true,
@@ -312,12 +410,13 @@ export const Dashboard = ({ onLogout }) => {
   }
   const hasLeftRail = renderedPanels.operationalMetrics || renderedPanels.sosFeed
   const hasRightRail = renderedPanels.averageResponse || renderedPanels.vehicles || renderedPanels.rescuers
+  const hasCenterPanel = renderedPanels.tacticalMap || renderedPanels.roadHazardReview
   const gridColumns = [
     ...(hasLeftRail ? ['200px'] : []),
-    ...(renderedPanels.tacticalMap ? ['minmax(0, 1fr)'] : []),
+    ...(hasCenterPanel ? ['minmax(0, 1fr)'] : []),
     ...(hasRightRail ? ['213px'] : []),
   ]
-  if (!renderedPanels.tacticalMap && gridColumns.length > 0) gridColumns.fill('minmax(0, 1fr)')
+  if (!hasCenterPanel && gridColumns.length > 0) gridColumns.fill('minmax(0, 1fr)')
 
   useEffect(() => () => {
     Object.values(panelAnimationTimers.current).forEach(window.clearTimeout)
@@ -786,6 +885,9 @@ export const Dashboard = ({ onLogout }) => {
   ))
 
   const handleViewAlert = (alert) => {
+    setSelectedAlert(alert)
+    setSelectedImagePreview(null)
+    setAlertImageSize('medium')
     const longitude = Number(alert.longitude)
     const latitude = Number(alert.latitude)
     if (!Number.isFinite(longitude) || !Number.isFinite(latitude)) {
@@ -796,6 +898,23 @@ export const Dashboard = ({ onLogout }) => {
     setFocusedAlertId(alert.id)
     setFocusRequestKey((current) => current + 1)
   }
+
+  useEffect(() => {
+    if (!selectedAlert) {
+      setAlertLocation('')
+      return undefined
+    }
+    let cancelled = false
+    setAlertLocationLoading(true)
+    lookupAlertLocation(selectedAlert.latitude, selectedAlert.longitude)
+      .then((location) => {
+        if (!cancelled) setAlertLocation(location)
+      })
+      .finally(() => {
+        if (!cancelled) setAlertLocationLoading(false)
+      })
+    return () => { cancelled = true }
+  }, [selectedAlert?.id, selectedAlert?.latitude, selectedAlert?.longitude])
 
   const verifiedAlert = verifiedAlertState
   const setVerifiedAlert = (alert) => setVerifiedAlertState((current) => current?.id === alert?.id ? null : alert)
@@ -821,14 +940,19 @@ export const Dashboard = ({ onLogout }) => {
     }
   }, [lastMessage, refreshPendingRoadHazards])
 
-  const reviewRoadHazard = async (id, approved) => {
+  useEffect(() => {
+    const pageCount = pendingRoadHazards.features.length
+    setRoadHazardPage((current) => pageCount === 0 ? 0 : Math.min(current, pageCount - 1))
+  }, [pendingRoadHazards.features.length])
+
+  const reviewRoadHazard = async (id, approved, remarks = '') => {
     setRoadHazardReviewing(id)
     setRoadHazardReviewError('')
     try {
       const response = await fetch(`${API_BASE_URL}/api/v1/hazards/road-reports/${id}/review`, {
         method: 'PATCH',
         headers: { ...getAuthHeaders(), 'Content-Type': 'application/json' },
-        body: JSON.stringify({ approved }),
+        body: JSON.stringify({ approved, remarks: remarks.trim() || null }),
       })
       if (!response.ok) {
         const responseData = await response.json().catch(() => null)
@@ -845,6 +969,22 @@ export const Dashboard = ({ onLogout }) => {
     } finally {
       setRoadHazardReviewing(null)
     }
+  }
+
+  const openRoadHazardRejection = (id, event) => {
+    event.stopPropagation()
+    setRoadHazardReviewError('')
+    setRoadHazardRejectionRemarks('')
+    setRoadHazardRejectionTarget(id)
+  }
+
+  const submitRoadHazardRejection = async (event) => {
+    event.preventDefault()
+    const remarks = roadHazardRejectionRemarks.trim()
+    if (!remarks || roadHazardRejectionTarget === null) return
+    const id = roadHazardRejectionTarget
+    setRoadHazardRejectionTarget(null)
+    await reviewRoadHazard(id, false, remarks)
   }
 
   const handleMapMarkerClick = (marker) => {
@@ -941,6 +1081,11 @@ export const Dashboard = ({ onLogout }) => {
 
     if (lastMessage?.type === 'alert_updated' && lastMessage.data) {
       setAlerts((currentAlerts) => currentAlerts.map((alert) => alert.id === lastMessage.data.id ? lastMessage.data : alert))
+      setSelectedAlert((currentAlert) => (
+        currentAlert?.id === lastMessage.data.id
+          ? { ...currentAlert, ...lastMessage.data }
+          : currentAlert
+      ))
     }
 
     if (lastMessage?.type === 'rescuer_status_updated' && lastMessage.data) {
@@ -1159,34 +1304,44 @@ export const Dashboard = ({ onLogout }) => {
     const rescuerStatusRefresh = window.setInterval(() => {
       loadRescuers()
       loadRescueUnits()
+      loadHazardLayers()
     }, 30_000)
     return () => {
       window.clearInterval(rescuerStatusRefresh)
     }
   }, [API_BASE_URL])
 
+  const lowHazardLayers = hazardLayers.filter((layer) => String(layer.hazard_level).toLowerCase() === 'low')
   const mediumHazardLayers = hazardLayers.filter((layer) => String(layer.hazard_level).toLowerCase() === 'medium')
   const highHazardLayers = hazardLayers.filter((layer) => String(layer.hazard_level).toLowerCase() === 'high')
-  const visibleHazardLayers = hazardLayers.filter((layer) => ['medium', 'high'].includes(String(layer.hazard_level).toLowerCase()))
+  const visibleHazardLayers = hazardLayers.filter((layer) => layer.is_published)
   const renderedHazardLayers = showNoahHazards ? visibleHazardLayers : []
   const renderedRoadHazardZones = showRoadHazards ? roadHazardZones : { type: 'FeatureCollection', features: [] }
   const renderedPendingRoadHazards = showRoadHazards ? pendingRoadHazards : { type: 'FeatureCollection', features: [] }
-  const allMediumHazardsPublished = mediumHazardLayers.length > 0 && mediumHazardLayers.every((layer) => layer.is_published)
-  const allHighHazardsPublished = highHazardLayers.length > 0 && highHazardLayers.every((layer) => layer.is_published)
-
   const handlePublishHazardLevel = async (hazardLevel, isPublished) => {
-    const layersToUpdate = hazardLevel === 'medium' ? mediumHazardLayers : highHazardLayers
+    const layersToUpdate = hazardLayers.filter((layer) =>
+      (hazardLevel === 'all' || String(layer.hazard_level).toLowerCase() === hazardLevel)
+      && layer.is_published !== isPublished
+    )
     setHazardLayerPublishing(hazardLevel)
+    setHazardPublicationMessage('')
     try {
-      const responses = await Promise.all(layersToUpdate.map((layer) => fetch(`${API_BASE_URL}/api/v1/hazards/${layer.id}/publish`, {
-        method: 'PATCH',
-        headers: getAuthHeaders(),
-        body: JSON.stringify({ is_published: isPublished })
-      })))
-      if (responses.some((response) => !response.ok)) throw new Error('Unable to update hazard publication status.')
-      setHazardLayers((layers) => layers.map((layer) => layersToUpdate.some((updatedLayer) => updatedLayer.id === layer.id) ? { ...layer, is_published: isPublished } : layer))
+      let failed = 0
+      for (let offset = 0; offset < layersToUpdate.length; offset += 10) {
+        const batch = layersToUpdate.slice(offset, offset + 10)
+        const responses = await Promise.allSettled(batch.map((layer) => fetch(`${API_BASE_URL}/api/v1/hazards/${layer.id}/publish`, {
+          method: 'PATCH',
+          headers: getAuthHeaders(),
+          body: JSON.stringify({ is_published: isPublished })
+        })))
+        failed += responses.filter((response) => response.status === 'rejected' || !response.value.ok).length
+      }
+      const response = await fetch(`${API_BASE_URL}/api/v1/hazards/map-layers?status=all`, { headers: getAuthHeaders() })
+      if (!response.ok) throw new Error('Could not refresh publication status.')
+      setHazardLayers(await response.json())
+      setHazardPublicationMessage(failed ? `${failed} grid updates failed. Please retry.` : 'Publication status updated.')
     } catch (error) {
-      setAlertStatus(error.message)
+      setHazardPublicationMessage(error.message)
     } finally {
       setHazardLayerPublishing(null)
     }
@@ -1714,6 +1869,7 @@ export const Dashboard = ({ onLogout }) => {
                 ['operationalMetrics', 'Operational metrics'],
                 ['sosFeed', 'Live SOS feed'],
                 ['tacticalMap', 'Tactical map'],
+                ['roadHazardReview', 'Road hazard review'],
                 ['averageResponse', 'Average response'],
                 ['vehicles', 'Vehicles'],
                 ['rescuers', 'Rescuer profiles'],
@@ -1867,6 +2023,7 @@ export const Dashboard = ({ onLogout }) => {
                           alert={alert}
                           now={currentTime}
                           onAssign={handleAssignAlert}
+                          onView={handleViewAlert}
                           isClosed
                         />
                       ))
@@ -1982,8 +2139,8 @@ export const Dashboard = ({ onLogout }) => {
         </aside>}
 
         {/* CENTER COLUMN: MAP ONLY */}
-        {renderedPanels.tacticalMap && <main className={`center-column map-only-column ${getPanelAnimationClass('tacticalMap')}`}>
-          <section className="map-panel">
+        {hasCenterPanel && <main className={`center-column map-only-column ${getPanelAnimationClass('tacticalMap')}`}>
+          {renderedPanels.tacticalMap && <section className="map-panel">
             <PanelTitle title="CDRRMO TACTICAL MAP AREA" badge="TRACKING MAP" />
             <button className="map-hazard-publish-button" type="button" onClick={() => setIsRoadHazardFormOpen((open) => !open)}>
               Report Road Hazard
@@ -2002,20 +2159,47 @@ export const Dashboard = ({ onLogout }) => {
                   <div><dt>Location</dt><dd>{selectedRoadHazard.latitude ?? '—'}, {selectedRoadHazard.longitude ?? '—'}</dd></div>
                   <div><dt>Description</dt><dd>{selectedRoadHazard.description || 'No description provided.'}</dd></div>
                 </dl>
+                {getAlertImageUrls(selectedRoadHazard.image_url).length > 0 && (
+                  <div className="road-hazard-review-images" aria-label="Uploaded road hazard images">
+                    {getAlertImageUrls(selectedRoadHazard.image_url).map((imageUrl, index) => (
+                      <button
+                        type="button"
+                        className="road-hazard-review-image-button"
+                        key={`${imageUrl}-${index}`}
+                        onClick={() => setSelectedImagePreview({ url: imageUrl, index })}
+                        aria-label={`Open road hazard image ${index + 1}`}
+                      >
+                        <img src={imageUrl} alt={`Road hazard evidence ${index + 1}`} />
+                      </button>
+                    ))}
+                  </div>
+                )}
               </article>
             )}
-            {pendingRoadHazards.features.length > 0 && (
+            {false && pendingRoadHazards.features.length > 0 && (
               <section className="road-hazard-review-queue" aria-label="Pending road hazard reports">
                 <h3>Road hazards awaiting review ({pendingRoadHazards.features.length})</h3>
                 {pendingRoadHazards.features.map(({ id, properties }) => (
-                  <article key={id} className="road-hazard-review-item">
+                  <article
+                    key={id}
+                    className="road-hazard-review-item"
+                    role="button"
+                    tabIndex={0}
+                    onClick={() => setSelectedRoadHazard({ id, ...properties })}
+                    onKeyDown={(event) => {
+                      if (event.key === 'Enter' || event.key === ' ') {
+                        event.preventDefault()
+                        setSelectedRoadHazard({ id, ...properties })
+                      }
+                    }}
+                  >
                     <strong>{String(properties.hazard_type).replace(/_/g, ' ')} · {properties.severity}</strong>
                     <span>{properties.road_name || 'Unnamed road'} · {properties.radius_meters} m radius</span>
                     <p>{properties.description}</p>
                     <small>{Number(properties.latitude).toFixed(5)}, {Number(properties.longitude).toFixed(5)} · Reported by {properties.reporter_name || 'Anonymous'}</small>
                     <div>
-                      <button type="button" disabled={roadHazardReviewing !== null} onClick={() => reviewRoadHazard(id, true)}>Approve & publish</button>
-                      <button type="button" disabled={roadHazardReviewing !== null} onClick={() => reviewRoadHazard(id, false)}>Reject</button>
+                      <button type="button" disabled={roadHazardReviewing !== null} onClick={(event) => { event.stopPropagation(); reviewRoadHazard(id, true) }}>Approve & publish</button>
+                      <button type="button" disabled={roadHazardReviewing !== null} onClick={(event) => openRoadHazardRejection(id, event)}>Reject</button>
                     </div>
                   </article>
                 ))}
@@ -2050,10 +2234,18 @@ export const Dashboard = ({ onLogout }) => {
               ))}
             </div>
             <div className="map-hazard-publish-controls" aria-label="Publish hazard layers to citizens">
+              <button type="button" className="map-hazard-publish-button" disabled={hazardLayerPublishing !== null || !hazardLayers.some((layer) => !layer.is_published)} onClick={() => handlePublishHazardLevel('all', true)}>
+                {hazardLayerPublishing === 'all' && <span className="map-hazard-publish-spinner" aria-hidden="true" />}
+                Publish all grids ({hazardLayers.filter((layer) => layer.is_published).length}/{hazardLayers.length} published)
+              </button>
               {[
-                { level: 'medium', label: 'Medium', layers: mediumHazardLayers, published: allMediumHazardsPublished },
-                { level: 'high', label: 'High', layers: highHazardLayers, published: allHighHazardsPublished },
-              ].map(({ level, label, layers, published }) => (
+                { level: 'low', label: 'Low', layers: lowHazardLayers },
+                { level: 'medium', label: 'Medium', layers: mediumHazardLayers },
+                { level: 'high', label: 'High', layers: highHazardLayers },
+              ].map(({ level, label, layers }) => {
+                const publishedCount = layers.filter((layer) => layer.is_published).length
+                const published = layers.length > 0 && publishedCount === layers.length
+                return (
                 <button
                   key={level}
                   type="button"
@@ -2063,9 +2255,11 @@ export const Dashboard = ({ onLogout }) => {
                   onClick={() => handlePublishHazardLevel(level, !published)}
                 >
                   {hazardLayerPublishing === level && <span className="map-hazard-publish-spinner" aria-hidden="true" />}
-                  {published ? `Unpublish ${label} Hazards` : `Publish ${label} Hazards`}
+                  {published ? `Unpublish ${label}` : `Publish ${label}`} ({publishedCount}/{layers.length})
                 </button>
-              ))}
+                )
+              })}
+              <span role="status">{hazardPublicationMessage}</span>
             </div>
             <div className="map-stage" style={{ height: `${mapHeight}px` }}>
               <div className="map-legend-static" role="group" aria-label="Map legend">
@@ -2082,6 +2276,7 @@ export const Dashboard = ({ onLogout }) => {
                 <span><i className="legend-swatch marker-full" /> FULL CENTER / MAINTENANCE</span>
                 <span><i className="legend-swatch hazard-high" /> NOAH HIGH HAZARD</span>
                 <span><i className="legend-swatch hazard-medium" /> NOAH MEDIUM HAZARD</span>
+                <span><i className="legend-swatch hazard-low" /> NOAH LOW HAZARD</span>
                 <span><i className="legend-swatch road-hazard" /> ACTIVE ROAD HAZARD</span>
                 <span><i className="legend-swatch pending-road-hazard" /> PENDING ROAD HAZARD</span>
               </div>
@@ -2098,7 +2293,58 @@ export const Dashboard = ({ onLogout }) => {
               </div>
               <button className="map-resize-handle" onPointerDown={startMapResize} aria-label="Drag to resize map" title="Drag to resize map">↕</button>
             </div>
-          </section>
+          </section>}
+          {renderedPanels.roadHazardReview && (
+            <section className={`road-hazard-review-panel ${getPanelAnimationClass('roadHazardReview')}`} aria-label="Road hazard review panel">
+              <PanelTitle title="ROAD HAZARD REVIEW" badge={`${pendingRoadHazards.features.length} PENDING`} />
+              {pendingRoadHazards.features.length === 0 ? (
+                <p className="road-hazard-review-empty">No road hazards awaiting review.</p>
+              ) : (
+                <>
+                  <div className="road-hazard-review-pagination" aria-label="Road hazard review pagination">
+                    <button type="button" onClick={() => setRoadHazardPage((page) => Math.max(0, page - 1))} disabled={roadHazardPage === 0} aria-label="Previous road hazard">Previous</button>
+                    <span>REPORT {roadHazardPage + 1} / {pendingRoadHazards.features.length}</span>
+                    <button type="button" onClick={() => setRoadHazardPage((page) => Math.min(pendingRoadHazards.features.length - 1, page + 1))} disabled={roadHazardPage >= pendingRoadHazards.features.length - 1} aria-label="Next road hazard">Next</button>
+                  </div>
+                  <div className="road-hazard-review-queue">
+                  {(() => {
+                    const { id, properties } = pendingRoadHazards.features[roadHazardPage]
+                    const imageUrls = getAlertImageUrls(properties.image_url)
+                    const previewImage = imageUrls[0]
+                    return (
+                    <article key={id} className="road-hazard-review-item" role="button" tabIndex={0} onClick={() => setSelectedRoadHazard({ id, ...properties })}>
+                      <div className="road-hazard-review-card-grid">
+                        <div className="road-hazard-review-thumbnail">
+                          {previewImage ? (
+                            <button type="button" onClick={(event) => { event.stopPropagation(); setSelectedImagePreview({ url: previewImage, index: 0 }) }} aria-label="Open road hazard image preview">
+                              <img src={previewImage} alt="Road hazard evidence preview" />
+                            </button>
+                          ) : (
+                            <div className="road-hazard-review-thumbnail-placeholder" aria-label="No image attached">NO IMAGE</div>
+                          )}
+                        </div>
+                        <div className="road-hazard-review-details">
+                          <div className="road-hazard-review-badges">
+                            <strong><span className="road-hazard-type-badge">{String(properties.hazard_type).replace(/_/g, ' ')}</span></strong>
+                            <span className={`road-hazard-severity-badge ${properties.severity || 'high'}`}>{properties.severity || 'high'} severity</span>
+                          </div>
+                          <strong className="road-hazard-review-location">{properties.road_name || 'Unnamed road'}</strong>
+                          <small className="road-hazard-review-coordinates">{Number(properties.latitude).toFixed(5)}, {Number(properties.longitude).toFixed(5)} · Reported by {properties.reporter_name || 'Anonymous'}</small>
+                          <p className="road-hazard-review-description">“{properties.description || 'No description provided.'}”</p>
+                        </div>
+                        <div className="road-hazard-review-actions">
+                          <button className="road-hazard-approve-button" type="button" disabled={roadHazardReviewing !== null} onClick={(event) => { event.stopPropagation(); reviewRoadHazard(id, true) }}><Check size={13} aria-hidden="true" />Approve &amp; Publish</button>
+                          <button className="road-hazard-reject-button" type="button" disabled={roadHazardReviewing !== null} onClick={(event) => openRoadHazardRejection(id, event)}><X size={13} aria-hidden="true" />Reject Report</button>
+                        </div>
+                      </div>
+                    </article>
+                    )
+                  })()}
+                  </div>
+                </>
+              )}
+            </section>
+          )}
         </main>}
 
         {/* RIGHT RAIL: Average Response -> Vehicles -> Rescuer Profiles */}
@@ -2280,16 +2526,51 @@ export const Dashboard = ({ onLogout }) => {
         </div>
       )}
 
+      {roadHazardRejectionTarget !== null && (
+        <div className={`modal-backdrop road-hazard-rejection-backdrop${closingModal === 'rejection' ? ' is-closing' : ''}`} onClick={() => closeModalWithAnimation('rejection', () => setRoadHazardRejectionTarget(null))}>
+          <section className="ops-modal road-hazard-rejection-modal" role="dialog" aria-modal="true" aria-labelledby="road-hazard-rejection-title" onClick={(event) => event.stopPropagation()}>
+            <div className="modal-header">
+              <PanelTitle title="REJECT ROAD HAZARD" badge={`REPORT #${roadHazardRejectionTarget}`} />
+              <button className="modal-close" type="button" onClick={() => setRoadHazardRejectionTarget(null)} aria-label="Close rejection remarks">×</button>
+            </div>
+            <form className="road-hazard-rejection-form" onSubmit={submitRoadHazardRejection}>
+              <h2 id="road-hazard-rejection-title">Why is this report being rejected?</h2>
+              <p>The remarks will be saved with the review record.</p>
+              <label htmlFor="road-hazard-rejection-remarks">Remarks</label>
+              <textarea
+                id="road-hazard-rejection-remarks"
+                value={roadHazardRejectionRemarks}
+                onChange={(event) => setRoadHazardRejectionRemarks(event.target.value)}
+                placeholder="State the reason for rejecting this road hazard..."
+                maxLength={1000}
+                rows={5}
+                required
+                autoFocus
+              />
+              <div className="road-hazard-rejection-actions">
+                <button type="button" onClick={() => closeModalWithAnimation('rejection', () => setRoadHazardRejectionTarget(null))}>Cancel</button>
+                <button type="submit" disabled={!roadHazardRejectionRemarks.trim() || roadHazardReviewing !== null}>Reject report</button>
+              </div>
+            </form>
+          </section>
+        </div>
+      )}
+
       {/* MODAL */}
       {activeModal && (
-        <div className="modal-backdrop" onClick={() => setActiveModal(null)}>
+        <div className={`modal-backdrop${closingModal === 'active' ? ' is-closing' : ''}`} onClick={() => closeModalWithAnimation('active', () => setActiveModal(null))}>
           <section className="ops-modal" role="dialog" aria-modal="true" onClick={(event) => event.stopPropagation()}>
             <div className="modal-header">
               <PanelTitle title={activeModal === 'alerts' ? 'ALL EMERGENCY ALERTS' : 'ACTIVE RESCUE UNITS'} badge="LIVE DATA" />
-              <button className="modal-close" onClick={() => setActiveModal(null)} aria-label="Close modal">×</button>
+              <button className="modal-close" onClick={() => closeModalWithAnimation('active', () => setActiveModal(null))} aria-label="Close modal">×</button>
             </div>
             {modalLoading ? (
-              <p className="modal-empty">Loading live data...</p>
+              <div className="modal-skeleton-list" aria-busy="true" aria-label="Loading live data">
+                <span className="skeleton-line skeleton-line-wide" />
+                <span className="skeleton-line" />
+                <span className="skeleton-line skeleton-line-short" />
+                <span className="skeleton-line skeleton-line-wide" />
+              </div>
             ) : activeModal === 'alerts' ? (
               <div className="modal-alert-list">
                 {alerts.length === 0 ? (
@@ -2379,6 +2660,156 @@ export const Dashboard = ({ onLogout }) => {
                 </div>
               </div>
             )}
+          </section>
+        </div>
+      )}
+
+      {selectedAlert && (
+        <div className={`modal-backdrop alert-detail-backdrop${closingModal === 'alert' ? ' is-closing' : ''}`} onClick={() => closeModalWithAnimation('alert', () => setSelectedAlert(null))}>
+          <section
+            className="ops-modal alert-detail-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="alert-detail-title"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="modal-header">
+              <PanelTitle title="EMERGENCY ALERT DETAILS" badge={`ALERT #${selectedAlert.id}`} />
+              <button className="modal-close" onClick={() => closeModalWithAnimation('alert', () => setSelectedAlert(null))} aria-label="Close alert details">Ã—</button>
+            </div>
+            <div className="alert-detail-content">
+              <div className="alert-detail-heading">
+                <span className={`severity ${selectedAlert.severity || 'high'}`}>
+                  {(selectedAlert.severity || 'high').toUpperCase()}
+                </span>
+                <h2 id="alert-detail-title">{disasterLabels[normalizeDisasterType(selectedAlert.disaster_type)] || 'Other'} incident</h2>
+                <span className="alert-detail-status">{statusLabel(selectedAlert.status)}</span>
+              </div>
+
+              <div className="alert-detail-preview-toolbar">
+                <span>IMAGE PREVIEW</span>
+                <div className="alert-image-size-controls" role="group" aria-label="Adjust image preview size">
+                  {[
+                    ['small', 'SMALL'],
+                    ['medium', 'MEDIUM'],
+                    ['large', 'LARGE'],
+                  ].map(([size, label]) => (
+                    <button
+                      key={size}
+                      type="button"
+                      className={alertImageSize === size ? 'active' : ''}
+                      aria-pressed={alertImageSize === size}
+                      onClick={() => setAlertImageSize(size)}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {getAlertImageUrls(selectedAlert.image_url).length > 0 ? (
+                <div className={`alert-detail-image-frame ${alertImageSize}`}>
+                  <div className="alert-detail-image-gallery">
+                    {getAlertImageUrls(selectedAlert.image_url).map((imageUrl, index) => (
+                      <button
+                        className="alert-detail-image-button"
+                        key={`${imageUrl}-${index}`}
+                        type="button"
+                        onClick={() => setSelectedImagePreview({ url: imageUrl, index })}
+                        aria-label={`Open uploaded evidence ${index + 1} for alert ${selectedAlert.id}`}
+                      >
+                        <img
+                          className="alert-detail-image"
+                          src={imageUrl}
+                          alt={`Uploaded evidence ${index + 1} for alert ${selectedAlert.id}`}
+                        />
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              ) : (
+                <div className="alert-detail-image-empty">NO IMAGE ATTACHED</div>
+              )}
+
+              <dl className="alert-detail-fields">
+                <div><dt>Reported by</dt><dd>{selectedAlert.sender_name || 'Unknown reporter'}</dd></div>
+                <div><dt>Reported</dt><dd>{formatTime(selectedAlert.created_at)}</dd></div>
+                <div><dt>General location</dt><dd>{alertLocationLoading ? <span className="field-skeleton" aria-label="Loading general location" /> : alertLocation || 'Location unavailable'}</dd></div>
+                <div><dt>Coordinates</dt><dd>{selectedAlert.latitude}, {selectedAlert.longitude}</dd></div>
+                <div className="alert-detail-message"><dt>Description</dt><dd>{selectedAlert.message || 'No additional description provided.'}</dd></div>
+              </dl>
+              {!isClosedAlert(selectedAlert) && (
+                <button
+                  type="button"
+                  className="alert-detail-assign-button"
+                  onClick={() => {
+                    openAssignmentModal(selectedAlert.id)
+                    setSelectedAlert(null)
+                  }}
+                >
+                  ASSIGN RESCUER
+                </button>
+              )}
+            </div>
+          </section>
+        </div>
+      )}
+
+      {selectedRoadHazard && (
+        <div className={`modal-backdrop road-hazard-detail-backdrop${closingModal === 'road-hazard' ? ' is-closing' : ''}`} onClick={() => closeModalWithAnimation('road-hazard', () => setSelectedRoadHazard(null))}>
+          <section className="ops-modal road-hazard-detail-modal" role="dialog" aria-modal="true" aria-labelledby="road-hazard-detail-title" onClick={(event) => event.stopPropagation()}>
+            <div className="modal-header">
+              <PanelTitle title="ROAD HAZARD DETAILS" badge={`REPORT #${selectedRoadHazard.id}`} />
+              <button className="modal-close" type="button" onClick={() => closeModalWithAnimation('road-hazard', () => setSelectedRoadHazard(null))} aria-label="Close hazard report details">×</button>
+            </div>
+            <div className="road-hazard-detail-content">
+              <h2 id="road-hazard-detail-title">{String(selectedRoadHazard.hazard_type || 'Unknown hazard').replace(/_/g, ' ')} report</h2>
+              <dl>
+                <div><dt>Severity</dt><dd>{selectedRoadHazard.severity || '—'}</dd></div>
+                <div><dt>Status</dt><dd>{selectedRoadHazard.review_status || (selectedRoadHazard.is_resolved ? 'Resolved' : 'Active')}</dd></div>
+                <div><dt>Road</dt><dd>{selectedRoadHazard.road_name || 'Unspecified road'}</dd></div>
+                <div><dt>Location</dt><dd>{selectedRoadHazard.latitude ?? '—'}, {selectedRoadHazard.longitude ?? '—'}</dd></div>
+                <div className="road-hazard-detail-description"><dt>Description</dt><dd>{selectedRoadHazard.description || 'No description provided.'}</dd></div>
+              </dl>
+              {getAlertImageUrls(selectedRoadHazard.image_url).length > 0 && (
+                <div className="road-hazard-review-images" aria-label="Uploaded road hazard images">
+                  {getAlertImageUrls(selectedRoadHazard.image_url).map((imageUrl, index) => (
+                    <button type="button" className="road-hazard-review-image-button" key={`${imageUrl}-${index}`} onClick={() => setSelectedImagePreview({ url: imageUrl, index })} aria-label={`Open road hazard image ${index + 1}`}>
+                      <img src={imageUrl} alt={`Road hazard evidence ${index + 1}`} />
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          </section>
+        </div>
+      )}
+
+      {selectedImagePreview && (
+        <div className={`modal-backdrop image-preview-backdrop${closingModal === 'image-preview' ? ' is-closing' : ''}`} onClick={() => closeModalWithAnimation('image-preview', () => setSelectedImagePreview(null))}>
+          <section
+            className="image-preview-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-label={`Uploaded evidence ${selectedImagePreview.index + 1}`}
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="image-preview-header">
+              <span>IMAGE {selectedImagePreview.index + 1}</span>
+              <button
+                className="modal-close"
+                type="button"
+                onClick={() => closeModalWithAnimation('image-preview', () => setSelectedImagePreview(null))}
+                aria-label="Close image preview"
+              >
+                Ã—
+              </button>
+            </div>
+            <img
+              className="image-preview-full"
+              src={selectedImagePreview.url}
+              alt={`Expanded uploaded evidence ${selectedImagePreview.index + 1}`}
+            />
           </section>
         </div>
       )}

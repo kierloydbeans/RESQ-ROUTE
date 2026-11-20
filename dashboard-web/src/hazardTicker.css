@@ -49,8 +49,48 @@
   min-width: 0;
   height: 16px;
   margin: 0;
+  appearance: none;
+  background: transparent;
   accent-color: var(--ops-red);
   cursor: pointer;
+}
+
+.incident-ticker-speed input::-webkit-slider-runnable-track {
+  height: 5px;
+  border: 1px solid var(--ops-border);
+  border-radius: 999px;
+  background: var(--ops-surface-2, var(--ops-bg));
+}
+
+.incident-ticker-speed input::-webkit-slider-thumb {
+  width: 15px;
+  height: 15px;
+  margin-top: -6px;
+  appearance: none;
+  border: 0;
+  border-radius: 50%;
+  background: var(--ops-red);
+}
+
+.incident-ticker-speed input::-moz-range-track {
+  height: 5px;
+  border: 1px solid var(--ops-border);
+  border-radius: 999px;
+  background: var(--ops-surface-2, var(--ops-bg));
+}
+
+.incident-ticker-speed input::-moz-range-progress {
+  height: 5px;
+  border-radius: 999px;
+  background: var(--ops-red);
+}
+
+.incident-ticker-speed input::-moz-range-thumb {
+  width: 15px;
+  height: 15px;
+  border: 0;
+  border-radius: 50%;
+  background: var(--ops-red);
 }
 
 .incident-ticker-speed output {

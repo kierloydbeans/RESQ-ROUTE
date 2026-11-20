@@ -25,6 +25,7 @@ class RoadHazardReportBase(SQLModel):
     severity: SeverityLevel = SeverityLevel.HIGH
     road_name: Optional[str] = None
     reporter_name: Optional[str] = None
+    image_url: Optional[str] = Field(default=None, max_length=2048)
     is_active: bool = True
     is_resolved: bool = False
 

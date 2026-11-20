@@ -1,4 +1,5 @@
 from datetime import datetime, timedelta, timezone
+import base64
 import json
 import logging
 from typing import Literal
@@ -12,7 +13,7 @@ from pydantic import BaseModel, EmailStr, Field as PydanticField, field_validato
 from sqlalchemy import func, cast, String
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
-from supabase import create_client
+from storage3 import create_client as create_storage_client
 
 from app.core.security import (
     create_access_token, 
@@ -39,10 +40,13 @@ from app.core.config import settings
 from app.core.mail import send_reset_password_email, send_otp_email
 from app.api.websockets.telemetry import manager as telemetry_manager
 from app.services.audit_logging import record_audit_log
+from app.services.groq_hazard_vision import analyze_emergency_image
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
 SOS_ALERT_MEDIA_BUCKET = "sos_alert_media"
+PROFILE_PICTURE_MAX_BYTES = 5 * 1024 * 1024
+PROFILE_PICTURE_TYPES = {"image/jpeg": ".jpg", "image/png": ".png", "image/webp": ".webp"}
 MAX_SOS_MEDIA_BYTES = 25 * 1024 * 1024
 SOS_MEDIA_EXTENSIONS = {
     "image/jpeg": ".jpg",
@@ -61,6 +65,50 @@ SOS_IMAGE_EXTENSIONS = frozenset(
 SOS_VIDEO_EXTENSIONS = frozenset(
     extension for content_type, extension in SOS_MEDIA_EXTENSIONS.items() if content_type.startswith("video/")
 )
+
+
+def _extract_public_storage_url(response: object) -> str | None:
+    """Normalize the public URL returned by different supabase-py versions."""
+    if isinstance(response, str):
+        return response.strip() or None
+
+    if isinstance(response, dict):
+        data = response.get("data")
+        candidates = [
+            response.get("publicUrl"),
+            response.get("public_url"),
+            data.get("publicUrl") if isinstance(data, dict) else None,
+            data.get("public_url") if isinstance(data, dict) else None,
+        ]
+    else:
+        candidates = [
+            getattr(response, "public_url", None),
+            getattr(response, "publicUrl", None),
+        ]
+
+    return next((url.strip() for url in candidates if isinstance(url, str) and url.strip()), None)
+
+
+def _image_urls_from_column(value: str | None) -> list[str]:
+    """Read both legacy single URLs and the current JSON-array representation."""
+    if not value:
+        return []
+    try:
+        decoded = json.loads(value)
+    except (TypeError, json.JSONDecodeError):
+        decoded = value
+    if isinstance(decoded, str):
+        return [decoded] if decoded.strip() else []
+    if isinstance(decoded, list):
+        return [url.strip() for url in decoded if isinstance(url, str) and url.strip()]
+    return []
+
+
+def _serialize_image_urls(urls: list[str]) -> str:
+    serialized = json.dumps(urls, separators=(",", ":"))
+    if len(serialized) > 2048:
+        raise ValueError("The emergency alert image URL list exceeds the database column limit")
+    return serialized
 
 
 def _utc_isoformat(value: datetime | None) -> str | None:
@@ -153,6 +201,14 @@ class ReauthRequest(BaseModel):
 
 class EmergencyAlertCreated(EmergencyAlertRead):
     media_upload_token: str
+
+
+class EmergencyImageAnalysisResponse(BaseModel):
+    analyzed: bool
+    incident_type: str
+    severity: str
+    people_affected: int
+    details: str
 
 
 class EmergencyAlertStatusReportCreate(BaseModel):
@@ -303,6 +359,7 @@ async def login(
             "username": user.username,
             "email": user.email,
             "full_name": user.full_name,
+            "profile_picture_url": user.profile_picture_url,
             "role": user.role.value if hasattr(user.role, "value") else str(user.role),
             "assigned_center_id": user.assigned_center_id
         }
@@ -360,6 +417,7 @@ async def login_role(
             "username": user.username,
             "email": user.email,
             "full_name": user.full_name,
+            "profile_picture_url": user.profile_picture_url,
             "role": user.role.value if hasattr(user.role, "value") else str(user.role),
             "assigned_center_id": user.assigned_center_id
         }
@@ -401,6 +459,78 @@ async def get_me(
     if not user:
         raise HTTPException(status_code=404, detail="User account not found")
     return {"user": UserRead.model_validate(user)}
+
+
+@router.post("/settings/profile-picture")
+async def upload_profile_picture(
+    file: UploadFile = File(...),
+    credentials: dict = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+):
+    result = await session.execute(
+        select(User).where(User.username == credentials.get("sub")).with_for_update()
+    )
+    user = result.scalar_one_or_none()
+    if not user or not user.is_active:
+        raise HTTPException(status_code=401, detail="Active user account required")
+
+    content_type = (file.content_type or "").lower()
+    extension = PROFILE_PICTURE_TYPES.get(content_type)
+    if not extension:
+        raise HTTPException(status_code=415, detail="Upload a JPG, PNG, or WebP image")
+    contents = await file.read(PROFILE_PICTURE_MAX_BYTES + 1)
+    await file.close()
+    if len(contents) > PROFILE_PICTURE_MAX_BYTES:
+        raise HTTPException(status_code=413, detail="Profile pictures must be 5 MB or smaller")
+    valid_image = (
+        content_type == "image/jpeg" and contents.startswith(b"\xff\xd8\xff")
+        or content_type == "image/png" and contents.startswith(b"\x89PNG\r\n\x1a\n")
+        or content_type == "image/webp" and contents.startswith(b"RIFF") and contents[8:12] == b"WEBP"
+    )
+    if not valid_image:
+        raise HTTPException(status_code=415, detail="The selected file is not a valid image")
+
+    parts = urlsplit(settings.SUPABASE_URL)
+    if parts.path.rstrip("/") == "/rest/v1":
+        parts = parts._replace(path="")
+    client = create_storage_client(
+        f"{urlunsplit(parts).rstrip('/')}/storage/v1",
+        {"apikey": settings.SUPABASE_KEY, "Authorization": f"Bearer {settings.SUPABASE_KEY}"},
+        is_async=False,
+    )
+    storage = client.from_(SOS_ALERT_MEDIA_BUCKET)
+    user_id = user.id
+    path = f"profile-pictures/{user_id}/{uuid4().hex}{extension}"
+    uploaded = False
+    old_url = user.profile_picture_url
+    try:
+        await run_in_threadpool(lambda: storage.upload(path, contents, file_options={"content-type": content_type, "upsert": "false"}))
+        uploaded = True
+        public_url = _extract_public_storage_url(await run_in_threadpool(lambda: storage.get_public_url(path)))
+        if not public_url:
+            raise RuntimeError("Storage returned no public URL")
+        user.profile_picture_url = public_url
+        await session.commit()
+    except Exception as error:
+        await session.rollback()
+        if uploaded:
+            try:
+                await run_in_threadpool(lambda: storage.remove([path]))
+            except Exception:
+                logger.exception("Could not remove an unreferenced profile picture")
+        logger.exception("Could not upload profile picture for user %s", user_id)
+        raise HTTPException(status_code=502, detail="Could not save your profile picture") from error
+    else:
+        marker = f"/storage/v1/object/public/{SOS_ALERT_MEDIA_BUCKET}/profile-pictures/{user_id}/"
+        old_path = urlsplit(old_url).path if old_url else ""
+        if marker in old_path and urlsplit(old_url).netloc == urlsplit(public_url).netloc:
+            try:
+                await run_in_threadpool(lambda: storage.remove([f"profile-pictures/{user_id}/{old_path.split(marker, 1)[1]}"]))
+            except Exception:
+                logger.exception("Could not remove the previous profile picture for user %s", user_id)
+    finally:
+        await run_in_threadpool(client.aclose)
+    return {"profile_picture_url": public_url}
 
 
 @router.get("/settings")
@@ -960,6 +1090,39 @@ async def list_rescue_units(session: AsyncSession = Depends(get_session)):
         ],
     }
 
+@router.post("/alerts/analyze-image", response_model=EmergencyImageAnalysisResponse)
+async def analyze_emergency_image_upload(file: UploadFile = File(...)) -> EmergencyImageAnalysisResponse:
+    """Analyze an emergency-report image using the incident-form schema."""
+
+    content_type = (file.content_type or "").lower()
+    if not content_type.startswith("image/"):
+        raise HTTPException(status_code=415, detail="Upload an image file")
+
+    try:
+        image_bytes = await file.read(20 * 1024 * 1024 + 1)
+        if len(image_bytes) > 20 * 1024 * 1024:
+            raise HTTPException(status_code=413, detail="Images must be 20 MB or smaller for vision analysis")
+        if not image_bytes:
+            raise HTTPException(status_code=400, detail="The selected image is empty")
+
+        image_data_url = f"data:{content_type};base64,{base64.b64encode(image_bytes).decode('ascii')}"
+        result = await analyze_emergency_image(image_data_url)
+        return EmergencyImageAnalysisResponse(analyzed=True, **result)
+    except HTTPException:
+        raise
+    except Exception as error:
+        logger.exception("Groq emergency image analysis failed: %s", error)
+        return EmergencyImageAnalysisResponse(
+            analyzed=False,
+            incident_type="trapped",
+            severity="high",
+            people_affected=0,
+            details="The image could not be analyzed automatically. Please review the incident details and enter visible injuries, danger, damage, or people needing help manually.",
+        )
+    finally:
+        await file.close()
+
+
 @router.post("/alerts", response_model=EmergencyAlertCreated, status_code=status.HTTP_201_CREATED)
 async def create_alert(
     payload: dict,
@@ -983,7 +1146,11 @@ async def create_alert(
         "status": payload.get("status", AlertStatus.PENDING),
         "assigned_rescuer_id": payload.get("assigned_rescuer_id"),
         "assigned_rescuer_name": payload.get("assigned_rescuer_name"),
-        "assigned_vehicle_ids": payload.get("assigned_vehicle_ids")
+        "assigned_vehicle_ids": payload.get("assigned_vehicle_ids"),
+        # Allows trusted callers that already have a public media URL to persist
+        # it as part of the insert. Normal citizen uploads use the media endpoint
+        # below, which obtains and persists the URL after Storage upload.
+        "image_url": payload.get("image_url"),
     }
     alert = EmergencyAlert.model_validate(alert_data)
 
@@ -1044,15 +1211,22 @@ async def upload_alert_media(
             raise HTTPException(status_code=403, detail="You can only upload media to your own SOS alert")
 
     storage_path = f"{alert_id}/{uuid4().hex}{extension}"
-    public_url = None
+    public_url: str | None = None
     supabase_url_parts = urlsplit(settings.SUPABASE_URL)
     supabase_url_path = supabase_url_parts.path.rstrip("/")
     if supabase_url_path == "/rest/v1":
         supabase_url_parts = supabase_url_parts._replace(path="")
-    client = create_client(urlunsplit(supabase_url_parts), settings.SUPABASE_KEY)
+    storage_client = create_storage_client(
+        f"{urlunsplit(supabase_url_parts).rstrip('/')}/storage/v1",
+        {
+            "apikey": settings.SUPABASE_KEY,
+            "Authorization": f"Bearer {settings.SUPABASE_KEY}",
+        },
+        is_async=False,
+    )
     storage_stage = "listing existing media"
     try:
-        storage = client.storage.from_(SOS_ALERT_MEDIA_BUCKET)
+        storage = storage_client.from_(SOS_ALERT_MEDIA_BUCKET)
         stored_objects = await run_in_threadpool(lambda: storage.list(str(alert_id)))
         stored_names = [
             str(item.get("name", "")) if isinstance(item, dict) else str(getattr(item, "name", ""))
@@ -1065,26 +1239,18 @@ async def upload_alert_media(
         if content_type.startswith("video/") and stored_video_count >= 1:
             raise HTTPException(status_code=409, detail="An SOS alert can have at most 1 video")
         storage_stage = "uploading media"
-        await run_in_threadpool(
+        upload_response = await run_in_threadpool(
             lambda: storage.upload(
                 storage_path,
                 contents,
                 file_options={"content-type": content_type, "upsert": "false"},
             )
         )
+        if upload_response is None:
+            raise RuntimeError("Supabase Storage returned no upload response")
         if content_type.startswith("image/"):
             public_url_response = await run_in_threadpool(lambda: storage.get_public_url(storage_path))
-            if isinstance(public_url_response, str):
-                public_url = public_url_response
-            elif isinstance(public_url_response, dict):
-                public_url = (
-                    public_url_response.get("publicUrl")
-                    or public_url_response.get("public_url")
-                    or public_url_response.get("data", {}).get("publicUrl")
-                    or public_url_response.get("data", {}).get("public_url")
-                )
-            else:
-                public_url = getattr(public_url_response, "public_url", None) or getattr(public_url_response, "publicUrl", None)
+            public_url = _extract_public_storage_url(public_url_response)
             if not public_url:
                 raise RuntimeError("Supabase Storage did not return a public URL")
     except HTTPException:
@@ -1093,12 +1259,34 @@ async def upload_alert_media(
         logger.exception("Supabase Storage %s failed for SOS alert %s", storage_stage, alert_id)
         raise HTTPException(status_code=502, detail="Unable to upload media to Supabase Storage") from error
     finally:
+        await run_in_threadpool(storage_client.aclose)
         await file.close()
 
-    if public_url:
-        alert.image_url = public_url
-        await session.commit()
-        await session.refresh(alert)
+    if content_type.startswith("image/"):
+        # An image upload must never be reported as successful while the
+        # emergency_alert row still contains NULL image_url.
+        if not public_url:
+            raise HTTPException(status_code=502, detail="Supabase Storage returned no public image URL")
+        existing_image_urls = _image_urls_from_column(alert.image_url)
+        try:
+            image_urls = existing_image_urls
+            if public_url not in image_urls:
+                image_urls.append(public_url)
+            alert.image_url = _serialize_image_urls(image_urls)
+            await session.commit()
+            await session.refresh(alert)
+        except Exception as error:
+            await session.rollback()
+            logger.exception("Unable to persist image URL for SOS alert %s", alert_id)
+            raise HTTPException(status_code=502, detail="Media uploaded but its URL could not be saved") from error
+        try:
+            await telemetry_manager.broadcast({
+                "type": "alert_updated",
+                "data": EmergencyAlertRead.model_validate(alert).model_dump(mode="json"),
+                "timestamp": datetime.utcnow().timestamp(),
+            })
+        except Exception:
+            logger.exception("Unable to broadcast image URL update for SOS alert %s", alert_id)
 
     return {
         "bucket": SOS_ALERT_MEDIA_BUCKET,

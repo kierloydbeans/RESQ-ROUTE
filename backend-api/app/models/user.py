@@ -24,6 +24,7 @@ class User(UserBase, table=True):
     __table_args__ = {"extend_existing": True}
 
     id: Optional[int] = Field(default=None, primary_key=True)
+    profile_picture_url: Optional[str] = None
     assigned_center_id: Optional[int] = Field(default=None, foreign_key="center.id")
     hashed_password: str
     created_at: datetime = Field(
@@ -42,6 +43,7 @@ class UserCreate(UserBase):
 
 class UserRead(UserBase):
     id: int
+    profile_picture_url: Optional[str] = None
     assigned_center_id: Optional[int] = None
     created_at: datetime
     updated_at: datetime

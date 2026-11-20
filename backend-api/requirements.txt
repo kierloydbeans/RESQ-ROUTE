@@ -12,3 +12,5 @@ supabase==2.3.4  # for interacting with Supabase services
 itsdangerous==2.1.2  # for generating secure tokens for email verification and password reset
 pydantic[email]==2.10.0  # for email validation and sending
 httpx>=0.24.0  # for async HTTP requests to routing providers
+groq>=0.5.0  # optional AI spatial fallback provider
+shapely>=2.0.0,<3.0.0  # projected route/hazard intersection and boundary checks

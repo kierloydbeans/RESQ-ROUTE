@@ -1,3 +1,4 @@
+from datetime import datetime
 from typing import Optional
 
 from fastapi import Request
@@ -40,6 +41,7 @@ def record_audit_log(
         user_id=str(current_user.get("sub") or current_user.get("user_id") or "unknown"),
         authority_role=_role_value(current_user),
         net_address=_request_ip(request),
+        timestamp=datetime.utcnow(),
     )
     session.add(audit_log)
     return audit_log
