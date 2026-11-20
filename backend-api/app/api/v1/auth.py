@@ -45,6 +45,8 @@ from app.services.groq_hazard_vision import analyze_emergency_image
 router = APIRouter()
 logger = logging.getLogger(__name__)
 SOS_ALERT_MEDIA_BUCKET = "sos_alert_media"
+PROFILE_PICTURE_MAX_BYTES = 5 * 1024 * 1024
+PROFILE_PICTURE_TYPES = {"image/jpeg": ".jpg", "image/png": ".png", "image/webp": ".webp"}
 MAX_SOS_MEDIA_BYTES = 25 * 1024 * 1024
 SOS_MEDIA_EXTENSIONS = {
     "image/jpeg": ".jpg",
@@ -357,6 +359,7 @@ async def login(
             "username": user.username,
             "email": user.email,
             "full_name": user.full_name,
+            "profile_picture_url": user.profile_picture_url,
             "role": user.role.value if hasattr(user.role, "value") else str(user.role),
             "assigned_center_id": user.assigned_center_id
         }
@@ -414,6 +417,7 @@ async def login_role(
             "username": user.username,
             "email": user.email,
             "full_name": user.full_name,
+            "profile_picture_url": user.profile_picture_url,
             "role": user.role.value if hasattr(user.role, "value") else str(user.role),
             "assigned_center_id": user.assigned_center_id
         }
@@ -455,6 +459,78 @@ async def get_me(
     if not user:
         raise HTTPException(status_code=404, detail="User account not found")
     return {"user": UserRead.model_validate(user)}
+
+
+@router.post("/settings/profile-picture")
+async def upload_profile_picture(
+    file: UploadFile = File(...),
+    credentials: dict = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+):
+    result = await session.execute(
+        select(User).where(User.username == credentials.get("sub")).with_for_update()
+    )
+    user = result.scalar_one_or_none()
+    if not user or not user.is_active:
+        raise HTTPException(status_code=401, detail="Active user account required")
+
+    content_type = (file.content_type or "").lower()
+    extension = PROFILE_PICTURE_TYPES.get(content_type)
+    if not extension:
+        raise HTTPException(status_code=415, detail="Upload a JPG, PNG, or WebP image")
+    contents = await file.read(PROFILE_PICTURE_MAX_BYTES + 1)
+    await file.close()
+    if len(contents) > PROFILE_PICTURE_MAX_BYTES:
+        raise HTTPException(status_code=413, detail="Profile pictures must be 5 MB or smaller")
+    valid_image = (
+        content_type == "image/jpeg" and contents.startswith(b"\xff\xd8\xff")
+        or content_type == "image/png" and contents.startswith(b"\x89PNG\r\n\x1a\n")
+        or content_type == "image/webp" and contents.startswith(b"RIFF") and contents[8:12] == b"WEBP"
+    )
+    if not valid_image:
+        raise HTTPException(status_code=415, detail="The selected file is not a valid image")
+
+    parts = urlsplit(settings.SUPABASE_URL)
+    if parts.path.rstrip("/") == "/rest/v1":
+        parts = parts._replace(path="")
+    client = create_storage_client(
+        f"{urlunsplit(parts).rstrip('/')}/storage/v1",
+        {"apikey": settings.SUPABASE_KEY, "Authorization": f"Bearer {settings.SUPABASE_KEY}"},
+        is_async=False,
+    )
+    storage = client.from_(SOS_ALERT_MEDIA_BUCKET)
+    user_id = user.id
+    path = f"profile-pictures/{user_id}/{uuid4().hex}{extension}"
+    uploaded = False
+    old_url = user.profile_picture_url
+    try:
+        await run_in_threadpool(lambda: storage.upload(path, contents, file_options={"content-type": content_type, "upsert": "false"}))
+        uploaded = True
+        public_url = _extract_public_storage_url(await run_in_threadpool(lambda: storage.get_public_url(path)))
+        if not public_url:
+            raise RuntimeError("Storage returned no public URL")
+        user.profile_picture_url = public_url
+        await session.commit()
+    except Exception as error:
+        await session.rollback()
+        if uploaded:
+            try:
+                await run_in_threadpool(lambda: storage.remove([path]))
+            except Exception:
+                logger.exception("Could not remove an unreferenced profile picture")
+        logger.exception("Could not upload profile picture for user %s", user_id)
+        raise HTTPException(status_code=502, detail="Could not save your profile picture") from error
+    else:
+        marker = f"/storage/v1/object/public/{SOS_ALERT_MEDIA_BUCKET}/profile-pictures/{user_id}/"
+        old_path = urlsplit(old_url).path if old_url else ""
+        if marker in old_path and urlsplit(old_url).netloc == urlsplit(public_url).netloc:
+            try:
+                await run_in_threadpool(lambda: storage.remove([f"profile-pictures/{user_id}/{old_path.split(marker, 1)[1]}"]))
+            except Exception:
+                logger.exception("Could not remove the previous profile picture for user %s", user_id)
+    finally:
+        await run_in_threadpool(client.aclose)
+    return {"profile_picture_url": public_url}
 
 
 @router.get("/settings")

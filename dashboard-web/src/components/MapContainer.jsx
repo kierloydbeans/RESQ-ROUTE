@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react'
+import React, { useEffect, useMemo, useRef, useState } from 'react'
 import * as maplibregl from 'maplibre-gl'
 import maplibreWorkerUrl from 'maplibre-gl/dist/maplibre-gl-worker.mjs?url'
 import { LocateFixed } from 'lucide-react'
@@ -256,6 +256,7 @@ const MapContainer = ({
   highlightMarkerId = null,
   selectedAlertCategory = 'all',
   hazardLayers = [],
+  darkFloodBasemap = false,
   roadHazardZones = { type: 'FeatureCollection', features: [] },
   pendingRoadHazardZones = { type: 'FeatureCollection', features: [] },
   centerRequestKey = 0,
@@ -264,11 +265,17 @@ const MapContainer = ({
   onMarkerClick,
   onVoiceCommandAction,
   voiceLocation = null,
+  accessibleMapLabel = null,
+  enableViewToggle = false,
+  children,
   trackDeviceLocation = true 
 }) => {
   const mapContainerRef = useRef(null)
   const mapRef = useRef(null)
+  const locationButtonRef = useRef(null)
   const markerInstancesRef = useRef(new Map())
+  const markerPreviewRef = useRef(null)
+  const markerPreviewTimerRef = useRef(null)
   const deviceMarkerRef = useRef(null)
   const devicePositionRef = useRef(null)
   const pinnedMarkerRef = useRef(null)
@@ -278,6 +285,11 @@ const MapContainer = ({
   const locationMessageTimeoutRef = useRef(null)
   const [locationMessage, setLocationMessage] = useState('')
   const [isLocating, setIsLocating] = useState(false)
+  const [mapReady, setMapReady] = useState(false)
+  const [is3DView, setIs3DView] = useState(false)
+  const [mapPitch, setMapPitch] = useState(0)
+  const [mapBearing, setMapBearing] = useState(0)
+  const viewTargetRef = useRef(false)
   const markersRef = useRef(markers)
   const routeRef = useRef(route)
   const centerRef = useRef(center)
@@ -285,17 +297,71 @@ const MapContainer = ({
   const highlightMarkerIdRef = useRef(highlightMarkerId)
   const selectedAlertCategoryRef = useRef(selectedAlertCategory)
   const hazardLayersRef = useRef(hazardLayers)
+  const darkFloodBasemapRef = useRef(darkFloodBasemap)
+  const baseLabelPaintRef = useRef([])
   const roadHazardZonesRef = useRef(roadHazardZones)
   const pendingRoadHazardZonesRef = useRef(pendingRoadHazardZones)
   const onMapClickRef = useRef(onMapClick)
   const onMarkerClickRef = useRef(onMarkerClick)
   const markersSignature = JSON.stringify(markers)
   const centerSignature = JSON.stringify(center)
-  const hazardLayersSignature = JSON.stringify(hazardLayers)
+  const hazardLayersSignature = useMemo(() => JSON.stringify(hazardLayers), [hazardLayers])
   const roadHazardZonesSignature = JSON.stringify(roadHazardZones)
   const pendingRoadHazardZonesSignature = JSON.stringify(pendingRoadHazardZones)
   pinnedLocationRef.current = pinnedLocation
   onMarkerClickRef.current = onMarkerClick
+  darkFloodBasemapRef.current = darkFloodBasemap
+
+  const updateFloodBasemapTheme = (map, dark) => {
+    if (!map.getLayer('resq-basemap-dim')) return
+    map.setPaintProperty('resq-basemap-dim', 'background-opacity', dark ? 0.78 : 0)
+    baseLabelPaintRef.current.forEach(({ id, color, haloColor }) => {
+      map.setPaintProperty(id, 'text-color', dark ? '#e2e8f0' : color)
+      map.setPaintProperty(id, 'text-halo-color', dark ? '#172033' : haloColor)
+    })
+  }
+
+  useEffect(() => {
+    if (mapRef.current) updateFloodBasemapTheme(mapRef.current, darkFloodBasemap)
+  }, [darkFloodBasemap])
+
+  const toggleMapView = () => {
+    const map = mapRef.current
+    if (!map) return
+    const nextIs3D = !viewTargetRef.current
+    viewTargetRef.current = nextIs3D
+    setIs3DView(nextIs3D)
+    const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches
+    map.easeTo({ pitch: nextIs3D ? 60 : 0, duration: reducedMotion ? 0 : 500 })
+  }
+
+  const resetMapNorth = () => {
+    const map = mapRef.current
+    if (!map) return
+    const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches
+    map.resetNorth({ duration: reducedMotion ? 0 : 500 })
+  }
+
+  useEffect(() => {
+    if (!enableViewToggle) return undefined
+    const handleMapShortcut = (event) => {
+      const map = mapRef.current
+      if (!map || event.target !== map.getCanvas() || event.repeat || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return
+      const key = event.key.toLowerCase()
+      if (key === 'v') {
+        event.preventDefault()
+        toggleMapView()
+      } else if (key === 'n') {
+        event.preventDefault()
+        resetMapNorth()
+      } else if (key === 'l') {
+        event.preventDefault()
+        locationButtonRef.current?.click()
+      }
+    }
+    document.addEventListener('keydown', handleMapShortcut)
+    return () => document.removeEventListener('keydown', handleMapShortcut)
+  }, [enableViewToggle])
 
   const showDeviceLocation = (map, longitude, latitude) => {
     const position = [longitude, latitude]
@@ -406,40 +472,6 @@ const MapContainer = ({
     )
   }
 
-  const splashHazardGeometry = (geometry, seedText = '') => {
-    if (geometry?.type !== 'Polygon' || geometry.coordinates?.length !== 1) return geometry
-    const ring = geometry.coordinates[0]
-    if (ring.length !== 5) return geometry
-
-    const longitudes = ring.map(([longitude]) => longitude)
-    const latitudes = ring.map(([, latitude]) => latitude)
-    const minLongitude = Math.min(...longitudes)
-    const maxLongitude = Math.max(...longitudes)
-    const minLatitude = Math.min(...latitudes)
-    const maxLatitude = Math.max(...latitudes)
-    const width = maxLongitude - minLongitude
-    const height = maxLatitude - minLatitude
-    const centerLongitude = (minLongitude + maxLongitude) / 2
-    const centerLatitude = (minLatitude + maxLatitude) / 2
-    let seed = [...String(seedText)].reduce((value, character) => value + character.charCodeAt(0), 0)
-    const pointCount = 16
-    const points = Array.from({ length: pointCount }, (_, index) => {
-      seed = (seed * 9301 + 49297) % 233280
-      const variation = 0.88 + (seed / 233280) * 0.22
-      const angle = (Math.PI * 2 * index) / pointCount
-      return [
-        centerLongitude + Math.cos(angle) * width * 0.58 * variation,
-        centerLatitude + Math.sin(angle) * height * 0.58 * variation,
-      ]
-    })
-    points.push(points[0])
-
-    return {
-      ...geometry,
-      coordinates: [points],
-    }
-  }
-
   const updateHazardLayers = (map, nextLayers) => {
     const source = map.getSource('resq-hazard-layers')
     if (!source) return
@@ -448,11 +480,10 @@ const MapContainer = ({
       features: nextLayers.map((layer) => ({
         type: 'Feature',
         id: layer.id,
-        geometry: splashHazardGeometry(layer.geometry, layer.source_grid_id || layer.id),
+        geometry: layer.geometry,
         properties: {
           hazard_level: layer.hazard_level,
           hazard_score: layer.hazard_score,
-          hazard_label: `${String(layer.hazard_level || 'unknown').toUpperCase()}\n${(Number(layer.hazard_score || 0) * 100).toFixed(0)}%`,
           source: layer.source,
           is_published: layer.is_published,
         },
@@ -501,6 +532,10 @@ const MapContainer = ({
       }
       if (entry.removalTimer !== null) return
       const element = entry.marker.getElement()
+      if (markerPreviewRef.current?.key === key) {
+        markerPreviewRef.current.popup.remove()
+        markerPreviewRef.current = null
+      }
       element.classList.remove('is-entering')
       element.classList.add('is-exiting')
       entry.removalTimer = window.setTimeout(() => {
@@ -515,6 +550,10 @@ const MapContainer = ({
       const existingEntry = markerInstancesRef.current.get(key)
       if (existingEntry && existingEntry.signature === signature) return
       if (existingEntry) {
+        if (markerPreviewRef.current?.key === key) {
+          markerPreviewRef.current.popup.remove()
+          markerPreviewRef.current = null
+        }
         if (existingEntry.removalTimer !== null) window.clearTimeout(existingEntry.removalTimer)
         existingEntry.marker.remove()
         markerInstancesRef.current.delete(key)
@@ -531,6 +570,83 @@ const MapContainer = ({
       element.setAttribute('role', 'img')
       element.setAttribute('aria-label', marker.accessibilityLabel || marker.label || 'Map marker')
       element.title = marker.label || 'Map marker'
+      if (marker.kind === 'shelter' && marker.preview) {
+        element.removeAttribute('title')
+        element.setAttribute('role', 'button')
+        const closePreview = () => {
+          window.clearTimeout(markerPreviewTimerRef.current)
+          markerPreviewTimerRef.current = window.setTimeout(() => {
+            if (markerPreviewRef.current?.key !== key) return
+            if (document.activeElement === element || markerPreviewRef.current.popup.getElement()?.matches(':hover')) return
+            markerPreviewRef.current.popup.remove()
+            markerPreviewRef.current = null
+            element.removeAttribute('aria-describedby')
+          }, 120)
+        }
+        const showPreview = () => {
+          window.clearTimeout(markerPreviewTimerRef.current)
+          if (markerPreviewRef.current?.key === key) return
+          markerPreviewRef.current?.element.removeAttribute('aria-describedby')
+          markerPreviewRef.current?.popup.remove()
+          const content = document.createElement('div')
+          content.className = 'shelter-marker-preview'
+          content.id = `shelter-marker-preview-${String(marker.id).replace(/[^a-zA-Z0-9_-]/g, '-')}`
+          content.setAttribute('role', 'tooltip')
+          const images = document.createElement('div')
+          images.className = 'shelter-marker-preview-images'
+          for (const imageUrl of marker.preview.images || []) {
+            try {
+              const url = new URL(imageUrl, window.location.href)
+              if (!['http:', 'https:'].includes(url.protocol)) continue
+              const image = document.createElement('img')
+              image.src = url.href
+              image.alt = ''
+              image.loading = 'lazy'
+              image.addEventListener('error', () => image.remove())
+              images.appendChild(image)
+            } catch {
+              continue
+            }
+          }
+          if (images.childElementCount) content.appendChild(images)
+          const title = document.createElement('strong')
+          title.className = 'shelter-marker-preview-name'
+          title.textContent = marker.label || 'Evacuation center'
+          content.appendChild(title)
+          for (const [className, value] of [['address', marker.preview.address], ['status', marker.preview.status], ['occupancy', marker.preview.occupancy], ['distance', marker.preview.distance]]) {
+            const line = document.createElement('span')
+            line.className = `shelter-marker-preview-${className}`
+            line.textContent = value
+            content.appendChild(line)
+          }
+          const preview = new maplibregl.Popup({ offset: 24, closeButton: false, closeOnClick: false, className: 'shelter-marker-preview-popup', maxWidth: '260px' })
+            .setLngLat([lng, lat])
+            .setDOMContent(content)
+            .addTo(map)
+          preview.getElement().addEventListener('mouseenter', () => window.clearTimeout(markerPreviewTimerRef.current))
+          preview.getElement().addEventListener('mouseleave', closePreview)
+          markerPreviewRef.current = { key, popup: preview, element }
+          element.setAttribute('aria-describedby', content.id)
+        }
+        element.addEventListener('mouseenter', showPreview)
+        element.addEventListener('mouseleave', closePreview)
+        element.addEventListener('focus', showPreview)
+        element.addEventListener('blur', closePreview)
+        element.addEventListener('click', () => {
+          window.clearTimeout(markerPreviewTimerRef.current)
+          markerPreviewRef.current?.element.removeAttribute('aria-describedby')
+          markerPreviewRef.current?.popup.remove()
+          markerPreviewRef.current = null
+        })
+        element.addEventListener('keydown', (event) => {
+          if (event.key === 'Escape') {
+            window.clearTimeout(markerPreviewTimerRef.current)
+            markerPreviewRef.current?.popup.remove()
+            markerPreviewRef.current = null
+            element.removeAttribute('aria-describedby')
+          }
+        })
+      }
       if (marker.id != null) element.dataset.markerId = String(marker.id)
       if (isAlertMarker) {
         element.dataset.alertId = String(marker.id)
@@ -617,6 +733,15 @@ const MapContainer = ({
           },
         })
         mapRef.current = map
+        if (accessibleMapLabel) map.getCanvas().setAttribute('aria-label', accessibleMapLabel)
+        setMapReady(true)
+        map.on('pitch', () => setMapPitch(Math.round(map.getPitch())))
+        map.on('rotate', () => setMapBearing(Math.round((map.getBearing() + 360) % 360) % 360))
+        map.on('pitchend', () => {
+          const tilted = map.getPitch() > 0.5
+          viewTargetRef.current = tilted
+          setIs3DView(tilted)
+        })
 
         let rasterFallbackShown = false
         const enableRasterFallback = (reason) => {
@@ -695,6 +820,19 @@ const MapContainer = ({
             type: 'geojson',
             data: { type: 'FeatureCollection', features: [] },
           })
+          const firstLabelLayer = map.getStyle().layers.find((layer) => layer.type === 'symbol')?.id
+          baseLabelPaintRef.current = map.getStyle().layers
+            .filter((layer) => layer.type === 'symbol' && layer.layout?.['text-field'])
+            .map((layer) => ({
+              id: layer.id,
+              color: map.getPaintProperty(layer.id, 'text-color'),
+              haloColor: map.getPaintProperty(layer.id, 'text-halo-color'),
+            }))
+          map.addLayer({
+            id: 'resq-basemap-dim',
+            type: 'background',
+            paint: { 'background-color': '#0b1220', 'background-opacity': 0 },
+          }, firstLabelLayer)
           map.addLayer({
             id: 'resq-hazard-fill',
             type: 'fill',
@@ -703,62 +841,15 @@ const MapContainer = ({
               'fill-color': [
                 'match',
                 ['get', 'hazard_level'],
-                'high', '#ef4444',
-                'medium', '#e9654c',
-                'low', '#facc15',
+                'high', '#e94f59',
+                'medium', '#f59045',
+                'low', '#f7c948',
                 '#94a3b8',
               ],
-              'fill-opacity': 0.22,
+              'fill-opacity': 0.65,
             },
-          })
-          map.addLayer({
-            id: 'resq-high-hazard-fill',
-            type: 'fill',
-            source: 'resq-hazard-layers',
-            filter: ['==', ['get', 'hazard_level'], 'high'],
-            paint: { 'fill-color': '#ef4444', 'fill-opacity': 0.32 },
-          })
-          map.addLayer({
-            id: 'resq-high-hazard-outline',
-            type: 'line',
-            source: 'resq-hazard-layers',
-            filter: ['==', ['get', 'hazard_level'], 'high'],
-            paint: { 'line-color': '#b91c1c', 'line-width': 1.5, 'line-opacity': 0.8 },
-          })
-          map.addLayer({
-            id: 'resq-hazard-labels',
-            type: 'symbol',
-            source: 'resq-hazard-layers',
-            layout: {
-              'text-field': ['get', 'hazard_label'],
-              'text-size': ['interpolate', ['linear'], ['zoom'], 11, 8, 14, 11, 17, 14],
-              'text-font': ['Open Sans Bold'],
-              'text-anchor': 'center',
-              'text-allow-overlap': true,
-              'text-ignore-placement': true,
-            },
-            paint: {
-              'text-opacity': 0.65,
-              'text-color': [
-                'match',
-                ['get', 'hazard_level'],
-                'high', '#991b1b',
-                'medium', '#8f3024',
-                'low', '#854d0e',
-                '#334155',
-              ],
-              'text-halo-color': [
-                'match',
-                ['get', 'hazard_level'],
-                'high', '#fecaca',
-                'medium', '#f4c5b9',
-                'low', '#fef08a',
-                '#e2e8f0',
-              ],
-              'text-halo-width': 0.8,
-              'text-halo-blur': 0.35,
-            },
-          })
+          }, firstLabelLayer)
+          updateFloodBasemapTheme(map, darkFloodBasemapRef.current)
           updateHazardLayers(map, hazardLayersRef.current)
           map.moveLayer('resq-pending-road-hazard-fill')
           map.moveLayer('resq-pending-road-hazard-outline')
@@ -831,6 +922,9 @@ const MapContainer = ({
         marker.remove()
       })
       markerInstancesRef.current.clear()
+      window.clearTimeout(markerPreviewTimerRef.current)
+      markerPreviewRef.current?.popup.remove()
+      markerPreviewRef.current = null
       mapRef.current?.remove()
       mapRef.current = null
     }
@@ -916,23 +1010,65 @@ const MapContainer = ({
   }, [pendingRoadHazardZonesSignature])
 
   return (
-    <div className="map-container" style={{ height: '100%', width: '100%', position: 'relative', zIndex: 1 }}>
+    <div className="map-container" style={{ height: '100%', width: '100%', position: 'relative' }}>
       <div ref={mapContainerRef} style={{ height: '100%', width: '100%' }} />
-      <div className="citizen-map-actions">
+      <div className="citizen-map-actions" onClickCapture={(event) => {
+        const summary = event.target.closest('summary')
+        const selected = summary?.parentElement
+        if (!selected?.matches('.citizen-camera-controls, .citizen-map-layer-controls') || selected.open) return
+        event.currentTarget.querySelectorAll('.citizen-camera-controls[open], .citizen-map-layer-controls[open]').forEach((control) => {
+          if (control !== selected) control.open = false
+        })
+      }}>
         {locationMessage && <span className="citizen-location-message" role="status">{locationMessage}</span>}
         <button
           type="button"
+          ref={locationButtonRef}
           className="citizen-my-location"
           onClick={handleMyLocation}
           aria-label="My location: center map on your current position"
           aria-busy={isLocating}
           disabled={isLocating}
-          title="My location"
+          title="My location (L when map is focused)"
         >
           <LocateFixed size={19} aria-hidden="true" />
           <span>{isLocating ? 'Locating…' : 'My location'}</span>
         </button>
+        {enableViewToggle && (
+          <button
+            type="button"
+            className="citizen-my-location citizen-map-view-toggle"
+            onClick={toggleMapView}
+            aria-label="3D map view"
+            aria-pressed={is3DView}
+            disabled={!mapReady}
+            title="Toggle 3D map view (V when map is focused)"
+          >
+            <b className="citizen-map-view-icon" aria-hidden="true">{is3DView ? '3D' : '2D'}</b>
+          </button>
+        )}
+        {enableViewToggle && (
+          <details className="citizen-camera-controls">
+            <summary aria-label={`Map angle and orientation, bearing ${mapBearing} degrees`} title="Map angle and orientation">
+              <span className="citizen-compass" style={{ transform: `rotate(${-mapBearing}deg)` }} aria-hidden="true">
+                <span className="compass-north">N</span>
+                <span className="compass-east">E</span>
+                <span className="compass-south">S</span>
+                <span className="compass-west">W</span>
+              </span>
+            </summary>
+            <div className="citizen-camera-panel">
+              <label htmlFor="citizen-map-pitch">Map angle <output>{mapPitch}°</output></label>
+              <input id="citizen-map-pitch" type="range" min="0" max="60" step="1" value={mapPitch} disabled={!mapReady} aria-valuetext={`${mapPitch} degrees`} onChange={(event) => mapRef.current?.setPitch(Number(event.target.value))} />
+              <label htmlFor="citizen-map-bearing">Orientation <output>{mapBearing}°</output></label>
+              <input id="citizen-map-bearing" type="range" min="0" max="359" step="1" value={mapBearing} disabled={!mapReady} aria-valuetext={`${mapBearing} degrees clockwise from north`} onChange={(event) => mapRef.current?.setBearing(Number(event.target.value))} />
+              <button type="button" disabled={!mapReady} onClick={resetMapNorth}>Reset north</button>
+              <p className="citizen-camera-shortcuts">On the map, use Shift + arrow keys to rotate or tilt, and N to reset north.</p>
+            </div>
+          </details>
+        )}
         <VoiceCommandButton currentLocation={voiceLocation} onAction={onVoiceCommandAction} />
+        {children}
       </div>
       <div className="map-source-credit" aria-label="Hazard data attribution">
         Hazard data: <a href={NOAH_DATASET_URL} target="_blank" rel="noreferrer" title="University of the Philippines Nationwide Operational Assessment of Hazards">UP NOAH</a>

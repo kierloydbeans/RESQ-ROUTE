@@ -1,13 +1,14 @@
-import React, { useEffect, useRef, useState } from 'react'
+import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useWebSocket } from '../hooks/useWebSocket'
 import { useActiveRoadHazards } from '../hooks/useActiveRoadHazards'
+import { useTheme } from '../ThemeContext'
 import { WS_URL } from '../dataProvider'
 import MapContainer from '../components/MapContainer'
 import RoadHazardReportForm from '../components/RoadHazardReportForm'
 import { parseImageUrls } from '../components/CenterImageManager'
 import Logo from '../components/Logo'
-import { Accessibility, CheckCircle2, ChevronDown, CircleHelp, Clock3, Construction, LockKeyhole, MapPin, Menu, QrCode, ScanSearch, UploadCloud } from 'lucide-react'
+import { Accessibility, CheckCircle2, ChevronDown, CircleHelp, Clock3, Construction, Layers, LockKeyhole, MapPin, Menu, QrCode, ScanSearch, UploadCloud } from 'lucide-react'
 import QRCode from 'qrcode'
 import 'maplibre-gl/dist/maplibre-gl.css'
 import "../styles/citizen-console.css";
@@ -295,20 +296,31 @@ const getReadablePinnedLocation = (location, centers) => {
 }
 
 export const CitizenDashboard = ({ auth, onLogout }) => {
+  const { isDark } = useTheme()
   const navigate = useNavigate()
   const [latestGps, setLatestGps] = useState(null)
   const [isQrDialogOpen, setIsQrDialogOpen] = useState(false)
   const [evacuationQr, setEvacuationQr] = useState('')
+  const [qrIdentity, setQrIdentity] = useState(null)
   const [isQrLoading, setIsQrLoading] = useState(false)
   const [qrError, setQrError] = useState('')
+  const [qrDownloadError, setQrDownloadError] = useState('')
+  const [isQrDownloading, setIsQrDownloading] = useState(false)
   const [centers, setCenters] = useState([])
   const [centerDataStatus, setCenterDataStatus] = useState('loading')
   const [centersLastFetchedAt, setCentersLastFetchedAt] = useState(null)
   const [centerLoadError, setCenterLoadError] = useState('')
   const [publishedHazardLayers, setPublishedHazardLayers] = useState([])
+  const [publishedHazardStatus, setPublishedHazardStatus] = useState('loading')
+  const [noahFloodFeatures, setNoahFloodFeatures] = useState(null)
+  const [noahFloodError, setNoahFloodError] = useState('')
   const [noahHazardFilter, setNoahHazardFilter] = useState('hide')
   const [isNoahFilterOpen, setIsNoahFilterOpen] = useState(false)
   const [selectedCenter, setSelectedCenter] = useState(null)
+  const [photoIndex, setPhotoIndex] = useState(0)
+  const photoDialogRef = useRef(null)
+  const photoTrackRef = useRef(null)
+  const photoScrollTimerRef = useRef(null)
   const [detailSheetState, setDetailSheetState] = useState('partial')
   const sheetDragStartYRef = useRef(null)
   const ignoreSheetClickRef = useRef(false)
@@ -325,10 +337,40 @@ export const CitizenDashboard = ({ auth, onLogout }) => {
   const [routeError, setRouteError] = useState('')
 
   const selectedRoute = routeOptions.find((route) => route.id === selectedRouteId) || null
-  const visiblePublishedHazardLayers = noahHazardFilter === 'hide'
-    ? []
-    : publishedHazardLayers.filter((layer) => noahHazardFilter === 'all'
-      || String(layer.hazard_level || '').toLowerCase() === noahHazardFilter)
+  const isFloodLayerVisible = noahHazardFilter !== 'hide'
+  const publishedGridIds = JSON.stringify(publishedHazardLayers.map((layer) => String(layer.source_grid_id)).sort())
+  const visiblePublishedHazardLayers = useMemo(() => {
+    if (!isFloodLayerVisible || !noahFloodFeatures) return []
+    const publishedIds = new Set(JSON.parse(publishedGridIds))
+    return noahFloodFeatures
+      .filter((feature) => publishedIds.has(String(feature.properties.source_grid_id))
+        && (noahHazardFilter === 'all' || feature.properties.hazard_level === noahHazardFilter))
+      .map((feature) => ({
+        geometry: feature.geometry,
+        hazard_level: feature.properties.hazard_level,
+        source: 'UP NOAH',
+        is_published: true,
+      }))
+  }, [isFloodLayerVisible, noahFloodFeatures, noahHazardFilter, publishedGridIds])
+
+  useEffect(() => {
+    if (!isFloodLayerVisible || noahFloodFeatures) return undefined
+    const controller = new AbortController()
+    setNoahFloodError('')
+    fetch(`${import.meta.env.BASE_URL}noah_flood_100yr.geojson`, { signal: controller.signal })
+      .then((response) => {
+        if (!response.ok) throw new Error('Flood map data is unavailable.')
+        return response.json()
+      })
+      .then((data) => {
+        if (data.type !== 'FeatureCollection' || !Array.isArray(data.features)) throw new Error('Flood map data is invalid.')
+        setNoahFloodFeatures(data.features)
+      })
+      .catch((error) => {
+        if (error.name !== 'AbortError') setNoahFloodError('Flood map data is unavailable. Hide and show the layer to retry.')
+      })
+    return () => controller.abort()
+  }, [isFloodLayerVisible, noahFloodFeatures])
 
   const clearRouteState = () => {
     setEvacuationRoute(null)
@@ -350,18 +392,32 @@ export const CitizenDashboard = ({ auth, onLogout }) => {
   }
   const [searchQuery, setSearchQuery] = useState('')
   const [isShelterPanelCollapsed, setIsShelterPanelCollapsed] = useState(false)
+  const [showKeyboardGuide, setShowKeyboardGuide] = useState(true)
+  const headerRef = useRef(null)
+  const detailHeadingRef = useRef(null)
+  const centerButtonsRef = useRef(new Map())
+  const returnToCenterRef = useRef(null)
+  const [headerBottom, setHeaderBottom] = useState(84)
   const [shelterSheetHeight, setShelterSheetHeight] = useState(null)
   const [isShelterSheetDragging, setIsShelterSheetDragging] = useState(false)
   const shelterSheetDragRef = useRef(null)
+  const ignoreShelterSheetClickRef = useRef(false)
   const [activeTab, setActiveTab] = useState('shelters')
   const [isProfileMenuOpen, setIsProfileMenuOpen] = useState(false)
   const [isSettingsOpen, setIsSettingsOpen] = useState(false)
   const [isSettingsLoading, setIsSettingsLoading] = useState(false)
   const [isSettingsLoaded, setIsSettingsLoaded] = useState(false)
   const [isSettingsSaving, setIsSettingsSaving] = useState(false)
+  const [isProfilePictureUploading, setIsProfilePictureUploading] = useState(false)
+  const [profilePictureCrop, setProfilePictureCrop] = useState(null)
+  const [cropImageLoaded, setCropImageLoaded] = useState(false)
+  const [cropPosition, setCropPosition] = useState({ x: 50, y: 50 })
+  const cropImageRef = useRef(null)
+  const [profilePictureError, setProfilePictureError] = useState(false)
   const [settingsError, setSettingsError] = useState('')
   const [settingsSuccess, setSettingsSuccess] = useState('')
   const [profileUser, setProfileUser] = useState(auth?.user || {})
+  const profilePictureRevisionRef = useRef(0)
   const [settingsForm, setSettingsForm] = useState({
     full_name: auth?.user?.full_name || '',
     email: auth?.user?.email || '',
@@ -376,6 +432,34 @@ export const CitizenDashboard = ({ auth, onLogout }) => {
   const [isAuthPromptOpen, setIsAuthPromptOpen] = useState(false)
   const profileMenuRef = useRef(null)
   const sharedCenterHandledRef = useRef(null)
+
+  useEffect(() => {
+    const timeout = window.setTimeout(() => setShowKeyboardGuide(false), 5000)
+    return () => window.clearTimeout(timeout)
+  }, [])
+
+  useEffect(() => {
+    const header = headerRef.current
+    if (!header) return undefined
+    const updateHeaderBottom = () => setHeaderBottom(Math.ceil(header.getBoundingClientRect().bottom))
+    updateHeaderBottom()
+    const observer = new ResizeObserver(updateHeaderBottom)
+    observer.observe(header)
+    window.addEventListener('resize', updateHeaderBottom)
+    return () => {
+      observer.disconnect()
+      window.removeEventListener('resize', updateHeaderBottom)
+    }
+  }, [])
+
+  useEffect(() => {
+    if (selectedCenter && activeTab === 'shelters') {
+      detailHeadingRef.current?.focus()
+    } else if (!selectedCenter && returnToCenterRef.current !== null) {
+      centerButtonsRef.current.get(String(returnToCenterRef.current))?.focus()
+      returnToCenterRef.current = null
+    }
+  }, [selectedCenter, activeTab])
 
   const [pinnedLocation, setPinnedLocation] = useState(null)
   const [showRoadHazards, setShowRoadHazards] = useState(true)
@@ -407,6 +491,36 @@ export const CitizenDashboard = ({ auth, onLogout }) => {
   const [currentTime, setCurrentTime] = useState(() => new Date())
 
   useEffect(() => {
+    if (!auth?.token) return undefined
+    const controller = new AbortController()
+    const pictureRevision = profilePictureRevisionRef.current
+    fetch(`${API_BASE_URL}/api/v1/auth/me`, {
+      headers: { Authorization: `Bearer ${auth.token}` },
+      signal: controller.signal,
+    })
+      .then((response) => response.ok ? response.json() : null)
+      .then((data) => {
+        if (data?.user) setProfileUser((current) => pictureRevision === profilePictureRevisionRef.current
+          ? data.user
+          : { ...data.user, profile_picture_url: current.profile_picture_url })
+      })
+      .catch((error) => {
+        if (error.name !== 'AbortError') console.error('Could not load profile', error)
+      })
+    return () => controller.abort()
+  }, [auth?.token])
+
+  useEffect(() => setProfilePictureError(false), [profileUser?.profile_picture_url])
+
+  useEffect(() => () => {
+    if (profilePictureCrop?.url) URL.revokeObjectURL(profilePictureCrop.url)
+  }, [profilePictureCrop])
+
+  useEffect(() => {
+    if (!isSettingsOpen) setProfilePictureCrop(null)
+  }, [isSettingsOpen])
+
+  useEffect(() => {
     const clockInterval = setInterval(() => setCurrentTime(new Date()), 1000)
     return () => clearInterval(clockInterval)
   }, [])
@@ -414,6 +528,7 @@ export const CitizenDashboard = ({ auth, onLogout }) => {
   useEffect(() => () => {
     window.clearTimeout(detailCloseTimeoutRef.current)
     window.clearTimeout(reportCloseTimeoutRef.current)
+    window.clearTimeout(photoScrollTimerRef.current)
   }, [])
 
   useEffect(() => {
@@ -522,7 +637,8 @@ export const CitizenDashboard = ({ auth, onLogout }) => {
         }))
       }))
       if (auth?.token) {
-        localStorage.setItem('auth', JSON.stringify({ ...auth, user: data.user }))
+        const storedAuth = JSON.parse(localStorage.getItem('auth') || '{}')
+        localStorage.setItem('auth', JSON.stringify({ ...storedAuth, user: data.user }))
       }
       setSettingsSuccess('Your account and household settings have been saved.')
     } catch (error) {
@@ -535,6 +651,57 @@ export const CitizenDashboard = ({ auth, onLogout }) => {
   const updateSettingsField = (event) => {
     const { name, value } = event.target
     setSettingsForm((current) => ({ ...current, [name]: value }))
+  }
+
+  const handleProfilePictureSelect = (event) => {
+    const file = event.target.files?.[0]
+    event.target.value = ''
+    if (!file) return
+    setSettingsError('')
+    setSettingsSuccess('')
+    if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.type) || file.size > 5 * 1024 * 1024) {
+      setSettingsError('Choose a JPG, PNG, or WebP image no larger than 5 MB.')
+      return
+    }
+    setCropImageLoaded(false)
+    setCropPosition({ x: 50, y: 50 })
+    setProfilePictureCrop({ url: URL.createObjectURL(file) })
+  }
+
+  const handleProfilePictureUpload = async () => {
+    const image = cropImageRef.current
+    if (!image?.naturalWidth || !image?.naturalHeight) return
+    setIsProfilePictureUploading(true)
+    try {
+      const side = Math.min(image.naturalWidth, image.naturalHeight)
+      const canvas = document.createElement('canvas')
+      canvas.width = Math.min(side, 512)
+      canvas.height = canvas.width
+      const context = canvas.getContext('2d')
+      if (!context) throw new Error('Could not crop this image.')
+      context.drawImage(image, (image.naturalWidth - side) * cropPosition.x / 100, (image.naturalHeight - side) * cropPosition.y / 100, side, side, 0, 0, canvas.width, canvas.height)
+      const croppedImage = await new Promise((resolve) => canvas.toBlob(resolve, 'image/png'))
+      if (!croppedImage) throw new Error('Could not crop this image.')
+      const body = new FormData()
+      body.append('file', croppedImage, 'profile-picture.png')
+      const response = await fetch(`${API_BASE_URL}/api/v1/auth/settings/profile-picture`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${auth?.token}` },
+        body,
+      })
+      const data = await response.json()
+      if (!response.ok) throw new Error(getApiErrorMessage(data.detail, 'Could not upload profile picture'))
+      profilePictureRevisionRef.current += 1
+      setProfileUser((current) => ({ ...current, profile_picture_url: data.profile_picture_url }))
+      const storedAuth = JSON.parse(localStorage.getItem('auth') || '{}')
+      localStorage.setItem('auth', JSON.stringify({ ...storedAuth, user: { ...storedAuth.user, profile_picture_url: data.profile_picture_url } }))
+      setProfilePictureCrop(null)
+      setSettingsSuccess('Your profile picture has been updated.')
+    } catch (error) {
+      setSettingsError(error.message || 'Could not upload profile picture')
+    } finally {
+      setIsProfilePictureUploading(false)
+    }
   }
 
   const addFamilyMember = () => {
@@ -668,11 +835,24 @@ export const CitizenDashboard = ({ auth, onLogout }) => {
     }
     loadCenters()
 
+    let hazardRequestId = 0
     const loadPublishedHazardLayers = async () => {
+      const requestId = ++hazardRequestId
       try {
         const response = await fetch(`${API_BASE_URL}/api/v1/hazards/map-layers?status=published`)
-        if (response.ok) setPublishedHazardLayers(await response.json())
-      } catch {}
+        if (!response.ok) throw new Error('Could not load published hazard areas.')
+        const layers = await response.json()
+        if (!Array.isArray(layers)) throw new Error('Invalid published hazard areas.')
+        if (isCurrent && requestId === hazardRequestId) {
+          setPublishedHazardLayers(layers)
+          setPublishedHazardStatus('ready')
+        }
+      } catch {
+        if (isCurrent && requestId === hazardRequestId) {
+          setPublishedHazardLayers([])
+          setPublishedHazardStatus('error')
+        }
+      }
     }
 
     loadPublishedHazardLayers()
@@ -755,6 +935,7 @@ export const CitizenDashboard = ({ auth, onLogout }) => {
 
   const handleCloseDetail = () => {
     if (!selectedCenter || isDetailClosing) return
+    returnToCenterRef.current = selectedCenter.id
     setIsDetailClosing(true)
     detailCloseTimeoutRef.current = window.setTimeout(() => {
       setSelectedCenter(null)
@@ -795,6 +976,36 @@ export const CitizenDashboard = ({ auth, onLogout }) => {
     setCenterRequestKey((requestKey) => requestKey + 1)
   }
 
+  const scrollToPhoto = (index, smooth = true) => {
+    const track = photoTrackRef.current
+    const slide = track?.children[index]
+    if (!track || !slide) return
+    const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches
+    const left = track.scrollLeft + slide.getBoundingClientRect().left - track.getBoundingClientRect().left
+    setPhotoIndex(index)
+    track.scrollTo({ left, behavior: smooth && !reducedMotion ? 'smooth' : 'auto' })
+  }
+
+  const openPhotoViewer = (index) => {
+    setPhotoIndex(index)
+    photoDialogRef.current?.showModal()
+    window.requestAnimationFrame(() => scrollToPhoto(index, false))
+  }
+
+  const updatePhotoIndex = () => {
+    window.clearTimeout(photoScrollTimerRef.current)
+    photoScrollTimerRef.current = window.setTimeout(() => {
+      const track = photoTrackRef.current
+      if (!track) return
+      const slides = Array.from(track.children)
+      if (!slides.length) return
+      const trackLeft = track.getBoundingClientRect().left
+      const index = slides.reduce((closest, slide, candidate) =>
+        Math.abs(slide.getBoundingClientRect().left - trackLeft) < Math.abs(slides[closest].getBoundingClientRect().left - trackLeft) ? candidate : closest, 0)
+      setPhotoIndex(index)
+    }, 120)
+  }
+
   const handleSheetPointerDown = (event) => {
     event.currentTarget.setPointerCapture(event.pointerId)
     sheetDragStartYRef.current = event.clientY
@@ -806,6 +1017,7 @@ export const CitizenDashboard = ({ auth, onLogout }) => {
     const sheet = event.currentTarget.closest('.shelter-sidebar')
     if (!sheet || window.innerWidth > 768) return
     event.currentTarget.setPointerCapture(event.pointerId)
+    ignoreShelterSheetClickRef.current = false
     shelterSheetDragRef.current = { startY: event.clientY, startHeight: sheet.getBoundingClientRect().height }
     setIsShelterSheetDragging(true)
   }
@@ -813,6 +1025,7 @@ export const CitizenDashboard = ({ auth, onLogout }) => {
   const handleShelterSheetPointerMove = (event) => {
     const drag = shelterSheetDragRef.current
     if (!drag) return
+    if (Math.abs(drag.startY - event.clientY) > 8) ignoreShelterSheetClickRef.current = true
     const maxHeight = window.innerHeight * 0.88
     setShelterSheetHeight(Math.min(maxHeight, Math.max(120, drag.startHeight + drag.startY - event.clientY)))
   }
@@ -943,7 +1156,9 @@ export const CitizenDashboard = ({ auth, onLogout }) => {
     setIsQrDialogOpen(true)
     setIsQrLoading(true)
     setEvacuationQr('')
+    setQrIdentity(null)
     setQrError('')
+    setQrDownloadError('')
 
     try {
       const response = await fetch(`${API_BASE_URL}/api/v1/auth/settings`, {
@@ -980,6 +1195,7 @@ export const CitizenDashboard = ({ auth, onLogout }) => {
         margin: 2,
         width: 280
       })
+      setQrIdentity({ user: data.user, household: payload.household, center: payload.center })
       setEvacuationQr(qrImage)
     } catch (error) {
       setQrError(error.message || 'Could not create your check-in QR code')
@@ -988,19 +1204,126 @@ export const CitizenDashboard = ({ auth, onLogout }) => {
     }
   }
 
-  const downloadEvacuationQr = () => {
-    if (!evacuationQr) return
-    const filename = `resq-route-evacuation-check-in-${(selectedCenter?.name || 'center')
-      .trim()
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, '-')
-      .replace(/^-|-$/g, '') || 'center'}.png`
-    const link = document.createElement('a')
-    link.href = evacuationQr
-    link.download = filename
-    document.body.appendChild(link)
-    link.click()
-    link.remove()
+  const downloadEvacuationQr = async () => {
+    if (!evacuationQr || !qrIdentity) return
+    setIsQrDownloading(true)
+    setQrDownloadError('')
+    try {
+      const loadImage = (src, crossOrigin = false) => new Promise((resolve, reject) => {
+        const image = new Image()
+        if (crossOrigin) image.crossOrigin = 'anonymous'
+        image.onload = () => resolve(image)
+        image.onerror = () => reject(new Error('Could not load the images needed for the ID.'))
+        image.src = src
+      })
+      const pictureUrl = !profilePictureError && qrIdentity.user.profile_picture_url
+      const [logo, qr, picture] = await Promise.all([
+        loadImage('/resq_logo.png'),
+        loadImage(evacuationQr),
+        pictureUrl ? loadImage(pictureUrl, true) : Promise.resolve(null),
+      ])
+      const canvas = document.createElement('canvas')
+      canvas.width = 800
+      const context = canvas.getContext('2d')
+      if (!context) throw new Error('Could not create the ID image.')
+      const wrap = (value, width, font) => {
+        context.font = font
+        const lines = []
+        let line = ''
+        for (const word of String(value).trim().split(/\s+/)) {
+          for (const character of `${line ? ' ' : ''}${word}`) {
+            if (line && context.measureText(line + character).width > width) {
+              lines.push(line.trim())
+              line = ''
+            }
+            line += character
+          }
+        }
+        if (line.trim()) lines.push(line.trim())
+        return lines
+      }
+      const name = qrIdentity.user.full_name || qrIdentity.user.username || 'Resident'
+      const fields = [
+        ['Household', qrIdentity.household.name?.trim()],
+        ['Members', qrIdentity.household.family_members.map((member) => member.name?.trim()).filter(Boolean).join(', ')],
+        ['Evacuation center', qrIdentity.center.name],
+      ].filter(([, value]) => value)
+      const nameLines = wrap(name, 500, '700 38px sans-serif')
+      const usernameLines = wrap(`@${qrIdentity.user.username}`, 500, '24px sans-serif')
+      const fieldLines = fields.map(([label, value]) => ({ label, lines: wrap(value, 680, '600 26px sans-serif') }))
+      const identityHeight = Math.max(170, 100 + nameLines.length * 48 + usernameLines.length * 32)
+      const fieldsHeight = fieldLines.reduce((height, field) => height + 34 + field.lines.length * 36 + 22, 0)
+      canvas.height = 150 + identityHeight + fieldsHeight + 360 + 55
+      context.fillStyle = '#f8fafc'
+      context.fillRect(0, 0, canvas.width, canvas.height)
+      context.fillStyle = '#17212b'
+      context.drawImage(logo, 48, 35, 68, 68)
+      context.fillStyle = '#b83b20'
+      context.font = '700 28px sans-serif'
+      context.fillText('RESQ-ROUTE', 132, 63)
+      context.fillStyle = '#607080'
+      context.font = '20px sans-serif'
+      context.fillText('EVACUATION CHECK-IN', 132, 95)
+      context.fillStyle = '#cbd5df'
+      context.fillRect(48, 125, 704, 2)
+      context.save()
+      context.beginPath()
+      context.arc(113, 220, 64, 0, Math.PI * 2)
+      context.clip()
+      if (picture) {
+        const side = Math.min(picture.naturalWidth, picture.naturalHeight)
+        context.drawImage(picture, (picture.naturalWidth - side) / 2, (picture.naturalHeight - side) / 2, side, side, 49, 156, 128, 128)
+      } else {
+        context.fillStyle = '#fff0e8'
+        context.fillRect(49, 156, 128, 128)
+        context.fillStyle = '#9f321b'
+        context.font = '700 54px sans-serif'
+        context.textAlign = 'center'
+        context.fillText(name.charAt(0).toUpperCase(), 113, 238)
+        context.textAlign = 'left'
+      }
+      context.restore()
+      let y = 172
+      context.fillStyle = '#607080'
+      context.font = '20px sans-serif'
+      context.fillText('ACCOUNT HOLDER', 210, y)
+      y += 44
+      context.fillStyle = '#17212b'
+      context.font = '700 38px sans-serif'
+      nameLines.forEach((line) => { context.fillText(line, 210, y); y += 48 })
+      context.fillStyle = '#607080'
+      context.font = '24px sans-serif'
+      usernameLines.forEach((line) => { context.fillText(line, 210, y); y += 32 })
+      y = 150 + identityHeight
+      fieldLines.forEach(({ label, lines }) => {
+        context.fillStyle = '#607080'
+        context.font = '20px sans-serif'
+        context.fillText(label.toUpperCase(), 48, y)
+        y += 34
+        context.fillStyle = '#17212b'
+        context.font = '600 26px sans-serif'
+        lines.forEach((line) => { context.fillText(line, 48, y); y += 36 })
+        y += 22
+      })
+      context.fillStyle = '#ffffff'
+      context.fillRect(220, y, 360, 360)
+      context.imageSmoothingEnabled = false
+      context.drawImage(qr, 260, y + 40, 280, 280)
+      const blob = await new Promise((resolve) => canvas.toBlob(resolve, 'image/png'))
+      if (!blob) throw new Error('Could not create the ID image.')
+      const url = URL.createObjectURL(blob)
+      const link = document.createElement('a')
+      link.href = url
+      link.download = `resq-route-evacuation-id-${(qrIdentity.center.name || 'center').trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'center'}.png`
+      document.body.appendChild(link)
+      link.click()
+      link.remove()
+      window.setTimeout(() => URL.revokeObjectURL(url), 1000)
+    } catch (error) {
+      setQrDownloadError(error.message || 'Could not download the ID.')
+    } finally {
+      setIsQrDownloading(false)
+    }
   }
 
   const uploadAlertMedia = async (alertId, files, mediaUploadToken) => {
@@ -1150,6 +1473,9 @@ export const CitizenDashboard = ({ auth, onLogout }) => {
   const centerMarkers = centers.map((c) => {
     const status = c.is_active === false ? 'Closed' : isCenterFull(c) ? 'Full' : isCenterAvailable(c) ? 'Accepting evacuees' : 'Not verified'
     const isSelected = String(c.id) === String(selectedCenter?.id)
+    const capacity = getVerifiedCapacity(c)
+    const location = pinnedLocation || latestGps
+    const distance = location ? getDistanceKm(location.latitude, location.longitude, c) : null
     return {
       id: c.id,
       kind: 'shelter',
@@ -1157,6 +1483,13 @@ export const CitizenDashboard = ({ auth, onLogout }) => {
       label: c.name,
       accessibilityLabel: `${c.name}, ${status} evacuation center`,
       details: { Availability: status },
+      preview: {
+        address: c.address || 'Address not provided',
+        images: parseImageUrls(c.image_url),
+        occupancy: capacity ? `${capacity.occupancy} of ${capacity.capacity} occupied` : 'Occupancy not verified',
+        distance: Number.isFinite(distance) ? `${distance.toFixed(1)} km away` : 'Distance unavailable',
+        status,
+      },
       color: isSelected ? '#df4930' : c.is_active === false || isCenterFull(c) ? '#b91c1c' : isCenterAvailable(c) ? '#15803d' : '#64748b',
       isFull: isCenterFull(c),
       isClosed: c.is_active === false,
@@ -1183,6 +1516,7 @@ export const CitizenDashboard = ({ auth, onLogout }) => {
   }))
 
   const isSaved = selectedCenter && savedShelterIds.includes(selectedCenter.id)
+  const centerPhotos = parseImageUrls(selectedCenter?.image_url)
   const capacityData = getVerifiedCapacity(selectedCenter)
   const capacity = capacityData?.capacity
   const occupancy = capacityData?.occupancy
@@ -1260,10 +1594,53 @@ export const CitizenDashboard = ({ auth, onLogout }) => {
     })
 
   return (
-    <div className={`citizen-map-layout${!auth?.token ? ' citizen-explore-entry' : ''}`} style={shelterSheetHeight === null ? undefined : { '--shelter-sheet-height': `${shelterSheetHeight}px` }}>
+    <div className={`citizen-map-layout${!auth?.token ? ' citizen-explore-entry' : ''}`} style={{ '--citizen-header-bottom': `${headerBottom}px`, ...(shelterSheetHeight === null ? {} : { '--shelter-sheet-height': `${shelterSheetHeight}px` }) }}>
+      <dialog ref={photoDialogRef} className="shelter-photo-dialog" aria-label={`${selectedCenter?.name || 'Evacuation center'} photos`}>
+        <div className="shelter-photo-viewer">
+          <div className="shelter-photo-viewer-header">
+            <strong>{selectedCenter?.name} photos</strong>
+            <form method="dialog"><button type="submit" className="shelter-photo-close" aria-label="Close photo viewer">×</button></form>
+          </div>
+          <section className="shelter-photo-carousel" aria-roledescription="carousel" aria-label="Evacuation center photos">
+            {centerPhotos.length > 1 && (
+              <div className="shelter-photo-navigation">
+                <button type="button" aria-label="Previous photo" onClick={() => scrollToPhoto((photoIndex - 1 + centerPhotos.length) % centerPhotos.length)}>‹</button>
+                <button type="button" aria-label="Next photo" onClick={() => scrollToPhoto((photoIndex + 1) % centerPhotos.length)}>›</button>
+              </div>
+            )}
+            <div ref={photoTrackRef} className="shelter-photo-track" onScroll={updatePhotoIndex} tabIndex={0} role="group" aria-label="Photos">
+              {centerPhotos.map((url, index) => (
+                <div key={`${url}-${index}`} className="shelter-photo-slide" role="group" aria-roledescription="slide" aria-label={`${index + 1} of ${centerPhotos.length}`}>
+                  <img src={url} alt={`${selectedCenter?.name || 'Evacuation center'} photo ${index + 1}`} />
+                </div>
+              ))}
+            </div>
+            <p className="shelter-photo-count" aria-live="polite">{photoIndex + 1} / {centerPhotos.length}</p>
+            {centerPhotos.length > 1 && (
+              <div className="shelter-photo-markers" aria-label="Choose a photo">
+                {centerPhotos.map((url, index) => (
+                  <button key={`${url}-${index}`} type="button" aria-label={`Go to photo ${index + 1}`} aria-current={photoIndex === index ? 'true' : undefined} onClick={() => scrollToPhoto(index)}><span /></button>
+                ))}
+              </div>
+            )}
+          </section>
+        </div>
+      </dialog>
+      {showKeyboardGuide && (
+        <aside className="citizen-keyboard-guide" aria-label="Keyboard controls">
+          <strong>Keyboard controls</strong>
+          <p><kbd>Tab</kbd> moves between controls. <kbd>Enter</kbd> or <kbd>Space</kbd> selects.</p>
+          <p>On the map, use the arrow keys to move and <kbd>+</kbd> or <kbd>−</kbd> to zoom.</p>
+          <p>With the map focused, press <kbd>V</kbd> to switch between 2D and 3D views.</p>
+          <p>Press <kbd>L</kbd> to center the map on your location.</p>
+          <p>On the map, use <kbd>Shift</kbd> + arrow keys to rotate or tilt. Press <kbd>N</kbd> to face north.</p>
+          <p>Use arrow keys on the compass sliders to adjust their values.</p>
+        </aside>
+      )}
       {/* 1. Background Map */}
-      <div className={`citizen-map-canvas ${activeTab === 'shelters' && isShelterPanelCollapsed ? 'panel-collapsed' : ''}`}>
+      <div className={`citizen-map-canvas ${activeTab === 'shelters' && isShelterPanelCollapsed ? 'panel-collapsed' : ''}${noahHazardFilter !== 'hide' ? ' has-flood-layer' : ''}`}>
         <MapContainer
+          darkFloodBasemap={isDark && isFloodLayerVisible}
           hazardLayers={visiblePublishedHazardLayers}
           roadHazardZones={showRoadHazards ? roadHazardZones : { type: 'FeatureCollection', features: [] }}
           markers={[...centerMarkers, ...(showRoadHazards ? hazardMarkers : [])]}
@@ -1281,16 +1658,31 @@ export const CitizenDashboard = ({ auth, onLogout }) => {
           onMapClick={handleMapClick}
           voiceLocation={pinnedLocation || latestGps}
           onVoiceCommandAction={handleVoiceCommandAction}
-        />
-        <div className="citizen-map-legend" aria-label="Map marker legend">
-          <span className="citizen-map-legend-title">Map key</span>
-          <span><i className="legend-location" aria-hidden="true" /> My location</span>
-          <span><i className="legend-available" aria-hidden="true" /> Accepting</span>
-          <span><i className="legend-full" aria-hidden="true" /> Full / closed</span>
-          <span><i className="legend-unverified" aria-hidden="true" /> Not verified</span>
-          <span><i className="legend-selected" aria-hidden="true" /> Selected</span>
-        </div>
-        <div className="citizen-map-layer-controls" role="group" aria-label="Map layers">
+          accessibleMapLabel="Evacuation map. Use the nearby evacuation centers list to select a center."
+          enableViewToggle
+        >
+        <details className="citizen-map-layer-controls">
+          <summary aria-label="Map layers" title="Map layers"><Layers size={20} aria-hidden="true" /></summary>
+          <div className="citizen-map-layer-panel">
+          <div className="citizen-map-legend" aria-label="Map marker legend">
+            <span className="citizen-map-legend-title">Map key</span>
+            <span><i className="legend-location" aria-hidden="true" /> My location</span>
+            <span><i className="legend-available" aria-hidden="true" /> Accepting</span>
+            <span><i className="legend-full" aria-hidden="true" /> Full / closed</span>
+            <span><i className="legend-unverified" aria-hidden="true" /> Not verified</span>
+            <span><i className="legend-selected" aria-hidden="true" /> Selected</span>
+          </div>
+          <div className="citizen-flood-legend" aria-label="Flood susceptibility levels">
+            <strong>100-year flood hazard</strong>
+            <span><i className="flood-level-low" aria-hidden="true" /> Low</span>
+            <span><i className="flood-level-medium" aria-hidden="true" /> Medium</span>
+            <span><i className="flood-level-high" aria-hidden="true" /> High</span>
+            <small>UP NOAH · Published areas</small>
+          </div>
+          {isFloodLayerVisible && noahFloodError && <p className="citizen-flood-layer-status" role="status">{noahFloodError}</p>}
+          {isFloodLayerVisible && !noahFloodFeatures && !noahFloodError && <p className="citizen-flood-layer-status" role="status">Loading flood map…</p>}
+          {isFloodLayerVisible && publishedHazardStatus === 'error' && <p className="citizen-flood-layer-status" role="status">Published flood areas are unavailable. Retrying automatically.</p>}
+          {isFloodLayerVisible && publishedHazardStatus === 'ready' && publishedHazardLayers.length === 0 && <p className="citizen-flood-layer-status" role="status">No flood areas are currently published.</p>}
           <div className={`citizen-noah-filter${isNoahFilterOpen ? ' is-open' : ''}`} role="group" aria-label="Filter UP NOAH disaster hazards">
             <button
               type="button"
@@ -1309,6 +1701,7 @@ export const CitizenDashboard = ({ auth, onLogout }) => {
                   ['all', 'All'],
                   ['high', 'High'],
                   ['medium', 'Medium'],
+                  ['low', 'Low'],
                   ['hide', 'Hide all'],
                 ].map(([value, label]) => (
                   <button
@@ -1340,11 +1733,14 @@ export const CitizenDashboard = ({ auth, onLogout }) => {
               × Clear dropped pin
             </button>
           )}
-        </div>
+          </div>
+        </details>
+        </MapContainer>
       </div>
 
       {/* 2. Map navigation and profile controls */}
       <div
+        ref={headerRef}
         className={`citizen-map-top-controls ${activeTab === 'shelters' && isShelterPanelCollapsed ? 'shelter-panel-collapsed' : ''}`}
       >
         <a className="citizen-map-brand" href="/" aria-label="RESQ-ROUTE home">
@@ -1358,6 +1754,8 @@ export const CitizenDashboard = ({ auth, onLogout }) => {
           <div className="citizen-chip-row">
             <button
               className={`citizen-chip ${activeTab === 'shelters' ? 'active' : ''}`}
+              aria-label="Evacuation centers"
+              aria-pressed={activeTab === 'shelters'}
               title="Evacuation Centers"
               onClick={() => {
                 if (activeTab === 'alert' || activeTab === 'road-hazard') {
@@ -1372,6 +1770,8 @@ export const CitizenDashboard = ({ auth, onLogout }) => {
             </button>
             <button
               className={`citizen-chip alert-chip ${activeTab === 'alert' ? 'active' : ''}`}
+              aria-label="Report emergency"
+              aria-pressed={activeTab === 'alert'}
               title="Report Emergency"
               onClick={handleOpenEmergencyReport}
             >
@@ -1379,14 +1779,16 @@ export const CitizenDashboard = ({ auth, onLogout }) => {
             </button>
             <button
               className={`citizen-chip road-hazard-chip ${activeTab === 'road-hazard' ? 'active' : ''}`}
+              aria-label="Report road hazard"
+              aria-pressed={activeTab === 'road-hazard'}
               title="Report Road Hazard"
               onClick={handleOpenRoadHazardReport}
             >
               <Construction size={18} aria-hidden="true" /> <span>Report Road Hazard</span>
             </button>
-            <div className="citizen-network-badge" title={isConnected ? 'Live Telemetry' : 'Offline'}>
+            <div className="citizen-network-badge" role="status" aria-label={isConnected ? 'Live updates connected' : 'Live updates disconnected'} title={isConnected ? 'Live updates connected' : 'Live updates disconnected'}>
               <span className={`dot ${isConnected ? 'online' : 'offline'}`} />
-              <span className="citizen-network-label">{isConnected ? 'Live Telemetry' : 'Offline'}</span>
+              <span className="citizen-network-label">{isConnected ? 'Updates connected' : 'Updates disconnected'}</span>
             </div>
           </div>
         </div>
@@ -1410,7 +1812,9 @@ export const CitizenDashboard = ({ auth, onLogout }) => {
                 aria-haspopup="menu"
                 aria-expanded={isProfileMenuOpen}
               >
-                {displayName.charAt(0).toUpperCase()}
+                {profileUser?.profile_picture_url && !profilePictureError
+                  ? <img src={profileUser.profile_picture_url} alt="" onError={() => setProfilePictureError(true)} />
+                  : displayName.charAt(0).toUpperCase()}
               </button>
               {isProfileMenuOpen && (
                 <div className="citizen-profile-dropdown" role="menu">
@@ -1479,6 +1883,26 @@ export const CitizenDashboard = ({ auth, onLogout }) => {
               <form className="citizen-settings-form" onSubmit={handleSettingsSubmit}>
                 <div className="citizen-settings-section">
                   <h3>Account</h3>
+                  <label className="citizen-settings-field">
+                    <span>Profile picture</span>
+                    <input className="citizen-profile-file-input" type="file" accept="image/jpeg,image/png,image/webp" onChange={handleProfilePictureSelect} disabled={isProfilePictureUploading || isSettingsSaving} />
+                    <small>JPG, PNG, or WebP, up to 5 MB.</small>
+                  </label>
+                  {profilePictureCrop && (
+                    <div className="citizen-profile-crop">
+                      <strong>Center your picture</strong>
+                      <div className="citizen-profile-crop-preview">
+                        <img ref={cropImageRef} src={profilePictureCrop.url} alt="Square profile picture preview" style={{ objectPosition: `${cropPosition.x}% ${cropPosition.y}%` }} onLoad={() => setCropImageLoaded(true)} onError={() => { setSettingsError('Could not open this image. Choose another file.'); setProfilePictureCrop(null) }} />
+                      </div>
+                      <label>Horizontal position <input type="range" min="0" max="100" value={cropPosition.x} onChange={(event) => setCropPosition((current) => ({ ...current, x: Number(event.target.value) }))} disabled={!cropImageLoaded || isProfilePictureUploading} /></label>
+                      <label>Vertical position <input type="range" min="0" max="100" value={cropPosition.y} onChange={(event) => setCropPosition((current) => ({ ...current, y: Number(event.target.value) }))} disabled={!cropImageLoaded || isProfilePictureUploading} /></label>
+                      <div className="citizen-profile-crop-actions">
+                        <button type="button" onClick={() => setProfilePictureCrop(null)} disabled={isProfilePictureUploading}>Cancel</button>
+                        <button type="button" onClick={handleProfilePictureUpload} disabled={!cropImageLoaded || isProfilePictureUploading || isSettingsSaving}>Use picture</button>
+                      </div>
+                    </div>
+                  )}
+                  {isProfilePictureUploading && <p className="citizen-settings-helper" role="status">Uploading profile picture…</p>}
                   <label className="citizen-settings-field">
                     <span>Full name</span>
                     <input
@@ -1633,7 +2057,7 @@ export const CitizenDashboard = ({ auth, onLogout }) => {
                   <button
                     type="submit"
                     className="citizen-settings-save"
-                    disabled={isSettingsSaving}
+                    disabled={isSettingsSaving || isProfilePictureUploading}
                   >
                     {isSettingsSaving ? 'Saving…' : 'Save changes'}
                   </button>
@@ -1682,19 +2106,41 @@ export const CitizenDashboard = ({ auth, onLogout }) => {
             >
               <Icons.Close />
             </button>
-            <div className="citizen-qr-icon"><QrCode size={22} aria-hidden="true" /></div>
             <h2 id="citizen-qr-title">Evacuation check-in</h2>
-            <p className="citizen-qr-center-name">{selectedCenter?.name}</p>
             {isQrLoading ? (
               <div className="citizen-qr-loading" role="status">Preparing your QR code…</div>
             ) : qrError ? (
               <p className="citizen-qr-error" role="alert">{qrError}</p>
-            ) : evacuationQr ? (
+            ) : evacuationQr && qrIdentity ? (
               <>
-                <img className="citizen-qr-image" src={evacuationQr} alt="QR code containing your account and household check-in information" />
-                <button type="button" className="citizen-qr-download" onClick={downloadEvacuationQr}>
-                  Download QR for offline use
+                <div className="citizen-checkin-card">
+                  <div className="citizen-checkin-card-header">
+                    <Logo size="small" />
+                    <div><strong>RESQ-ROUTE</strong><span>Evacuation check-in</span></div>
+                  </div>
+                  <div className="citizen-checkin-identity">
+                    <div className="citizen-checkin-avatar">
+                      {qrIdentity.user.profile_picture_url && !profilePictureError
+                        ? <img src={qrIdentity.user.profile_picture_url} alt="" onError={() => setProfilePictureError(true)} />
+                        : (qrIdentity.user.full_name || qrIdentity.user.username || 'R').charAt(0).toUpperCase()}
+                    </div>
+                    <div className="citizen-checkin-person">
+                      <span>Account holder</span>
+                      <strong>{qrIdentity.user.full_name || qrIdentity.user.username}</strong>
+                      <span>@{qrIdentity.user.username}</span>
+                    </div>
+                  </div>
+                  <div className="citizen-checkin-details">
+                    {qrIdentity.household.name?.trim() && <div><span>Household</span><strong>{qrIdentity.household.name}</strong></div>}
+                    {qrIdentity.household.family_members.length > 0 && <div><span>Members</span><p>{qrIdentity.household.family_members.map((member) => member.name).filter(Boolean).join(', ')}</p></div>}
+                    <div><span>Evacuation center</span><strong>{qrIdentity.center.name}</strong></div>
+                  </div>
+                  <img className="citizen-qr-image" src={evacuationQr} alt="QR code containing your account and household check-in information" />
+                </div>
+                <button type="button" className="citizen-qr-download" onClick={downloadEvacuationQr} disabled={isQrDownloading}>
+                  {isQrDownloading ? 'Preparing ID…' : 'Download ID for offline use'}
                 </button>
+                {qrDownloadError && <p className="citizen-qr-error" role="alert">{qrDownloadError}</p>}
                 <p className="citizen-qr-guidance">Show this code to the evacuation center coordinator to help record your household’s arrival.</p>
               </>
             ) : null}
@@ -1725,7 +2171,14 @@ export const CitizenDashboard = ({ auth, onLogout }) => {
           <button
             type="button"
             className="mobile-pull-handle"
-            aria-label="Drag to resize shelter list"
+            aria-label={shelterSheetHeight !== null && shelterSheetHeight > window.innerHeight * 0.6 ? 'Reduce shelter list height' : 'Expand shelter list'}
+            onClick={() => {
+              if (ignoreShelterSheetClickRef.current) {
+                ignoreShelterSheetClickRef.current = false
+                return
+              }
+              setShelterSheetHeight((height) => height !== null && height > window.innerHeight * 0.6 ? Math.round(window.innerHeight * 0.52) : Math.round(window.innerHeight * 0.75))
+            }}
             onPointerDown={handleShelterSheetPointerDown}
             onPointerMove={handleShelterSheetPointerMove}
             onPointerUp={handleShelterSheetPointerEnd}
@@ -1755,6 +2208,7 @@ export const CitizenDashboard = ({ auth, onLogout }) => {
                 <button
                   type="button"
                   className="report-close-btn"
+                  aria-label="Close incident report"
                   onClick={() => handleCloseReport()}
                 >
                   <Icons.Close />
@@ -1962,7 +2416,7 @@ export const CitizenDashboard = ({ auth, onLogout }) => {
                 <div className="shelter-detail-heading">
                   <div>
                     <p className="shelter-detail-eyebrow">Evacuation center</p>
-                    <h2 className="shelter-name-heading">{selectedCenter.name}</h2>
+                    <h2 ref={detailHeadingRef} tabIndex={-1} className="shelter-name-heading">{selectedCenter.name}</h2>
                   </div>
                   <button type="button" className="detail-nav-btn" onClick={handleCloseDetail} title="Close center details" aria-label="Close center details">
                     <Icons.Close />
@@ -2115,15 +2569,19 @@ export const CitizenDashboard = ({ auth, onLogout }) => {
 
                 <section className="shelter-detail-section">
                   <h3>Photos</h3>
-                  {parseImageUrls(selectedCenter.image_url).length > 0 ? (
-                    <img className="shelter-exterior-photo" src={parseImageUrls(selectedCenter.image_url)[0]} alt={`Exterior or entrance of ${selectedCenter.name}`} />
+                  {centerPhotos.length > 0 ? (
+                    <button type="button" className="shelter-photo-trigger" onClick={() => openPhotoViewer(0)} aria-label={`View photo 1 of ${centerPhotos.length} for ${selectedCenter.name}`}>
+                      <img className="shelter-exterior-photo" src={centerPhotos[0]} alt="" />
+                    </button>
                   ) : (
                     <p>No exterior photo provided.</p>
                   )}
-                  {parseImageUrls(selectedCenter.image_url).slice(1).length > 0 && (
+                  {centerPhotos.length > 1 && (
                     <div className="shelter-interior-gallery">
-                      {parseImageUrls(selectedCenter.image_url).slice(1).map((imageUrl, index) => (
-                        <img key={`${selectedCenter.id}-interior-${index}`} src={imageUrl} alt={`${selectedCenter.name} additional view ${index + 1}`} />
+                      {centerPhotos.slice(1).map((imageUrl, index) => (
+                        <button key={`${selectedCenter.id}-interior-${index}`} type="button" className="shelter-photo-trigger" onClick={() => openPhotoViewer(index + 1)} aria-label={`View photo ${index + 2} of ${centerPhotos.length} for ${selectedCenter.name}`}>
+                          <img src={imageUrl} alt="" />
+                        </button>
                       ))}
                     </div>
                   )}
@@ -2197,26 +2655,29 @@ export const CitizenDashboard = ({ auth, onLogout }) => {
                     <span>Offline information · updated {formatCenterUpdatedTime(centersLastFetchedAt) || 'time unavailable'}</span>
                   </div>
                 )}
+                <label className="shelter-search-label" htmlFor="citizen-center-search">Search evacuation centers</label>
                 <div className="citizen-search-box">
                   <Icons.Search />
                   <input
                     type="text"
+                    id="citizen-center-search"
                     className="citizen-search-field"
-                    placeholder="Search evacuation centers..."
+                    placeholder="Name or address"
                     value={searchQuery}
                     onChange={(e) => setSearchQuery(e.target.value)}
                   />
                   {searchQuery && (
-                    <button className="citizen-clear-btn" onClick={() => setSearchQuery('')}>
+                    <button type="button" className="citizen-clear-btn" aria-label="Clear center search" onClick={() => setSearchQuery('')}>
                       <Icons.Close />
                     </button>
                   )}
                 </div>
 
-                <div className="shelter-filter-row">
+                <div className="shelter-filter-row" role="group" aria-label="Sort evacuation centers">
                   <button
                     type="button"
                     className={`shelter-filter-pill ${filterType === 'nearest' ? 'active' : ''}`}
+                    aria-pressed={filterType === 'nearest'}
                     onClick={() => setFilterType('nearest')}
                   >
                     Nearest
@@ -2224,6 +2685,7 @@ export const CitizenDashboard = ({ auth, onLogout }) => {
                   <button
                     type="button"
                     className={`shelter-filter-pill ${filterType === 'most_space' ? 'active' : ''}`}
+                    aria-pressed={filterType === 'most_space'}
                     onClick={() => setFilterType('most_space')}
                   >
                     Most space
@@ -2237,16 +2699,18 @@ export const CitizenDashboard = ({ auth, onLogout }) => {
                 <h3 className="shelter-results-header">
                   NEARBY EVACUATION CENTERS ({processedCenters.length})
                 </h3>
+                <p className="shelter-data-freshness">{centersLastFetchedAt ? `Center data fetched ${formatCenterUpdatedTime(centersLastFetchedAt) || 'at an unknown time'}` : 'Center data fetch time unavailable'}</p>
                 {processedCenters.length === 0 && centerDataStatus !== 'loading' && (
                   <p className="shelter-list-empty">
                     {centerDataStatus === 'error'
                       ? 'Center results are unavailable while offline.'
                       : centers.length === 0
                         ? 'No evacuation centers are available in this area yet.'
-                        : 'No centers match this search.'}
+                        : 'No centers match this search. Try another name or address.'}
                   </p>
                 )}
 
+                <ul className="shelter-results-items">
                 {processedCenters.map((center) => {
                   const centerStatus = center.is_active === false
                     ? 'Closed'
@@ -2257,49 +2721,54 @@ export const CitizenDashboard = ({ auth, onLogout }) => {
                     : centerStatus === 'Full' || centerStatus === 'Closed' ? '#b91c1c' : '#94a3b8'
 
                   return (
-                    <div
-                      key={center.id}
+                    <li key={center.id}>
+                    <button
+                      type="button"
+                      ref={(element) => { if (element) centerButtonsRef.current.set(String(center.id), element); else centerButtonsRef.current.delete(String(center.id)) }}
                       className="shelter-item-card"
-                      role="button"
-                      tabIndex={0}
                       onClick={() => handleSelectCenter(center)}
                     >
-                      <div className="shelter-item-avatar">
+                      <span className="shelter-item-avatar" aria-hidden="true">
                         <Icons.Shelter />
-                      </div>
+                      </span>
 
-                      <div className="shelter-item-main">
-                        <div className="shelter-item-top">
-                          <h4 className="shelter-item-name">{center.name}</h4>
+                      <span className="shelter-item-main">
+                        <span className="shelter-item-top">
+                          <strong className="shelter-item-name">{center.name}</strong>
                           <span className="shelter-item-distance">
                             {center.distanceKm !== null ? `${center.distanceKm} km` : '--'}
                           </span>
-                        </div>
+                        </span>
 
-                        <p className="shelter-item-address">
+                        <span className="shelter-item-address">
                           {center.address || 'Address not provided'}
-                        </p>
+                        </span>
 
-                        <div className="shelter-item-bottom">
-                          <div className="shelter-progress-track">
-                            <div
+                        <span className="shelter-item-bottom">
+                          <span className="shelter-open-count" data-status={centerStatus === 'Accepting evacuees' ? 'available' : centerStatus === 'Not verified' ? 'unknown' : 'unavailable'}>
+                            <strong>{centerStatus === 'Accepting evacuees' ? 'Accepting' : centerStatus}</strong>
+                            {centerStatus === 'Accepting evacuees' && center.openSlots !== null && (
+                              <> · <strong>{center.openSlots}</strong> spaces reported available</>
+                            )}
+                          </span>
+                          {center.occPct !== null && <span className="shelter-progress-track" aria-hidden="true">
+                            <span
                               className="shelter-progress-fill"
                               style={{
                                 width: `${center.occPct ?? 0}%`,
                                 backgroundColor: barColor
                               }}
                             />
-                          </div>
-                          <span className="shelter-open-count" style={{ color: barColor }}>
-                            {centerStatus !== 'Accepting evacuees' || center.openSlots === null
-                              ? centerStatus
-                              : `${center.openSlots} spaces reported available`}
-                          </span>
-                        </div>
-                      </div>
-                    </div>
+                          </span>}
+                        </span>
+                        <span className="shelter-occupancy">{center.occPct === null ? 'Occupancy not verified' : `Occupancy: ${center.current_occupancy} of ${center.capacity}`}</span>
+                        <span className="shelter-occupancy shelter-updated">{formatCenterUpdatedTime(center.availability_updated_at || center.updated_at) ? `Updated ${formatCenterUpdatedTime(center.availability_updated_at || center.updated_at)}` : 'Update time unavailable'}</span>
+                      </span>
+                    </button>
+                    </li>
                   )
                 })}
+                </ul>
               </div>
             </div>
           </>

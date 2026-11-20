@@ -296,6 +296,7 @@ export const Dashboard = ({ onLogout }) => {
   const [closingModal, setClosingModal] = useState(null)
   const [hazardLayers, setHazardLayers] = useState([])
   const [hazardLayerPublishing, setHazardLayerPublishing] = useState(null)
+  const [hazardPublicationMessage, setHazardPublicationMessage] = useState('')
   const [showNoahHazards, setShowNoahHazards] = useState(true)
   const [showRoadHazards, setShowRoadHazards] = useState(true)
   const [routeRerouted, setRouteRerouted] = useState(false)
@@ -1303,34 +1304,44 @@ export const Dashboard = ({ onLogout }) => {
     const rescuerStatusRefresh = window.setInterval(() => {
       loadRescuers()
       loadRescueUnits()
+      loadHazardLayers()
     }, 30_000)
     return () => {
       window.clearInterval(rescuerStatusRefresh)
     }
   }, [API_BASE_URL])
 
+  const lowHazardLayers = hazardLayers.filter((layer) => String(layer.hazard_level).toLowerCase() === 'low')
   const mediumHazardLayers = hazardLayers.filter((layer) => String(layer.hazard_level).toLowerCase() === 'medium')
   const highHazardLayers = hazardLayers.filter((layer) => String(layer.hazard_level).toLowerCase() === 'high')
-  const visibleHazardLayers = hazardLayers.filter((layer) => ['medium', 'high'].includes(String(layer.hazard_level).toLowerCase()))
+  const visibleHazardLayers = hazardLayers.filter((layer) => layer.is_published)
   const renderedHazardLayers = showNoahHazards ? visibleHazardLayers : []
   const renderedRoadHazardZones = showRoadHazards ? roadHazardZones : { type: 'FeatureCollection', features: [] }
   const renderedPendingRoadHazards = showRoadHazards ? pendingRoadHazards : { type: 'FeatureCollection', features: [] }
-  const allMediumHazardsPublished = mediumHazardLayers.length > 0 && mediumHazardLayers.every((layer) => layer.is_published)
-  const allHighHazardsPublished = highHazardLayers.length > 0 && highHazardLayers.every((layer) => layer.is_published)
-
   const handlePublishHazardLevel = async (hazardLevel, isPublished) => {
-    const layersToUpdate = hazardLevel === 'medium' ? mediumHazardLayers : highHazardLayers
+    const layersToUpdate = hazardLayers.filter((layer) =>
+      (hazardLevel === 'all' || String(layer.hazard_level).toLowerCase() === hazardLevel)
+      && layer.is_published !== isPublished
+    )
     setHazardLayerPublishing(hazardLevel)
+    setHazardPublicationMessage('')
     try {
-      const responses = await Promise.all(layersToUpdate.map((layer) => fetch(`${API_BASE_URL}/api/v1/hazards/${layer.id}/publish`, {
-        method: 'PATCH',
-        headers: getAuthHeaders(),
-        body: JSON.stringify({ is_published: isPublished })
-      })))
-      if (responses.some((response) => !response.ok)) throw new Error('Unable to update hazard publication status.')
-      setHazardLayers((layers) => layers.map((layer) => layersToUpdate.some((updatedLayer) => updatedLayer.id === layer.id) ? { ...layer, is_published: isPublished } : layer))
+      let failed = 0
+      for (let offset = 0; offset < layersToUpdate.length; offset += 10) {
+        const batch = layersToUpdate.slice(offset, offset + 10)
+        const responses = await Promise.allSettled(batch.map((layer) => fetch(`${API_BASE_URL}/api/v1/hazards/${layer.id}/publish`, {
+          method: 'PATCH',
+          headers: getAuthHeaders(),
+          body: JSON.stringify({ is_published: isPublished })
+        })))
+        failed += responses.filter((response) => response.status === 'rejected' || !response.value.ok).length
+      }
+      const response = await fetch(`${API_BASE_URL}/api/v1/hazards/map-layers?status=all`, { headers: getAuthHeaders() })
+      if (!response.ok) throw new Error('Could not refresh publication status.')
+      setHazardLayers(await response.json())
+      setHazardPublicationMessage(failed ? `${failed} grid updates failed. Please retry.` : 'Publication status updated.')
     } catch (error) {
-      setAlertStatus(error.message)
+      setHazardPublicationMessage(error.message)
     } finally {
       setHazardLayerPublishing(null)
     }
@@ -2223,10 +2234,18 @@ export const Dashboard = ({ onLogout }) => {
               ))}
             </div>
             <div className="map-hazard-publish-controls" aria-label="Publish hazard layers to citizens">
+              <button type="button" className="map-hazard-publish-button" disabled={hazardLayerPublishing !== null || !hazardLayers.some((layer) => !layer.is_published)} onClick={() => handlePublishHazardLevel('all', true)}>
+                {hazardLayerPublishing === 'all' && <span className="map-hazard-publish-spinner" aria-hidden="true" />}
+                Publish all grids ({hazardLayers.filter((layer) => layer.is_published).length}/{hazardLayers.length} published)
+              </button>
               {[
-                { level: 'medium', label: 'Medium', layers: mediumHazardLayers, published: allMediumHazardsPublished },
-                { level: 'high', label: 'High', layers: highHazardLayers, published: allHighHazardsPublished },
-              ].map(({ level, label, layers, published }) => (
+                { level: 'low', label: 'Low', layers: lowHazardLayers },
+                { level: 'medium', label: 'Medium', layers: mediumHazardLayers },
+                { level: 'high', label: 'High', layers: highHazardLayers },
+              ].map(({ level, label, layers }) => {
+                const publishedCount = layers.filter((layer) => layer.is_published).length
+                const published = layers.length > 0 && publishedCount === layers.length
+                return (
                 <button
                   key={level}
                   type="button"
@@ -2236,9 +2255,11 @@ export const Dashboard = ({ onLogout }) => {
                   onClick={() => handlePublishHazardLevel(level, !published)}
                 >
                   {hazardLayerPublishing === level && <span className="map-hazard-publish-spinner" aria-hidden="true" />}
-                  {published ? `Unpublish ${label} Hazards` : `Publish ${label} Hazards`}
+                  {published ? `Unpublish ${label}` : `Publish ${label}`} ({publishedCount}/{layers.length})
                 </button>
-              ))}
+                )
+              })}
+              <span role="status">{hazardPublicationMessage}</span>
             </div>
             <div className="map-stage" style={{ height: `${mapHeight}px` }}>
               <div className="map-legend-static" role="group" aria-label="Map legend">
@@ -2255,6 +2276,7 @@ export const Dashboard = ({ onLogout }) => {
                 <span><i className="legend-swatch marker-full" /> FULL CENTER / MAINTENANCE</span>
                 <span><i className="legend-swatch hazard-high" /> NOAH HIGH HAZARD</span>
                 <span><i className="legend-swatch hazard-medium" /> NOAH MEDIUM HAZARD</span>
+                <span><i className="legend-swatch hazard-low" /> NOAH LOW HAZARD</span>
                 <span><i className="legend-swatch road-hazard" /> ACTIVE ROAD HAZARD</span>
                 <span><i className="legend-swatch pending-road-hazard" /> PENDING ROAD HAZARD</span>
               </div>
